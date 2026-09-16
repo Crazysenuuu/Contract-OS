@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import pytest
 from datetime import datetime
 from pathlib import Path
@@ -24,14 +25,28 @@ from pathlib import Path
 TEST_DB_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://cs@localhost:5432/contractos")
 BACKUP_DIR = tempfile.mkdtemp(prefix="contractos_backup_test_")
 
+# libpq tools (pg_dump/psql/createdb) don't understand the +asyncpg:// scheme
+# and can't use the local Unix socket on CI, where PostgreSQL runs as a TCP
+# service container. Derive the standard PG* connection variables from
+# TEST_DB_URL and pass them to every subprocess call.
+_pg_url = urllib.parse.urlparse(TEST_DB_URL.split("+", 1)[-1])
+PG_ENV = {
+    **os.environ,
+    "PGHOST": _pg_url.hostname or "localhost",
+    "PGPORT": str(_pg_url.port or 5432),
+    "PGUSER": _pg_url.username or "cs",
+    "PGPASSWORD": _pg_url.password or "password",
+}
+
 
 @pytest.fixture(scope="module")
 def db_name():
     """Extract database name from URL. Skip if PostgreSQL isn't reachable."""
     ready = subprocess.run(
-        ["pg_isready", "-h", "localhost", "-p", "5432"],
+        ["pg_isready", "-h", PG_ENV["PGHOST"], "-p", PG_ENV["PGPORT"]],
         capture_output=True,
         text=True,
+        env=PG_ENV,
     )
     if ready.returncode != 0:
         pytest.skip("PostgreSQL is not reachable on localhost:5432")
@@ -57,9 +72,10 @@ def pg_dump_backup(db_name, backup_dir):
     backup_file = os.path.join(backup_dir, "test_backup.dump")
     if not os.path.exists(backup_file):
         result = subprocess.run(
-            ["pg_dump", "-U", "cs", "-d", db_name, "-F", "c", "-f", backup_file],
+            ["pg_dump", "-d", db_name, "-F", "c", "-f", backup_file],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
         assert result.returncode == 0, f"pg_dump failed: {result.stderr}"
     return backup_file
@@ -73,9 +89,10 @@ class TestBackupCreation:
         backup_file = os.path.join(backup_dir, "test_backup.dump")
 
         result = subprocess.run(
-            ["pg_dump", "-U", "cs", "-d", db_name, "-F", "c", "-f", backup_file],
+            ["pg_dump", "-d", db_name, "-F", "c", "-f", backup_file],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         assert result.returncode == 0, f"pg_dump failed: {result.stderr}"
@@ -91,9 +108,10 @@ class TestBackupCreation:
         backup_file = os.path.join(backup_dir, "test_backup.sql")
 
         result = subprocess.run(
-            ["pg_dump", "-U", "cs", "-d", db_name, "-F", "p", "-f", backup_file],
+            ["pg_dump", "-d", db_name, "-F", "p", "-f", backup_file],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         assert result.returncode == 0, f"pg_dump failed: {result.stderr}"
@@ -114,6 +132,7 @@ class TestBackupCreation:
             ["pg_restore", "-l", backup_file],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         assert result.returncode == 0, f"pg_restore listing failed: {result.stderr}"
@@ -149,28 +168,31 @@ class TestBackupRestore:
         try:
             # Create test database
             result = subprocess.run(
-                ["createdb", "-U", "cs", test_db],
+                ["createdb", test_db],
                 capture_output=True,
                 text=True,
+                env=PG_ENV,
             )
             assert result.returncode == 0, f"createdb failed: {result.stderr}"
 
             # Restore backup
             result = subprocess.run(
-                ["pg_restore", "-U", "cs", "-d", test_db, backup_file],
+                ["pg_restore", "-d", test_db, backup_file],
                 capture_output=True,
                 text=True,
+                env=PG_ENV,
             )
             assert result.returncode == 0, f"pg_restore failed: {result.stderr}"
 
             # Verify tables exist in restored database
             result = subprocess.run(
                 [
-                    "psql", "-U", "cs", "-d", test_db,
+                    "psql", "-d", test_db,
                     "-c", "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';"
                 ],
                 capture_output=True,
                 text=True,
+                env=PG_ENV,
             )
             assert result.returncode == 0
             table_count = int(result.stdout.strip().split("\n")[-2].strip())
@@ -180,9 +202,10 @@ class TestBackupRestore:
         finally:
             # Cleanup test database
             subprocess.run(
-                ["dropdb", "-U", "cs", test_db],
+                ["dropdb", test_db],
                 capture_output=True,
                 text=True,
+                env=PG_ENV,
             )
 
     def test_restore_data_integrity(self, db_name, pg_dump_backup):
@@ -195,28 +218,31 @@ class TestBackupRestore:
             original_counts = {}
             for table in ["users", "organizations", "agreements", "languages"]:
                 result = subprocess.run(
-                    ["psql", "-U", "cs", "-d", db_name,
+                    ["psql", "-d", db_name,
                      "-t", "-A", "-c", f"SELECT COUNT(*) FROM {table};"],
                     capture_output=True,
                     text=True,
+                    env=PG_ENV,
                 )
                 if result.returncode == 0:
                     original_counts[table] = int(result.stdout.strip())
 
             # Create and restore test database
-            subprocess.run(["createdb", "-U", "cs", test_db], check=True)
+            subprocess.run(["createdb", test_db], check=True, env=PG_ENV)
             subprocess.run(
-                ["pg_restore", "-U", "cs", "-d", test_db, backup_file],
+                ["pg_restore", "-d", test_db, backup_file],
                 check=True,
+                env=PG_ENV,
             )
 
             # Verify row counts match
             for table, original_count in original_counts.items():
                 result = subprocess.run(
-                    ["psql", "-U", "cs", "-d", test_db,
+                    ["psql", "-d", test_db,
                      "-t", "-A", "-c", f"SELECT COUNT(*) FROM {table};"],
                     capture_output=True,
                     text=True,
+                    env=PG_ENV,
                 )
                 restored_count = int(result.stdout.strip())
                 assert original_count == restored_count, (
@@ -228,9 +254,10 @@ class TestBackupRestore:
 
         finally:
             subprocess.run(
-                ["dropdb", "-U", "cs", test_db],
+                ["dropdb", test_db],
                 capture_output=True,
                 text=True,
+                env=PG_ENV,
             )
 
 
@@ -319,8 +346,9 @@ class TestBackupPerformance:
 
         # Create fresh backup
         subprocess.run(
-            ["pg_dump", "-U", "cs", "-d", db_name, "-F", "c", "-f", backup_file],
+            ["pg_dump", "-d", db_name, "-F", "c", "-f", backup_file],
             check=True,
+            env=PG_ENV,
         )
 
         file_size = os.path.getsize(backup_file)
@@ -343,8 +371,9 @@ class TestBackupPerformance:
 
         start_time = time.time()
         subprocess.run(
-            ["pg_dump", "-U", "cs", "-d", db_name, "-F", "c", "-f", backup_file],
+            ["pg_dump", "-d", db_name, "-F", "c", "-f", backup_file],
             check=True,
+            env=PG_ENV,
         )
         elapsed_time = time.time() - start_time
 

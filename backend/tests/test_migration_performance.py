@@ -18,11 +18,37 @@ import subprocess
 import sys
 import time
 import tempfile
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import pytest
+
+# Subprocess invocations (alembic, pg_dump, createdb, psql) need concrete
+# host/port/user/password values rather than the +asyncpg:// scheme or the
+# local unix-socket defaults (which don't exist on CI where PostgreSQL runs
+# as a TCP service container). Derive everything from $DATABASE_URL.
+TEST_DB_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://cs@localhost:5432/contractos")
+_pg_url = urllib.parse.urlparse(TEST_DB_URL.split("+", 1)[-1])
+PG_HOST = _pg_url.hostname or "localhost"
+PG_PORT = str(_pg_url.port or 5432)
+PG_USER = _pg_url.username or "cs"
+PG_PASSWORD = _pg_url.password or ""
+PG_ENV = {
+    **os.environ,
+    "PGHOST": PG_HOST,
+    "PGPORT": PG_PORT,
+    "PGUSER": PG_USER,
+}
+if PG_PASSWORD:
+    PG_ENV["PGPASSWORD"] = PG_PASSWORD
+
+
+def async_db_url(db: str) -> str:
+    """Build an asyncpg DATABASE_URL for a specific database name."""
+    auth = PG_USER if not PG_PASSWORD else f"{PG_USER}:{PG_PASSWORD}"
+    return f"postgresql+asyncpg://{auth}@{PG_HOST}:{PG_PORT}/{db}"
 
 # Performance thresholds (seconds)
 PERFORMANCE_THRESHOLDS = {
@@ -150,10 +176,7 @@ class PerformanceBaseline:
 @pytest.fixture(scope="module")
 def db_name():
     """Extract database name from URL."""
-    db_url = os.getenv(
-        "DATABASE_URL", "postgresql+asyncpg://cs@localhost:5432/contractos"
-    )
-    return db_url.split("/")[-1]
+    return TEST_DB_URL.split("/")[-1]
 
 
 @pytest.fixture(scope="module")
@@ -167,9 +190,10 @@ def test_database():
     """Create a test database for performance testing."""
     # Skip gracefully when Postgres/PG tooling isn't available in this environment.
     ready = subprocess.run(
-        ["pg_isready", "-h", "localhost", "-p", "5432"],
+        ["pg_isready", "-h", PG_HOST, "-p", PG_PORT],
         capture_output=True,
         text=True,
+        env=PG_ENV,
     )
     if ready.returncode != 0:
         pytest.skip("PostgreSQL is not reachable on localhost:5432")
@@ -181,18 +205,20 @@ def test_database():
 
     # Create database
     subprocess.run(
-        ["createdb", "-U", "cs", db_name],
+        ["createdb", db_name],
         capture_output=True,
         text=True,
+        env=PG_ENV,
     )
 
     yield db_name
 
     # Cleanup
     subprocess.run(
-        ["dropdb", "-U", "cs", db_name],
+        ["dropdb", db_name],
         capture_output=True,
         text=True,
+        env=PG_ENV,
     )
 
 
@@ -212,7 +238,7 @@ class TestMigrationPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
@@ -252,7 +278,7 @@ class TestMigrationPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
@@ -293,7 +319,7 @@ class TestMigrationPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
@@ -306,7 +332,7 @@ class TestMigrationPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
@@ -349,7 +375,7 @@ class TestMigrationPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
@@ -361,7 +387,7 @@ class TestMigrationPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
@@ -373,7 +399,7 @@ class TestMigrationPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
@@ -413,9 +439,10 @@ class TestBackupRestorePerformance:
         start_time = time.time()
 
         result = subprocess.run(
-            ["pg_dump", "-U", "cs", "-d", test_database, "-F", "c", "-f", backup_file],
+            ["pg_dump", "-d", test_database, "-F", "c", "-f", backup_file],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         duration = time.time() - start_time
@@ -456,27 +483,30 @@ class TestBackupRestorePerformance:
         # Create backup first
         backup_file = os.path.join(tempfile.gettempdir(), "perf_restore_test.dump")
         subprocess.run(
-            ["pg_dump", "-U", "cs", "-d", test_database, "-F", "c", "-f", backup_file],
+            ["pg_dump", "-d", test_database, "-F", "c", "-f", backup_file],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         restore_db = f"{test_database}_restore_{int(time.time())}"
 
         # Create empty database
         subprocess.run(
-            ["createdb", "-U", "cs", restore_db],
+            ["createdb", restore_db],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         try:
             start_time = time.time()
 
             result = subprocess.run(
-                ["pg_restore", "-U", "cs", "-d", restore_db, backup_file],
+                ["pg_restore", "-d", restore_db, backup_file],
                 capture_output=True,
                 text=True,
+                env=PG_ENV,
             )
 
             duration = time.time() - start_time
@@ -507,9 +537,10 @@ class TestBackupRestorePerformance:
         finally:
             # Cleanup
             subprocess.run(
-                ["dropdb", "-U", "cs", restore_db],
+                ["dropdb", restore_db],
                 capture_output=True,
                 text=True,
+                env=PG_ENV,
             )
             os.remove(backup_file)
 
@@ -527,19 +558,20 @@ class TestIndexPerformance:
             cwd=os.path.join(os.path.dirname(__file__), ".."),
             env={
                 **os.environ,
-                "DATABASE_URL": f"postgresql+asyncpg://cs@localhost/{test_database}",
+                "DATABASE_URL": async_db_url(test_database),
             },
         )
 
         # Get current index count
         result = subprocess.run(
             [
-                "psql", "-U", "cs", "-d", test_database,
+                "psql", "-d", test_database,
                 "-t", "-A", "-c",
                 "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public';"
             ],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
         initial_index_count = int(result.stdout.strip())
 
@@ -548,11 +580,12 @@ class TestIndexPerformance:
 
         subprocess.run(
             [
-                "psql", "-U", "cs", "-d", test_database,
+                "psql", "-d", test_database,
                 "-c", "CREATE INDEX IF NOT EXISTS idx_test_perf ON users(email);"
             ],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         duration = time.time() - start_time
@@ -575,11 +608,12 @@ class TestIndexPerformance:
         # Cleanup test index
         subprocess.run(
             [
-                "psql", "-U", "cs", "-d", test_database,
+                "psql", "-d", test_database,
                 "-c", "DROP INDEX IF EXISTS idx_test_perf;"
             ],
             capture_output=True,
             text=True,
+            env=PG_ENV,
         )
 
         print(f"  ✅ Index creation: {duration:.2f}s")
