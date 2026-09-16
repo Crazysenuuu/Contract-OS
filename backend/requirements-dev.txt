@@ -1,0 +1,11 @@
+# Test-only dependencies. Production installs only requirements.txt;
+# test runs (CI Backend Tests, Database Tests, local `make test`) need
+# these on top:
+# - pytest/pytest-asyncio/pytest-cov: runner, asyncio mode (pytest.ini
+#   sets asyncio_mode = auto) and coverage reporting
+# - aiosqlite: tests/conftest.py defaults to a sqlite+aiosqlite:///:memory:
+#   engine when DATABASE_URL is unset
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+aiosqlite>=0.19.0
