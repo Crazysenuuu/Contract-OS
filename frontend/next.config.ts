@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Emit .next/standalone so the production Docker image can copy a
+  // self-contained server (frontend/Dockerfile copies .next/standalone
+  // and runs server.js).
+  output: "standalone",
   async rewrites() {
     // Proxy API calls to the FastAPI backend. The frontend ships a relative
     // API_BASE ("/api/v1"), so in dev/e2e everything must resolve against the
