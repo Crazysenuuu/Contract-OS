@@ -105,3 +105,4 @@ E2E fixtures come from `backend/scripts/seed_e2e.py` (test user `test@example.co
 ## License / status
 
 Private project — all rights reserved. Work in progress; see the repository issues for the current roadmap.
+# Contract-OS
