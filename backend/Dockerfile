@@ -23,7 +23,12 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip first: the resolver regression that hit this Docker build
+# (see requirements.txt OTel pin note) is fixed in newer pip versions, so
+# build with the current resolver rather than the older one bundled in the
+# slim base image.
+RUN python -m pip install --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY . .

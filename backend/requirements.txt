@@ -41,6 +41,12 @@ business-rules>=1.1.1
 # payload never carries legal-document contents. Import is lazy: if the
 # SDK packages are absent the tracing middleware degrades to a no-op tracer
 # instead of failing the request.
-opentelemetry-api>=1.24.0
-opentelemetry-sdk>=1.24.0
-opentelemetry-exporter-otlp-proto-http>=1.24.0
+#
+# Pinned to 1.27.x: google-cloud-documentai==2.27.0 requires protobuf<5.0,
+# and opentelemetry-proto>=1.28 requires protobuf>=5.0 — newer OTel cannot
+# coexist with that pin. On newer pip/corepip the resolver backtracks to
+# 1.27.0 automatically; pinning keeps the Docker build (older pip, Debian
+# slim base) deterministic.
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-exporter-otlp-proto-http==1.27.0
