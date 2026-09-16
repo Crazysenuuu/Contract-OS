@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contractos-backend-canary
+  labels:
+    app: contractos-backend
+    track: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: contractos-backend
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: contractos-backend
+        track: canary
+    spec:
+      containers:
+        - name: backend
+          image: contractos-backend:canary
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: contractos-secrets
+                  key: database-url
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: contractos-secrets
+                  key: jwt-secret
+            - name: CANARY_VERSION
+              value: "canary"
+          readinessProbe:
+            httpGet:
+              path: /api/v1/metrics/ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/metrics/live
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: contractos-backend-canary
+  labels:
+    app: contractos-backend
+    track: canary
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: contractos-backend
+    track: canary

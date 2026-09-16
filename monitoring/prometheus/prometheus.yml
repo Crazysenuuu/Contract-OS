@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'contractos-backend'
+    metrics_path: '/api/v1/metrics/prometheus'
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: 'contractos-backend'
+
+  - job_name: 'contractos-migration-monitor'
+    metrics_path: '/api/v1/migration-monitor/prometheus'
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: 'contractos-migration-monitor'
+
+  - job_name: 'contractos-postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'contractos-postgres'
+
+  - job_name: 'contractos-redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'contractos-redis'
+
+rule_files:
+  - 'alerts.yml'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093

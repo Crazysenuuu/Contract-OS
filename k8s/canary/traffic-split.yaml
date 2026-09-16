@@ -1,0 +1,39 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: contractos-backend
+spec:
+  hosts:
+    - contractos-backend
+  http:
+    - match:
+        - headers:
+            x-canary:
+              exact: "true"
+      route:
+        - destination:
+            host: contractos-backend
+            subset: canary
+    - route:
+        - destination:
+            host: contractos-backend
+            subset: stable
+          weight: 90
+        - destination:
+            host: contractos-backend
+            subset: canary
+          weight: 10
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: contractos-backend
+spec:
+  host: contractos-backend
+  subsets:
+    - name: stable
+      labels:
+        track: stable
+    - name: canary
+      labels:
+        track: canary

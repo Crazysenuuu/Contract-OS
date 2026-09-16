@@ -1,0 +1,1939 @@
+1. The startup concept
+2. The most important principle
+3. Agreement taxonomy
+1. Shareholders Agreement
+2. Share Purchase Agreement
+3. Investment Agreement
+4. Convertible Note Agreement
+5. SAFE-style Investment Agreement
+6. Founder Agreement
+7. Board Resolution
+4. Commercial agreements
+8. Master Services Agreement — MSA
+9. Statement of Work — SOW
+10. Service Agreement
+11. Service Level Agreement — SLA
+12. Vendor Agreement
+13. Supplier Agreement
+14. Purchase Agreement
+15. Distribution Agreement
+16. Reseller Agreement
+17. Partnership Agreement
+18. Strategic Partnership Agreement
+19. Referral Agreement
+20. Commission Agreement
+5. Confidentiality agreements
+21. NDA — Non-Disclosure Agreement
+6. Employment & HR
+22. Employment Agreement
+23. Independent Contractor Agreement
+24. Consultant Agreement
+25. Internship Agreement
+26. Offer Letter
+27. Employee IP Assignment Agreement
+28. Employee NDA
+29. Non-Solicitation Agreement
+7. Technology agreements
+30. Software Development Agreement
+31. Software License Agreement
+32. SaaS Agreement
+33. API Agreement
+34. Data Processing Agreement — DPA
+35. IP Assignment Agreement
+36. IP License Agreement
+37. Trademark License Agreement
+38. Technology Transfer Agreement
+8. Financial agreements
+39. Loan Agreement
+40. Promissory Note
+41. Payment Agreement
+42. Credit Agreement
+43. Guarantee Agreement
+44. Debt Settlement Agreement
+9. Real estate / physical arrangements
+45. Lease Agreement
+46. Commercial Lease
+47. Property Management Agreement
+48. Facility Use Agreement
+10. Marketing agreements
+49. Marketing Services Agreement
+50. Influencer Agreement
+51. Advertising Agreement
+52. Sponsorship Agreement
+53. Brand Ambassador Agreement
+54. Affiliate Agreement
+11. Logistics & supply chain
+55. Transportation Agreement
+56. Logistics Agreement
+57. Warehousing Agreement
+58. Manufacturing Agreement
+59. Procurement Agreement
+60. Import/Export Agreement
+12. Corporate transactions
+61. Merger Agreement
+62. Acquisition Agreement
+63. Asset Purchase Agreement
+64. Joint Venture Agreement
+65. Strategic Alliance Agreement
+13. Dispute-related agreements
+66. Settlement Agreement
+67. Mediation Agreement
+68. Arbitration Agreement
+69. Release / Waiver Agreement
+14. The agreement creation engine
+15. Dynamic questionnaire
+16. Clause library
+17. Agreement intelligence
+18. AI contract review
+19. VERY important: don't let AI invent law
+20. Jurisdiction engine
+21. Signature architecture
+22. Never modify a signed agreement
+23. Audit trail
+24. Approval workflows
+25. Contract obligation engine
+12 March 2027
+1 January 2027
+26. Contract dashboard
+27. Mobile app
+28. Web application
+29. Company identity system
+30. Signatory authority engine
+31. Company policy engine
+32. Data protection
+33. Security architecture
+34. Multi-tenancy
+35. The killer feature: Contract Risk Graph
+36. AI Contract Copilot
+37. Negotiation workspace
+38. External party experience
+39. Agreement status machine
+40. What I would build first
+41. Then Phase 2
+42. Phase 3
+43. Phase 4 — Enterprise
+44. Your actual competitive advantage
+45. One extremely important business decision
+46. And there is a particularly good Sri Lankan opportunity
+47. The product architecture I would recommend
+1. Product definition
+2. Core design philosophy
+3. Complete system architecture
+4. Recommended technology stack
+5. Backend
+6. Core domain model
+7. Database architecture
+8. Organization model
+9. Legal entity
+10. Authorized signatory
+11. Agreement type system
+12. Agreement type taxonomy
+13. Dynamic agreement schema
+14. Template architecture
+15. Clause engine
+16. Clause dependency engine
+17. Rule engine
+18. Jurisdiction engine
+19. Legal source registry
+20. AI architecture
+21. AI should have separate jobs
+22. AI grounding
+23. Contract ingestion pipeline
+24. Document storage
+25. Document integrity
+26. Version control
+27. Negotiation engine
+28. Internal approval engine
+29. Approval rule engine
+30. Signature system
+31. Signature event ledger
+32. Audit system
+33. Obligation extraction
+34. Obligation engine
+35. Renewal engine
+36. Amendment system
+37. Contract effective-state engine
+38. Contract risk engine
+39. Risk scoring
+40. Company policy engine
+41. AI negotiation assistant
+42. Contract search
+43. Search architecture
+44. Notification system
+45. Mobile application
+46. Web application
+47. Dashboard
+48. Contract page
+01 Jan 2027
+31 Dec 2027
+49. AI side panel
+50. Multi-tenant architecture
+51. RBAC
+52. ABAC
+53. External parties
+54. Security architecture
+55. Data protection architecture
+56. Data classification
+57. Retention engine
+58. Backup architecture
+59. API architecture
+60. WebSocket
+61. Event-driven architecture
+62. Event types
+63. Background jobs
+64. Document generation
+65. PDF should not be the source of truth
+66. Agreement state machine
+67. State-transition rules
+68. Agreement creation flow
+69. Creation should support natural language
+70. AI must distinguish facts from assumptions
+71. No hardcoded business data
+72. No synthetic contract data in production
+73. AI training strategy
+74. Legal knowledge learning
+75. Human-in-the-loop architecture
+76. Contract quality engine
+77. Undefined-term detector
+78. Cross-reference validator
+79. Numerical consistency engine
+80. Date consistency engine
+81. Party consistency engine
+82. Signature authority check
+83. External verification
+84. Analytics
+85. Financial contract analytics
+86. Supplier intelligence
+87. Contract graph
+88. Current effective contract graph
+89. Compliance dashboard
+90. Enterprise integrations
+91. API/webhook system
+92. Billing
+93. Enterprise deployment
+94. Observability
+95. Security monitoring
+96. Disaster recovery
+97. Testing architecture
+98. AI evaluation
+99. AI answer contract
+100. The MVP
+101. MVP agreement types
+102. MVP workflow
+103. MVP database relationship
+104. Recommended development sequence
+105. The architecture I would ultimately aim for
+106. The most important architectural decision
+1. Definition of Confidential Information
+2. Duration
+3. Jinja2 render → PDF preview
+5. State machine transitions + audit log
+6. Click-to-sign flow + final hash + locked PDF
+7. Email notifications (send, viewed, signed) — can be stubbed/logged initially
+1. Backend structure
+2. Configuration
+3. Environment configuration
+4. Database engine
+5. Base model
+6. Organization model
+7. User model
+8. RBAC
+9. Legal entity
+10. Agreement types
+11. Agreement
+12. Import all models
+13. Alembic initialization
+14. Generate the migration
+15. Verify the actual database
+16. Critical architecture decision
+17. What comes next
+1. Agreement access must be explicitly scoped
+2. Add people to a particular agreement
+3. Lawyers must be attached to their representing party
+4. Generation workflow
+5. Lawyer gets the complete agreement
+6. Lawyer editing
+7. Version system
+8. Explicit clause-change display
+9. Every change gets a reason
+10. Back-and-forth negotiation
+11. Negotiation rounds
+12. Notifications
+13. Who gets notified?
+14. Confidential notification design
+15. Party confirmation
+16. Agreement activation
+17. Activation notification
+18. Agreement termination system
+19. Automatic expiry monitoring
+20. Expiry decision
+21. Termination must check obligations
+22. New database architecture
+23. Most important security rule
+403 Forbidden
+24. One more thing I strongly recommend
+1. Final access architecture
+2. Add agreement parties
+3. Agreement participants
+4. Lawyer representation
+5. Assign lawyer to a particular party
+6. Why this matters
+7. Add access grants
+8. Permission model
+9. Agreement access dependency
+10. Agreement endpoint
+11. But there's a security improvement
+12. Adding a participant
+13. Adding a lawyer
+14. Lawyer assignment notification
+15. Now we need the actual change-tracking engine
+16. Individual clause changes
+17. Never modify an executed version
+18. Negotiation state
+19. Negotiation flow
+20. Lawyer approval ≠ party approval
+21. Notification event architecture
+22. Notification engine
+23. One very important privacy rule
+24. Database migration
+25. We have now established the security boundary
+1. PRIVATE
+2. NEGOTIATION
+3. AGREEMENT
+1. Updated architecture
+2. Private notes
+3. Internal legal comments
+4. Public negotiation comments
+5. The UI distinction
+6. Clause-level redlines
+7. Never trust the submitted old content
+8. Version creation service
+9. Change proposal service
+10. Negotiation actions
+11. Example negotiation
+12. Counter proposal
+13. Clause status
+14. Change acceptance
+15. Conflict prevention
+16. Optimistic locking
+17. Lawyer → Client confirmation
+18. Why this distinction matters
+19. Opposing side receives only released changes
+20. Full state machine
+21. Final approval gate
+22. Notifications become automatic
+23. Audit trail
+24. Database relationships now look like this
+25. Important legal/data-protection consideration
+26. Migration
+27. What we have achieved
+1. Define the lifecycle
+2. Don't use Python enums as the source of truth
+3. Workflow models
+4. Transition requirements
+5. Workflow transition service
+6. Requirement evaluator
+7. Requirement interface
+8. Registry
+9. Lawyer review requirement
+10. Create a real legal review model
+11. Party confirmation
+12. Critical version rule
+13. Approval endpoint
+14. Execution readiness service
+15. Signatory authority must be separate
+16. Signature request model
+17. Individual signature records
+18. Signature evidence
+19. The final execution sequence
+20. One more critical protection: immutable executed version
+21. Agreement state and workflow state should not be confused
+22. Database migration
+23. What we have now
+1. The authorization problem we're solving
+2. Permission model
+3. Add permission catalog
+4. Improve agreement access
+5. Why both role permissions and agreement permissions?
+6. Central authorization context
+7. Authorization decision object
+8. Build the authorization service
+9. But there is an important missing security boundary
+10. Party isolation
+11. Create a reusable party-scoped query
+12. Authorization dependency
+13. Lawyer-only actions
+14. Client approval must be different
+15. Workflow + authorization must work together
+1. Is user authenticated?
+2. Is user an agreement participant?
+3. Is user active?
+4. Which party does user represent?
+5. Is user an assigned lawyer for that party?
+6. Is lawyer verified?
+7. Does lawyer have agreement.propose_change?
+8. Is the agreement currently in a state where PROPOSE is allowed?
+9. Is the submitted base version still current?
+10. Are private/public visibility rules satisfied?
+16. Prevent stale-version attacks
+17. Never trust submitted old content
+18. Redline generation
+19. Audit every authorization-sensitive action
+20. Denial logging
+21. Add authorization tests now
+22. PostgreSQL Row-Level Security later
+23. Important architectural rule
+24. The complete security decision
+25. What Milestone 1.6 gives Aariya/ContractOS
+1. The data model
+2. Agreement type versions
+3. Sections
+4. Dynamic fields
+5. Why configuration matters
+6. Don't store executable rules in the database
+7. Rule engine
+8. Agreement type requirements
+9. Clause binding
+10. Clause selection becomes dynamic
+11. Dynamic agreement validation
+12. Agreement creation must snapshot the type definition
+13. Dynamic form generation
+14. Schema endpoint
+15. Agreement creation
+16. Critical: schema validation
+17. Clause library architecture
+18. Don't let AI directly invent legal clauses
+19. Execution requirements also become dynamic
+20. Current architecture
+21. What is still missing from Milestone 1
+1. Formal JSON Schema validation
+2. Clause versioning
+3. Dynamic clause selection
+4. Document template/rendering engine
+5. Real workflow definition management API
+6. Complete requirement evaluator
+7. Execution requirement engine
+8. Immutable version locking
+9. Transactional workflow transitions
+10. Full audit-chain implementation
+11. Object-storage document security
+12. Background notification infrastructure
+13. Database constraints/indexes
+14. Integration tests
+15. PostgreSQL RLS
+1.8.1 Database model
+1.8.2 Clause variables
+1.8.3 Clause conditions
+1.8.4 Jurisdiction applicability
+1.8.5 Agreement-type binding
+1.8.6 Register the models
+1.8.7 Hash every clause version
+1.8.8 Clause version selection
+1.8.9 Safe condition evaluator
+1.8.10 Clause applicability service
+1.8.11 Variable resolution
+1.8.12 Draft assembly
+1.8.13 Very important: agreement_data must come from the database
+1.8.14 Server-side context builder
+1.8.15 Do not make party_a and party_b arbitrary
+1.8.16 Generate the actual agreement version
+1.8.17 Record exactly which clauses were used
+1.8.18 Provenance
+1.8.19 Clause lifecycle
+1.8.20 Clause changes during negotiation
+1.8.21 Redline generation
+1.8.22 API endpoint
+1.8.23 One major correction to the existing authorization design
+1.8.24 Audit the generation
+1.8.25 The complete clause architecture
+1.8.26 What we have now
+1.9.1 Add JSON Schema support
+1.9.2 Store the formal schema
+1.9.3 Example schema structure
+1.9.4 Schema validation service
+1.9.5 Don't allow arbitrary JSON Schema
+1.9.6 Field-level validation
+1.9.7 Cross-field validation
+1.9.8 Upgrade the rule evaluator
+1.9.9 Dates need special treatment
+1.9.10 Build the complete validation result
+1.9.11 Main validation service
+1.9.12 Validation must happen before persistence
+1.9.13 Transaction boundary
+1.9.14 Validation exception
+1.9.15 Don't leak internal validation details
+1.9.16 Party validation
+1.9.17 Signatory validation
+1.9.18 Jurisdiction validation
+1.9.19 Validation stages
+1.9.20 Validation pipeline
+1.9.21 Validator interface
+1.9.22 Why this matters later
+1.9.23 Dynamic creation flow now
+1.9.24 Testing
+1.9.25 Most important test: type version immutability
+1.9.26 Second important test: approved clause immutability
+1.9.27 What the platform can now guarantee
+1.10.1 Create jurisdictions
+1.10.2 Legal source registry
+1.10.3 Source versions
+1.10.4 Why storing source snapshots matters
+1.10.5 Legal rules
+1.10.6 Rule versions
+1.10.7 Separate proposition from executable rule
+1.10.8 Legal rule definition
+1.10.9 Rule applicability
+1.10.10 Legal source acquisition
+1.10.11 Source integrity
+1.10.12 Store source documents privately
+1.10.13 Do not immediately trust extracted text
+1.10.14 Legal source extraction model
+1.10.15 Legal rule provenance
+1.10.16 Human review gate
+1.10.17 Never let source ingestion automatically activate a rule
+1.10.18 Rule status
+1.10.19 Rule engine service
+1.10.20 Legal rules shouldn't all be blocking
+1.10.21 Rule enforcement
+1.10.22 Integrate with agreement validation
+1.10.23 Legal rule adapter
+1.10.24 Legal knowledge API
+1.10.25 Add permissions
+1.10.26 Source freshness
+1.10.27 Background acquisition
+1.10.28 Change detection
+1.10.29 Source conflict detection
+1.10.30 Legal rule dependencies
+1.10.31 Rule graph validation
+1.10.32 Legal research AI
+1.10.33 AI response contract
+1.10.34 Prevent uncited legal claims
+1.10.35 No autonomous legal-rule learning
+1.10.36 Example of the complete research lifecycle
+1.10.37 Connect rules to agreement types
+1.10.38 Connect rules to clause selection
+1.10.39 Connect rules to execution readiness
+1.10.40 Database migration
+1.10.41 Tests
+1.10.42 What the system now has
+1.10.1 Create jurisdictions
+1.10.2 Legal source registry
+1.10.3 Source versions
+1.10.4 Why storing source snapshots matters
+1.10.5 Legal rules
+1.10.6 Rule versions
+1.10.7 Separate proposition from executable rule
+1.10.8 Legal rule definition
+1.10.9 Rule applicability
+1.10.10 Legal source acquisition
+1.10.11 Source integrity
+1.10.12 Store source documents privately
+1.10.13 Do not immediately trust extracted text
+1.10.14 Legal source extraction model
+1.10.15 Legal rule provenance
+1.10.16 Human review gate
+1.10.17 Never let source ingestion automatically activate a rule
+1.10.18 Rule status
+1.10.19 Rule engine service
+1.10.20 Legal rules shouldn't all be blocking
+1.10.21 Rule enforcement
+1.10.22 Integrate with agreement validation
+1.10.23 Legal rule adapter
+1.10.24 Legal knowledge API
+1.10.25 Add permissions
+1.10.26 Source freshness
+1.10.27 Background acquisition
+1.10.28 Change detection
+1.10.29 Source conflict detection
+1.10.30 Legal rule dependencies
+1.10.31 Rule graph validation
+1.10.32 Legal research AI
+1.10.33 AI response contract
+1.10.34 Prevent uncited legal claims
+1.10.35 No autonomous legal-rule learning
+1.10.36 Example of the complete research lifecycle
+1.10.37 Connect rules to agreement types
+1.10.38 Connect rules to clause selection
+1.10.39 Connect rules to execution readiness
+1.10.40 Database migration
+1.10.41 Tests
+1.10.42 What the system now has
+1. New permission model
+2. New database tables
+3. Agreement parties
+4. Agreement members
+5. Do not let the client choose arbitrary permissions
+6. Invitations
+7. Add relationships to Agreement
+8. Migration
+9. Agreement access dependency
+404 Agreement not found
+403 You are not allowed to access this agreement.
+10. Permission dependency
+11. Critical security rule
+12. Lawyer assignment endpoint
+13. The lawyer cannot accidentally cross parties
+14. Private vs shared negotiation data
+15. Do not use a single comments table
+16. Invitation acceptance
+17. Audit everything
+18. Notification events
+19. The actual workflow this enables
+20. Final authorization matrix
+21. Important change to the overall database architecture
+1. The fundamental rule
+2. Clause-level structure
+3. Agreement clause model
+4. Why clause keys matter
+5. Change set
+6. Individual clause changes
+7. Never trust submitted previous text
+8. Comment system
+9. Change proposal API
+10. Server-side validation
+409 CONFLICT
+11. Optimistic concurrency
+12. Redline generation
+13. The system must distinguish proposals from accepted text
+14. Accept / reject / counter
+15. Negotiation state machine
+16. Your requested lawyer workflow
+17. Notifications
+18. No notification leakage
+19. Version creation service
+20. Materializing a new version
+21. Hash the version
+22. Database migration
+23. API surface after Milestone 1.12
+24. What we have now
+1. New workflow entities
+2. Workflow definition
+3. Why actor_type matters
+4. Workflow instance
+5. Step instance
+6. Why we snapshot the workflow
+7. Approval actions
+8. Critical distinction: confirmation vs approval
+9. Party confirmation requires authority
+10. Agreement workflow service
+11. Find the current step
+12. Validate actor
+13. Do not allow arbitrary step completion
+14. Complete a workflow action
+15. Advancing the workflow
+16. Your exact two-sided workflow
+17. Version must be locked during confirmation
+18. Confirmation record must identify exactly what was confirmed
+19. No approval after a stale change
+20. Final negotiated state
+21. Agreement state machine
+22. Notifications at every transition
+23. Outbox integration
+24. Approval API
+25. Workflow visibility
+26. Admin workflow designer
+1. Party A Counsel
+2. Party A Representative
+3. Party B Counsel
+4. Party B Representative
+5. Signature
+27. Database migration
+28. What is now protected
+29. The complete negotiation engine so far
+1. Target architecture
+2. What becomes an event?
+3. Outbox model
+4. Why the payload must be limited
+5. Outbox service
+6. Example: creating a change proposal
+7. Notification records
+8. Notification delivery records
+9. Notification preferences
+10. Recipient resolution
+11. Agreement recipient service
+12. Example: change proposal notification
+13. Event-specific recipient policy
+14. Private party notifications
+15. Event dispatcher
+16. Process an event
+17. Idempotency
+18. Retry strategy
+19. Celery integration
+20. Outbox polling task
+21. Real-time WebSocket delivery
+22. Redis channel isolation
+23. Notification API
+24. Example notification response
+25. The system's notification behavior
+26. Notification contents must be generated from authorized data
+27. Notification template system
+28. Email provider abstraction
+29. Email security
+30. Audit integration
+31. Security requirement: authorization before notification
+32. Notification categories
+33. Read state is user-specific
+34. Notification deletion
+35. Migration
+36. Full architecture after 1.14
+37. What this enables for your original requirement
+1. Execution architecture
+2. New execution entities
+3. Signature request
+4. Signer record
+5. Signing authority check
+6. Authorized signatory record
+7. Execution requirements engine
+8. Execution requirement check
+9. Execution package
+10. Why sealing matters
+11. Signature events
+12. Do not store private credentials
+13. Identity verification
+14. Provider abstraction
+15. Consent event
+16. Signature application
+17. Execution evidence package
+18. Evidence model
+19. Signing order
+20. Signing order must not be client-controlled
+1. Awaiting Party A
+2. Awaiting Party B
+21. Signing invitation
+22. Signing session
+23. Signing endpoint
+24. State transition after final signer
+25. Activation rule
+26. Event sequence
+27. Notifications
+28. Prevent post-signature modification
+29. Executed document storage
+30. Download authorization
+31. Audit trail
+32. Evidence integrity chain
+33. Special-form agreements
+34. API surface
+35. Database migration
+36. Milestone 1.15 result
+1. What the engine needs to manage
+2. New entities
+3. Obligation model
+4. Why obligations are separate from clauses
+1. maintain security controls;
+2. notify Customer of an incident within 24 hours;
+3. provide annual security evidence.
+5. Assignees
+6. Deadline model
+7. Do not invent dates
+8. Store the source text
+9. Deadline expressions
+31 December 2027
+10. Trigger model
+11. Obligation evidence
+12. Evidence verification
+13. Compliance issue
+14. Example
+15. Business days
+16. Recurrence
+17. Obligation event history
+18. Reminder engine
+19. Escalation
+20. Obligation state machine
+21. AI extraction
+22. Source traceability
+23. Human review
+24. Notifications
+25. API
+26. Important authorization distinction
+27. Dashboard
+28. Integration with renewal and termination
+29. Integration with amendments
+30. Database migration
+31. Scheduler architecture
+32. High-level background architecture
+33. Milestone 1.16 result
+1. Agreement lifecycle after activation
+2. Do not treat expiry and termination as the same thing
+3. New models
+4. Renewal policy
+5. Renewal types
+6. Renewal events
+7. Termination request
+8. Termination reasons
+9. Termination rights engine
+10. Never guess termination rights
+11. Termination workflow
+12. Termination notice
+13. Notice delivery evidence
+14. Cure periods
+15. Settlement
+16. Settlement model
+17. Outstanding obligations check
+18. Post-termination obligations
+19. Post-termination model
+20. Termination completion check
+21. Expiration scheduler
+22. Automatic renewal
+23. Renewal vs amendment
+24. Termination API
+25. Termination notification flow
+26. Privacy
+27. Termination versioning
+28. Audit
+29. State machine
+30. Migration
+31. What Milestones 1.16 + 1.17 now provide
+1. Core principle
+2. Amendment entities
+3. Amendment model
+4. Amendment number
+5. Amendment versions
+6. Why amendment versions are separate
+7. Clause changes must reference the original clause
+8.2 — Payment Terms
+8. Additions and removals
+9. Amendment relationship
+10. Important distinction: legal document vs derived agreement state
+11. Amendment request
+12. Who can initiate an amendment?
+13. Amendment workflow
+14. Reuse negotiation engine
+15. Amendment access control
+16. Amendment effective date
+17. Amendment activation
+18. Recalculate obligations
+19. Existing deadline handling
+20. Amendment conflict detection
+21. Example
+22. Consolidated agreement view
+23. Amendment notification flow
+24. Amendment events
+25. Amendment signing
+26. Amendment execution package
+27. API surface
+28. Database migration
+29. Important architectural improvement
+30. Final amendment lifecycle
+1. What the intelligence layer should detect
+2. New architecture
+3. Intelligence entities
+4. AI model registry
+5. Extraction run
+6. Clause extraction
+7. Don't trust LLM-generated citations
+8. Contract findings
+9. Finding categories
+10. Evidence for every finding
+11. AI analysis run
+12. Human review
+13. AI must not silently become legal advice
+14. Rule engine + AI engine
+15. Missing-clause detection
+16. Cross-clause inconsistency
+17. Date consistency
+18. Financial consistency
+19. Cross-document analysis
+20. Document hierarchy
+21. Retrieval layer
+22. Citation-first AI
+23. Structured AI output
+24. AI provider abstraction
+25. Extraction provider abstraction
+26. OCR should not be the default
+27. Analysis pipeline
+28. Finding fusion
+29. Risk scoring
+30. Risk score history
+31. AI analysis triggered by changes
+32. Amendment impact analysis
+33. Human legal workspace
+34. Don't hide uncertainty
+35. AI audit
+36. Sensitive information
+37. AI data governance
+38. API
+39. Event integration
+40. Do not automatically change agreements because of AI
+41. Migration
+42. Testing requirements
+43. The intelligence architecture now looks like this
+44. Full platform architecture after 1.19
+45. What remains before calling the core platform complete
+1.20 — Legal Audit & Evidentiary Record
+1.21 — Enterprise Integrations
+1.22 — Security Hardening & Data Governance
+1.23 — Production Deployment & Reliability
+1.24 — Billing & SaaS Administration
+1.25 — End-to-End Lifecycle Integration + Testing
+1. Audit architecture
+2. Immutable audit event
+3. Why the hash chain matters
+4. Hash construction
+5. Important: event order
+6. Never generate audit sequence in application memory
+7. Create the audit service
+8. What goes into metadata?
+9. Audit event taxonomy
+10. Audit event vs user activity
+11. Document evidence snapshots
+12. Evidence model
+13. Evidence types
+14. Evidence hash
+15. Merkle-style batching
+16. External timestamping
+17. Verification service
+18. Verification API
+19. Export complete agreement history
+20. Evidence manifest
+21. Access control for audit records
+22. Prevent audit deletion
+23. Database permissions
+24. Trigger-based protection
+25. Audit the audit system
+26. Event-to-evidence linkage
+27. Build an evidence graph
+28. Chain of custody for files
+29. Retention
+30. Legal hold
+31. Audit export security
+32. Complete evidence verification
+33. Migration
+34. End-to-end example
+35. What Milestone 1.20 gives us
+36. Updated complete platform
+1.01  Production foundation
+1.02  Dynamic agreement engine
+1.03  Approval + negotiation
+1.04  Electronic execution
+1.05  Obligations + compliance
+1.06  Renewal + termination
+1.07  Amendments
+1.08  Contract intelligence
+1.10  Legal knowledge + jurisdiction rules
+1.11  Lawyer/party access control
+1.12  Negotiation/redlines
+1.13  Approval/confirmation
+1.14  Events/notifications
+1.15  Signing/execution evidence
+1.16  Obligations/compliance
+1.17  Renewal/termination
+1.18  Amendments
+1.19  AI legal review
+1.20  Legal audit/evidence
+1. Systems we should support
+2. Integration model
+3. Integration entity
+4. Credentials
+5. Integration scopes
+6. Provider abstraction
+7. Integration registry
+8. Identity / SSO
+9. SCIM provisioning
+10. CRM integration
+11. ERP / finance integration
+12. Procurement integration
+13. HR integration
+14. Calendar integration
+15. Email integration
+16. Cloud storage
+17. E-signature integrations
+18. Webhook endpoint
+19. Webhook delivery record
+20. Outgoing webhook architecture
+21. Webhook signatures
+22. Incoming webhook security
+23. Idempotency
+24. Integration event log
+25. Integration mapping
+26. Sync direction
+27. Conflict handling
+28. Integration permissions
+29. External system must not see private legal work
+30. API management
+31. API key handling
+32. Rate limiting
+33. Integration monitoring
+34. Integration failure behavior
+35. Integration retry queue
+36. Integration disconnect
+37. Data deletion behavior
+38. API event example
+39. Integration authorization flow
+40. Integration event flow example
+41. Real enterprise workflow
+42. Migration
+43. What 1.21 gives the platform
+1. Zero-trust access model
+2. Strong authentication
+3. MFA model
+4. Session management
+5. Refresh-token rotation
+6. PostgreSQL Row-Level Security
+7. Transaction tenant context
+8. Defense in depth
+9. Object-storage security
+10. Presigned URL flow
+11. Encryption strategy
+12. Field-level encryption
+13. Key management
+14. Secret management
+15. Secret scanning
+16. Password security
+17. Login rate limiting
+18. Account lockout behavior
+19. CSRF
+20. CORS
+21. Content Security Policy
+22. Security headers
+23. SSRF protection
+24. Document security
+25. PDF/DOCX parser isolation
+26. Malware scanning
+27. DLP layer
+28. AI data boundary
+29. No training leakage
+30. Security event architecture
+31. Suspicious behavior detection
+32. Mass-download protection
+33. Export controls
+34. Screenshot / screen protection
+35. Watermarking
+36. Data classification
+37. Retention engine
+38. Legal hold
+39. Backup security
+40. Disaster recovery
+41. Database backup principle
+42. Dependency security
+43. Container security
+44. Network segmentation
+45. Egress control
+46. Webhook security
+47. Security incident process
+48. Security API
+49. Tenant isolation test suite
+50. IDOR testing
+51. Object-storage IDOR testing
+52. Revocation propagation
+53. Signing security
+54. Approval security
+55. Security headers + reverse proxy
+56. Request correlation
+57. Structured logging
+58. Privacy-aware telemetry
+59. Security migration
+60. Production security checklist
+61. Final security architecture
+62. Where the platform stands
+1.10  Legal knowledge + jurisdiction rules
+1.11  Party/lawyer access control
+1.12  Negotiation + redlines
+1.13  Multi-stage confirmation
+1.14  Event + notifications
+1.15  Signature + execution evidence
+1.16  Obligations + compliance
+1.17  Renewal + termination
+1.18  Amendments
+1.19  Contract intelligence + AI review
+1.20  Audit + evidentiary record
+1.21  Enterprise integrations
+1.22  Security + data governance
+1. Separate runtime workloads
+2. Docker architecture
+3. Do not bake secrets into Docker
+4. Docker Compose for local/staging
+5. Application health endpoints
+6. Liveness
+7. Readiness
+8. Graceful shutdown
+9. Connection pool management
+10 API instances
+20 DB connections
+10. Database migration strategy
+11. CI/CD pipeline
+12. CI checks
+13. Testing pyramid
+14. The critical end-to-end test
+15. Observability architecture
+16. Structured logs
+17. Correlation IDs
+18. Metrics
+19. Business metrics
+20. Prometheus-style metrics
+21. Queue observability
+22. Dead-letter handling
+23. Distributed tracing
+24. Error handling
+25. Exception taxonomy
+26. Circuit breakers
+27. Timeouts
+28. Retry only when safe
+29. Idempotency keys
+30. Blue/green or rolling deployments
+31. Deployment sequence
+32. Rollback
+33. Database HA
+34. Redis HA
+35. Caching strategy
+36. Cache invalidation
+37. Object storage reliability
+38. Temporary file lifecycle
+39. Scheduler reliability
+40. Exactly-once illusion
+41. Backup verification
+42. Disaster recovery drill
+43. Rate limiting at production edge
+44. Production config validation
+45. Environment separation
+46. Production hostname structure
+47. Database connection security
+48. WebSocket reliability
+49. Event ordering
+50. Production monitoring dashboard
+51. Alerting
+52. Production logging retention
+53. Deployment artifact provenance
+54. Application version endpoint
+55. Production readiness gate
+56. Final production architecture
+57. What 1.23 accomplishes
+1. Commercial architecture
+2. What can be metered
+3. Plans
+4. Pricing should be data
+5. Entitlements
+6. Feature access must be centralized
+7. Subscription
+8. Subscription states
+9. Billing customer
+10. Never store card details
+11. Invoices
+12. Invoice lines
+13. Usage records
+14. Example real usage
+15. Usage source traceability
+16. Entitlement service
+17. Usage limit check
+500 AI analyses/month
+18. Legal data must survive billing failure
+19. What can be restricted?
+20. Seat counting
+21. External lawyers and billing
+22. Organization administration
+23. Billing roles
+24. Organization-level overrides
+25. Don't let customers directly edit billing entitlements
+26. Trial system
+27. Downgrades
+28. Upgrade flow
+29. Billing provider abstraction
+30. Billing webhooks
+31. Billing webhook idempotency
+32. Invoice payment status
+33. Billing audit
+34. Billing doesn't control legal state
+35. API
+36. Usage dashboard
+37. Feature gating in the frontend
+38. API-level entitlement example
+39. Usage transaction
+40. Enterprise billing
+41. Tax
+42. Currency
+43. Billing state and legal state remain separate
+44. Database migration
+45. Final architecture after 1.24
+46. The platform is now approaching completion
+01  Foundation
+02  Dynamic Agreement Engine
+03  Parties / Lawyers / Access
+04  Negotiation / Redlines
+05  Approval / Confirmation
+06  Notifications / Events
+07  Signature / Execution
+08  Obligations / Compliance
+09  Renewal / Expiry
+10  Termination
+11  Amendments
+12  Legal Knowledge / Jurisdiction
+13  AI Contract Intelligence
+14  Audit / Evidence
+15  Enterprise Integrations
+16  Security / Data Governance
+17  Production Infrastructure
+18  SaaS Billing / Entitlements
+1. Final domain state machine
+2. Centralize legal state transitions
+3. No direct status mutation
+4. Transaction boundary
+5. Transactional domain service
+6. Complete lifecycle integration
+7. Complete agreement creation
+8. Generated agreement pipeline
+9. End-to-end negotiation test
+10. Cross-party privacy test
+11. IDOR test suite
+12. Revoked lawyer test
+13. Stale version test
+409 VERSION_CONFLICT
+14. Concurrent approval test
+15. Signature concurrency
+16. Webhook duplication test
+17. Worker crash test
+18. Notification failure test
+19. Database failure test
+20. AI failure test
+21. External integration failure test
+22. Termination integration test
+23. Amendment integration test
+24. Renewal integration test
+25. Legal rule regression tests
+26. AI evaluation suite
+27. AI citation accuracy
+28. Contract generation tests
+29. Template validation
+30. Production data rule
+31. Seed data distinction
+32. Production bootstrap
+33. Data consistency checker
+34. Financial consistency checks
+35. Audit consistency checker
+36. Observability checks
+37. Tenant isolation test matrix
+38. End-to-end automated test
+1. Create Organization A
+2. Create Organization B
+3. Add Legal Entity A
+4. Add Legal Entity B
+5. Create users
+6. Assign lawyers
+7. Create agreement
+8. Generate draft
+9. Analyze draft
+10. Lawyer A proposes changes
+11. Party A confirms
+12. Lawyer B counters
+13. Party B confirms
+14. Both complete negotiation
+15. Verify execution requirements
+16. Prepare signing
+17. Sign A
+18. Sign B
+19. Execute
+20. Activate
+21. Generate obligations
+22. Complete one obligation
+23. Create amendment
+24. Negotiate amendment
+25. Execute amendment
+26. Recalculate affected obligations
+27. Start termination
+28. Complete termination
+29. Verify audit chain
+30. Export agreement history
+31. Verify exported evidence
+39. Failure injection
+40. Final lifecycle invariant
+41. Final architecture
+42. The core platform is now complete
+2.01 — Web Application UX
+2.02 — Mobile Application UX
+2.03 — Agreement Authoring Studio
+2.04 — Lawyer Negotiation Workspace
+2.05 — Party Confirmation & Executive Approval Workspace
+2.06 — Complete Signing Experience
+2.07 — Executed Agreement Repository & Document Lifecycle
+2.08 — Obligations & Contract Operations Workspace
+2.09 — Contract Risk, Compliance & Exception Management
+2.10 — Contract Intelligence & Advanced AI Workspace
+2.11 — Workflow Automation & Contract Operations Orchestrator
+2.12 — Billing UI
+2.13 — Search / Contract Repository
+2.14 — Reporting / Analytics
+2.15 — Enterprise SSO / SCIM UX
+2.16 — Full Accessibility / Localization
+2.17 — Production UX security review
+2.18 — Load / penetration / resilience testing
+2.19 — Beta release
+2.20 — Production launch
+1. Web application architecture
+2. Main application shell
+3. Next.js layout
+4. Authenticated layout
+5. App shell
+6. Dashboard
+7. Agreement repository
+8. Agreement workspace
+9. Agreement header
+30 Sep 2027
+10. Agreement identity panel
+11. Party panel
+12. Agreement members
+13. Add lawyer flow
+14. Document workspace
+15. Version selector
+16. Negotiation workspace
+17. Redline visualization
+18. Never make the browser the source of the old clause
+19. Change proposal panel
+20. Change history
+21. Private notes
+22. Shared comments
+23. Approval workspace
+24. Action-required banner
+25. Optimistic UI must not finalize legal actions
+26. Signature workspace
+27. Obligation workspace
+15 Oct 2026
+10 Jan 2027
+01 Mar 2027
+28. Amendment workspace
+29. Lifecycle workspace
+30. Intelligence workspace
+31. Never expose unsupported AI certainty
+32. Evidence workspace
+33. Activity workspace
+03 Sep
+03 Sep
+02 Sep
+01 Sep
+34. Search
+35. Search query architecture
+36. Real-time agreement updates
+37. Reconnect behavior
+38. API client
+39. Server/client separation
+40. Permission hook
+41. Agreement query hook
+42. Loading and error states
+43. Sensitive content handling
+44. Browser caching
+45. Download behavior
+46. Mobile compatibility
+47. Accessibility
+48. Responsive agreement workspace
+49. Notification center
+50. Action deep links
+51. Agreement action menu
+52. Prevent stale UI actions
+53. Conflict dialog
+54. Frontend file upload
+55. Product navigation after 2.01
+56. Production frontend rules
+57. What 2.01 delivers
+1. Mobile responsibilities
+2. Flutter project
+3. Dependencies
+4. Environment configuration
+5. Secure local storage
+6. Network client
+7. Authentication interceptor
+8. Authentication flow
+9. App router
+10. Mobile dashboard
+11. Mobile bottom navigation
+12. Agreement list
+13. Mobile agreement overview
+14. Agreement role display
+15. Mobile document viewer
+16. Don't download unnecessarily
+17. Redline viewer
+18. Counterproposal flow
+19. Approval screen
+20. Version hash display
+21. Signing screen
+22. Signing security
+23. Biometric re-authentication
+24. Push notifications
+25. Device token model
+26. Push token rotation
+27. Deep links
+28. Offline strategy
+29. Offline approval/signing
+30. WebSocket connection
+31. Better WebSocket authentication
+32. Reconnect
+33. Missed-event recovery
+34. Obligations screen
+10 Sep
+35. Evidence upload
+36. Renewal screen
+30 Sep 2027
+02 Jul 2027
+37. Termination screen
+38. Intelligence mobile view
+39. Notifications
+40. Notification preferences
+41. Session/device management
+42. Mobile app security
+43. Certificate pinning
+44. Mobile logging
+45. Local database
+46. Mobile analytics
+47. Crash reporting
+48. Mobile API authorization model
+49. Example repository layer
+50. Strongly typed models
+51. State management
+52. Agreement state invalidation
+53. Permission-aware action buttons
+54. Billing/entitlements on mobile
+55. Mobile app update strategy
+56. Forced upgrade
+57. Mobile app flow example
+58. Final mobile security boundary
+1. Authoring architecture
+2. Agreement creation starts with type
+3. Agreement type registry
+4. Example response
+5. Dynamic schema
+6. Supported field types
+7. Conditional fields
+8. Backend validation
+9. Pydantic validation layer
+10. Party selection
+11. Adding representatives and lawyers during authoring
+12. Lawyer invitation
+13. Party access must start early
+14. Jurisdiction selection
+15. Governing law vs execution jurisdiction
+16. Dynamic commercial terms
+17. Clause selection engine
+18. Clause source hierarchy
+19. Clause assembly
+20. Template engine
+21. Template model
+22. Missing variable protection
+23. Draft-generation transaction
+24. Agreement generation service
+25. Generated document validation
+26. Document rendering pipeline
+27. PDF is not the source of truth
+28. Save as draft
+29. Draft autosave
+30. Draft concurrency
+409 CONFLICT
+31. Draft vs negotiation
+33. AI assistance during authoring
+34. Example AI-assisted field
+35. Legal source awareness
+36. Preview screen
+37. Validation panel
+38. Requirement severity
+39. Lawyer assignment before generation
+40. Notification after generation
+41. Authoring API
+42. Draft API example
+43. Never trust role names from client
+44. Document attachments
+45. Attachment confidentiality
+46. Agreement number
+47. Draft naming
+48. Audit events from authoring
+49. Authoring security
+50. Draft AI processing
+51. Final authoring workflow
+1. Workspace layout
+2. Workspace must know current user context
+3. Create a negotiation page
+4. Workspace component
+5. Clause list
+6. Clause editor states
+7. Edit mode
+8. Never edit the current version directly
+9. Frontend editing state
+10. Formal proposal review
+11. Add clause
+12. Remove clause
+13. Replace clause
+14. Multiple changes in one proposal
+15. Shared redline view
+16. Why the backend produces the diff
+17. Comment architecture
+18. Private counsel notes
+19. Private notes are not formal negotiation
+20. Proposal submission
+21. Submission success
+22. Opposing lawyer view
+23. Proposal comparison
+24. Accept
+25. Reject
+26. Counterproposal
+27. Negotiation timeline
+28. Version timeline
+29. Current version indicator
+30. Real-time update
+31. But don't trust WebSocket state
+32. Collaboration presence
+33. Locking strategy
+34. Clause-level concurrency
+409 VERSION_CONFLICT
+35. Unsaved work recovery
+36. Clause comments
+37. Comment resolution
+38. Mention system
+39. Search within contract
+40. AI assistance in workspace
+41. AI must not automatically submit changes
+42. AI impact analysis
+43. Formal proposal summary
+44. Proposal permissions
+45. Shared/private visual distinction
+46. Before submitting any private note
+47. Navigation between related objects
+48. Audit trail in workspace
+49. Agreement lock during execution
+50. UI state machine
+51. API calls used by this workspace
+52. WebSocket events
+53. Security-critical UI rule
+54. Error handling
+409 VERSION_CONFLICT
+403 INSUFFICIENT_PERMISSION
+404 NOT_FOUND
+409 WORKFLOW_STATE_ERROR
+410 INVITATION_EXPIRED
+423 RESOURCE_LOCKED
+55. Mobile adaptation later
+56. Final negotiation workspace flow
+1. Party approval workspace
+2. Backend response
+3. Approval page
+4. Approval workspace
+5. Exact version being approved
+6. Lawyer confirmation must happen first
+7. Party representative capability
+8. Confirmation API
+9. Never trust submitted version_id
+10. Approval record
+11. Why store the version hash?
+12. Request-changes flow
+13. Request changes API
+14. Do not silently send a private note
+15. Approval screen should show all material changes
+16. Compare with previously approved version
+17. Approval timeline
+18. Authentication step-up
+19. Approval confirmation dialog
+20. Server-side confirmation transaction
+21. Duplicate confirmation
+22. Lawyer confirmation screen
+23. Legal review findings
+24. Approval blocking rules
+25. Party-specific review
+26. Release to opposing side
+27. Release should be an explicit domain transition
+28. The full two-sided flow
+29. What happens when Party B changes something?
+30. Automatic invalidation
+31. Final negotiation completion check
+32. Finalization endpoint
+33. Notification after final confirmation
+34. UI transition
+35. Final approval audit
+36. Evidence snapshot
+37. Security test
+38. Critical test: lawyer cannot bind client
+39. Critical test: client cannot skip lawyer review
+40. Critical test: new version invalidates pending confirmation
+41. API summary
+42. Database migration
+43. Full workflow now
+2.06 — Complete Signing Experience
+2.06.1 — Add signing-session domain
+2.06.2 — Signature provider abstraction
+2.06.3 — Signing service
+2.06.4 — Never trust the browser for signing authority
+2.06.5 — Create the signing request
+2.06.6 — Signer session creation
+2.06.7 — Secure signing URL
+2.06.8 — Signing-session authentication
+2.06.9 — Signer review screen
+2.06.10 — Document viewer API
+2.06.11 — Consent
+2.06.12 — Authentication / step-up authentication
+2.06.13 — Signature placement
+2.06.14 — Signature capture
+2.06.15 — Submit signature
+2.06.16 — The actual signing transaction
+2.06.17 — Execution evidence
+2.06.18 — Evidence hash
+2.06.19 — Multiple signers
+2.06.20 — Decline signing
+2.06.21 — Cancel signing
+2.06.22 — Final document generation
+2.06.23 — Finalization
+2.06.24 — Signing completion screen
+2.06.25 — Web signing routes
+2.06.26 — API surface
+2.06.27 — Mobile signing flow
+2.06.28 — Real-time signing updates
+2.06.29 — Notification flow
+2.06.30 — Critical state machine
+2.06.31 — Database migration
+2.06.32 — Important indexes
+2.06.33 — Signing security rules
+2.06.34 — Idempotency
+2.06.35 — Test the complete signing lifecycle
+2.06.36 — Attack tests
+2.07 — Executed Agreement Repository & Document Lifecycle
+2.07.1 — Repository architecture
+2.07.2 — Document types
+2.07.3 — Database-backed document types
+2.07.4 — Repository record
+2.07.5 — Document relationships
+2.07.6 — Immutable executed artifact
+2.07.7 — Prevent document mutation
+2.07.8 — Secure storage
+2.07.9 — Upload pipeline
+2.07.10 — Hashing
+2.07.11 — Secure download
+2.07.12 — Repository access
+2.07.13 — Repository API
+2.07.14 — Agreement repository response
+2.07.15 — Repository page
+2.07.16 — Document viewer
+2.07.17 — Executed-document verification
+2.07.18 — Evidence package
+2.07.19 — Evidence generation
+2.07.20 — Retention policies
+2.07.21 — Retention calculation
+2.07.22 — Legal hold
+2.07.23 — Disposal protection
+2.07.24 — Archive versus delete
+2.07.25 — Amendment relationship
+2.07.26 — Consolidated agreement view
+2.07.27 — Consolidation service
+2.07.28 — Current terms API
+2.07.29 — Repository search
+2.07.30 — Repository filters
+2.07.31 — Repository activity timeline
+2.07.32 — Activity API
+2.07.33 — Repository notification events
+2.07.34 — Web Agreement Workspace integration
+2.07.35 — Security boundary
+2.07.36 — API authorization dependency
+2.07.37 — Retention worker
+2.07.38 — Legal-hold worker
+2.07.39 — Repository mobile screen
+2.07.40 — Document repository tests
+2.07.41 — Essential security tests
+2.07.42 — Migration
+2.07.43 — End-to-end flow after this milestone
+2.07.44 — One important architectural correction
+2.08 — Obligations & Contract Operations Workspace
+2.08.1 — Architecture
+1.16 Obligations
+1.17 Renewal / Termination
+1.18 Amendments
+1.19 AI
+1.20 Audit
+2.07 Repository
+2.08.2 — Obligation lifecycle
+2.08.3 — Obligation model
+2.08.4 — Why source_version_id matters
+2.08.5 — Obligation assignees
+2.08.6 — Deadlines
+2.08.7 — Absolute versus relative deadlines
+2.08.8 — Deadline calculator
+2.08.9 — Working calendar
+2.08.10 — Recurring obligations
+2.08.11 — Obligation extraction
+2.08.12 — AI extraction schema
+2.08.13 — Candidate creation
+2.08.14 — Human confirmation
+2.08.15 — Confirmation API
+2.08.16 — Assigning ownership
+2.08.17 — Evidence
+2.08.18 — Evidence review
+2.08.19 — Completion is not enough
+2.08.20 — Reminder system
+2.08.21 — Reminder scheduler
+2.08.22 — Overdue detection
+2.08.23 — Escalation
+2.08.24 — Escalation service
+2.08.25 — Operational dashboard
+2.08.26 — Obligation workspace
+2.08.27 — Obligation detail API
+2.08.28 — Obligation event history
+2.08.29 — Status transition service
+2.08.30 — Complete obligation operation
+2.08.31 — Amendment propagation
+2.08.32 — Renewal integration
+2.08.33 — Termination integration
+2.08.34 — Mobile operations
+2.08.35 — Push notifications
+2.08.36 — AI operational assistance
+2.08.37 — Cross-agreement obligation intelligence
+2.08.38 — Cross-contract conflict detection
+2.08.39 — Critical indexes
+2.08.40 — API surface
+2.08.41 — Dashboard query
+2.08.42 — Authorization
+2.08.43 — Security boundary
+2.08.44 — Tests
+2.08.45 — Important tests
+2.08.46 — Migration
+2.08.47 — End-to-end operational flow
+2.09 — Contract Risk, Compliance & Exception Management
+2.09.1 — Module structure
+2.09.2 — Risk finding model
+2.09.3 — Finding evidence
+2.09.4 — Risk categories
+2.09.5 — Deterministic rules engine
+2.09.6 — Rule definition
+2.09.7 — Rule execution
+2.09.8 — Rule result
+2.09.9 — AI findings
+2.09.10 — Verify AI evidence
+2.09.11 — Confidence is not severity
+2.09.12 — Risk scoring
+2.09.13 — Risk assessment
+2.09.14 — Remediation
+2.09.15 — Remediation sources
+2.09.16 — Risk acceptance
+2.09.17 — Exception management
+2.09.18 — Compliance policy
+2.09.19 — Compliance evaluation
+2.09.20 — Compliance evaluation record
+2.09.21 — Risk status workflow
+2.09.22 — Risk review screen
+2.09.23 — Finding detail
+2.09.24 — Version awareness
+2.09.25 — Risk snapshots
+2.09.26 — Risk score must be explainable
+2.09.27 — Risk remediation from amendment workflow
+2.09.28 — AI suggested remediation
+2.09.29 — Exception ownership
+2.09.30 — SLA for risk remediation
+2.09.31 — Compliance dashboard
+2.09.32 — Contract comparison
+2.09.33 — Clause deviation engine
+2.09.34 — External compliance data
+2.09.35 — External evaluation record
+2.09.36 — API
+2.09.37 — Risk service
+2.09.38 — Run analysis after real lifecycle events
+2.09.39 — Celery task
+2.09.40 — Analysis provenance
+2.09.41 — Important anti-hallucination rule
+2.09.42 — Human review
+2.09.43 — Resolution must require evidence
+2.09.44 — Escalation
+2.09.45 — Risk dashboard
+2.09.46 — Organization risk posture
+2.09.47 — Risk trend
+2.09.48 — Mobile
+2.09.49 — Tests
+2.09.50 — Critical security tests
+2.09.51 — Migration
+2.09.52 — Full risk pipeline
+2.10 — Contract Intelligence & Advanced AI Workspace
+2.10.1 — What this milestone provides
+2.10.2 — Module structure
+2.10.3 — AI provider abstraction
+2.10.4 — Embedding abstraction
+2.10.5 — Knowledge chunks
+2.10.6 — Embedding storage
+2.10.7 — Why content_hash matters
+2.10.8 — Ingestion pipeline
+2.10.9 — Legal-aware chunking
+2.10.10 — Retrieval pipeline
+2.10.11 — Permission-filtered retrieval
+2.10.12 — Retrieval context
+2.10.13 — Hybrid retrieval
+2.10.14 — Retrieval result
+2.10.15 — Context packing
+2.10.16 — AI answer schema
+2.10.17 — Citation verification
+2.10.18 — Intelligence orchestrator
+2.10.19 — No-answer policy
+2.10.20 — Conflicting sources
+2.10.22 — Organization-wide AI search
+2.10.23 — Cross-contract comparison
+2.10.24 — Comparison engine
+2.10.25 — Comparison UI
+2.10.26 — Precedent retrieval
+2.10.27 — Precedent model
+2.10.28 — Privacy boundary for precedent retrieval
+2.10.29 — Negotiation intelligence
+2.10.30 — Negotiation suggestion schema
+2.10.31 — Link intelligence to risk engine
+2.10.32 — Link intelligence to obligations
+2.10.33 — Contract summary
+2.10.34 — Summary schema
+2.10.35 — Natural-language query API
+2.10.36 — Conversation memory
+2.10.37 — Conversation security
+2.10.38 — AI feedback
+2.10.39 — Feedback must not directly retrain production
+2.10.40 — AI evaluation dataset
+2.10.41 — AI evaluation metrics
+2.10.42 — Evaluation pipeline
+2.10.43 — Model version registry
+2.10.44 — Prompt versioning
+2.10.45 — AI audit record
+2.10.46 — Data minimization
+2.10.47 — Prompt construction
+2.10.48 — Contract intelligence API
+2.10.49 — Comparison endpoint
+2.10.50 — Intelligence workspace
+2.10.51 — Source panel
+2.10.53 — Intelligence-to-action
+2.10.54 — Background analysis
+2.10.55 — Re-indexing policy
+2.10.56 — Search index metadata
+2.10.57 — Temporal retrieval
+2.10.58 — Cross-agreement intelligence
+2.10.59 — Intelligence dashboard
+2.10.60 — Mobile intelligence
+2.10.61 — Security tests
+2.10.62 — Citation test
+2.10.63 — Contradiction test
+2.10.64 — No hallucination test
+2.10.65 — Privacy tests
+2.10.66 — Performance
+2.10.67 — Streaming answers
+2.10.68 — Don't expose chain-of-thought
+2.10.69 — Migration
+2.10.70 — Complete intelligence pipeline
+2.11 — Workflow Automation & Contract Operations Orchestrator
+2.11.1 — What this milestone adds
+2.11.2 — Module structure
+2.11.3 — Workflow definition
+2.11.4 — Workflow definition model
+2.11.5 — Workflow scope
+2.11.6 — Workflow steps
+2.11.7 — Step transitions
+2.11.8 — Workflow instance
+2.11.9 — Step instance
+2.11.10 — Events
+2.11.11 — Generic domain event
+2.11.12 — Event routing
+2.11.13 — Trigger definition
+2.11.14 — Condition engine
+2.11.15 — Compound conditions
+2.11.16 — Workflow action registry
+2.11.17 — Action execution
+2.11.18 — Human tasks
+2.11.19 — Task assignment
+2.11.20 — Approval task
+2.11.21 — Signature action
+2.11.22 — Delay steps
+2.11.23 — Scheduler
+2.11.24 — Event wait
+2.11.25 — Workflow engine
+2.11.26 — Step execution
+2.11.27 — Parallel execution
+2.11.28 — Parallel completion
+2.11.29 — Real workflow example
+2.11.30 — More realistic branching
+2.11.31 — Retry handling
+2.11.32 — Idempotency
+2.11.33 — Human-intervention state
+2.11.34 — Compensation
+2.11.35 — Workflow suspension
+2.11.36 — Workflow cancellation
+2.11.37 — Workflow audit
+2.11.38 — Workflow versioning
+2.11.39 — Definition publish process
+2.11.40 — Cycle detection
+2.11.41 — Workflow editor
+2.11.42 — No-code workflow configuration
+2.11.43 — Workflow test mode
+2.11.44 — Workflow execution trace
+2.11.45 — API
+2.11.46 — Example: renewal workflow
+2.11.47 — Example: onboarding workflow
+2.11.48 — External integrations
+2.11.49 — Workflow secrets
+2.11.50 — Data mapping
+2.11.51 — Workflow authorization
+2.11.52 — Workflow data access
+2.11.53 — Task-context projection
+2.11.54 — Workflow notifications
+2.11.55 — Workflow-to-obligation integration
+2.11.56 — Workflow-to-risk integration
+2.11.57 — Workflow-to-intelligence integration
+2.11.58 — Workflow-to-signing integration
+2.11.59 — Event correlation
+2.11.60 — Workflow event outbox
+2.11.61 — Exactly-once illusion
+2.11.62 — Dead-letter events
+2.11.63 — Workflow observability
+2.11.64 — Workflow health dashboard
+2.11.65 — Workflow API security
+2.11.66 — Tests
+2.11.67 — Critical workflow tests
+2.11.68 — Workflow migration
+2.11.69 — The finished orchestration architecture
+2.10.1 — What this milestone provides
+2.10.2 — Module structure
+2.10.3 — AI provider abstraction
+2.10.4 — Embedding abstraction
+2.10.5 — Knowledge chunks
+2.10.6 — Embedding storage
+2.10.7 — Why content_hash matters
+2.10.8 — Ingestion pipeline
+2.10.9 — Legal-aware chunking
+2.10.10 — Retrieval pipeline
+2.10.11 — Permission-filtered retrieval
+2.10.12 — Retrieval context
+2.10.13 — Hybrid retrieval
+2.10.14 — Retrieval result
+2.10.15 — Context packing
+2.10.16 — AI answer schema
+2.10.17 — Citation verification
+2.10.18 — Intelligence orchestrator
+2.10.19 — No-answer policy
+2.10.20 — Conflicting sources
+2.10.22 — Organization-wide AI search
+2.10.23 — Cross-contract comparison
+2.10.24 — Comparison engine
+2.10.25 — Comparison UI
+2.10.26 — Precedent retrieval
+2.10.27 — Precedent model
+2.10.28 — Privacy boundary for precedent retrieval
+2.10.29 — Negotiation intelligence
+2.10.30 — Negotiation suggestion schema
+2.10.31 — Link intelligence to risk engine
+2.10.32 — Link intelligence to obligations
+2.10.33 — Contract summary
+2.10.34 — Summary schema
+2.10.35 — Natural-language query API
+2.10.36 — Conversation memory
+2.10.37 — Conversation security
+2.10.38 — AI feedback
+2.10.39 — Feedback must not directly retrain production
+2.10.40 — AI evaluation dataset
+2.10.41 — AI evaluation metrics
+2.10.42 — Evaluation pipeline
+2.10.43 — Model version registry
+2.10.44 — Prompt versioning
+2.10.45 — AI audit record
+2.10.46 — Data minimization
+2.10.47 — Prompt construction
+2.10.48 — Contract intelligence API
+2.10.49 — Comparison endpoint
+2.10.50 — Intelligence workspace
+2.10.51 — Source panel
+2.10.53 — Intelligence-to-action
+2.10.54 — Background analysis
+2.10.55 — Re-indexing policy
+2.10.56 — Search index metadata
+2.10.57 — Temporal retrieval
+2.10.58 — Cross-agreement intelligence
+2.10.59 — Intelligence dashboard
+2.10.60 — Mobile intelligence
+2.10.61 — Security tests
+2.10.62 — Citation test
+2.10.63 — Contradiction test
+2.10.64 — No hallucination test
+2.10.65 — Privacy tests
+2.10.66 — Performance
+2.10.67 — Streaming answers
+2.10.68 — Don't expose chain-of-thought
+2.10.69 — Migration
+2.10.70 — Complete intelligence pipeline
+2.10.71 — The most important architectural connection
+2.10.72 — What the platform now has

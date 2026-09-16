@@ -1,0 +1,419 @@
+"""Signing API endpoints.
+
+Handle internal party signing and auto-transition to EXECUTED.
+"""
+
+import hashlib
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.dependencies.agreement_access import verify_agreement_access
+from app.dependencies.auth import get_current_user
+from app.dependencies.tenant import get_current_organization_id
+from app.models.agreement import Agreement, AgreementVersion
+from app.models.audit import AuditEvent
+from app.models.external_party import ExternalPartySignature
+from app.models.signature import InternalSignature
+from app.models.user import User
+from app.services.agreement_versioning import get_latest_version
+from app.services.audit_service import record_event
+from app.services.alerting_service import AlertSeverity, get_alerting_service
+from app.services.escalation_service import EscalationLevel, get_escalation_service
+from app.services.lifecycle_service import (
+    TransitionNotAllowed,
+    apply_transition,
+)
+from app.services.signing_authority_service import evaluate_signing_authority
+
+router = APIRouter(
+    prefix="/agreements",
+    tags=["signing"],
+)
+
+
+class SignRequest(BaseModel):
+    consent_text: str
+
+
+class SignResponse(BaseModel):
+    signature_id: uuid.UUID
+    signed_at: str
+    message: str
+    agreement_status: str
+
+
+class ExecutionResponse(BaseModel):
+    status: str
+    message: str
+    document_hash: str | None = None
+
+
+async def _record_audit_event(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    agreement_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+    actor_type: str,
+    action: str,
+    resource_type: str | None = None,
+    resource_id: uuid.UUID | None = None,
+    metadata: dict | None = None,
+    ip_address: str | None = None,
+):
+    """Record an audit event."""
+    return await record_event(
+        db,
+        tenant_id=tenant_id,
+        agreement_id=agreement_id,
+        actor_id=actor_id,
+        actor_type=actor_type,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        metadata_json=metadata,
+        ip_address=ip_address,
+    )
+
+
+async def _check_and_execute(
+    db: AsyncSession,
+    agreement: Agreement,
+    org_id: uuid.UUID,
+) -> bool:
+    """Check if all parties have signed and auto-transition to EXECUTED.
+
+    Returns True if execution was triggered.
+    """
+    # Check if there are signatures from all required parties
+    ext_result = await db.execute(
+        select(ExternalPartySignature).where(
+            ExternalPartySignature.agreement_id == agreement.id,
+        )
+    )
+    int_result = await db.execute(
+        select(InternalSignature).where(
+            InternalSignature.agreement_id == agreement.id,
+        )
+    )
+    ext_sigs = list(ext_result.scalars().all())
+    int_sigs = list(int_result.scalars().all())
+    signatures = ext_sigs + int_sigs
+
+    if len(signatures) < 1:
+        return False
+
+    # Check if agreement already executed
+    if agreement.status == "executed":
+        return False
+
+    # Auto-transition to executed
+    try:
+        await apply_transition(
+            db,
+            agreement=agreement,
+            action_key="execute",
+            actor_id=None,
+            org_id=org_id,
+            actor_type="system",
+            metadata_json={"signature_count": len(signatures)},
+        )
+    except TransitionNotAllowed as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    agreement.execution_date = datetime.now(timezone.utc).date()
+
+    # Lock the latest version
+    version = await get_latest_version(db, agreement.id)
+    if version:
+        from app.services.agreement_versioning import lock_version
+        await lock_version(db, version)
+
+        # Generate final PDF hash
+        if version.content:
+            document_hash = hashlib.sha256(version.content.encode()).hexdigest()
+            version.content_hash = document_hash
+            await db.flush()
+
+            # Record execution audit event
+            await _record_audit_event(
+                db,
+                tenant_id=org_id,
+                agreement_id=agreement.id,
+                actor_id=None,
+                actor_type="system",
+                action="EXECUTED",
+                resource_type="agreement",
+                resource_id=agreement.id,
+                metadata={
+                    "document_hash": document_hash,
+                    "signature_count": len(signatures),
+                },
+            )
+
+    await db.flush()
+    return True
+
+
+def _send_esign_alert(
+    org_id: str,
+    agreement_id: str,
+    action: str,
+    actor: str,
+    executed: bool = False,
+    error: str | None = None,
+):
+    """Dispatch e-signature alerts via Slack/PagerDuty + escalation."""
+    alerting = get_alerting_service()
+    escalation = get_escalation_service()
+
+    if error:
+        severity = AlertSeverity.CRITICAL
+        esc_level = EscalationLevel.CRITICAL
+        title = f"E-Signature Failed: {action}"
+        message = f"{actor} failed to {action} agreement {agreement_id[:8]}...: {error}"
+    elif executed:
+        severity = AlertSeverity.INFO
+        esc_level = EscalationLevel.INFO
+        title = f"Agreement Executed: {action}"
+        message = f"{actor} signed and executed agreement {agreement_id[:8]}..."
+    else:
+        severity = AlertSeverity.INFO
+        esc_level = EscalationLevel.INFO
+        title = f"E-Signature: {action}"
+        message = f"{actor} {action} agreement {agreement_id[:8]}..."
+
+    alerting.send_alert(
+        title=title,
+        message=message,
+        severity=severity,
+        source="contractos-esignature",
+        category="esignature",
+        details={
+            "agreement_id": agreement_id,
+            "action": action,
+            "actor": actor,
+            "executed": executed,
+        },
+    )
+
+    if severity in (AlertSeverity.WARNING, AlertSeverity.CRITICAL):
+        escalation.create_incident(
+            organization_id=org_id,
+            category="esignature",
+            title=title,
+            message=message,
+            severity=esc_level,
+            details={"agreement_id": agreement_id, "actor": actor},
+        )
+
+
+@router.post(
+    "/{agreement_id}/sign",
+    response_model=SignResponse,
+)
+async def sign_agreement(
+    agreement_id: uuid.UUID,
+    data: SignRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Internal user signs the agreement.
+
+    Captures signature with evidence for audit trail.
+    """
+    agreement = await verify_agreement_access(
+        agreement_id=agreement_id,
+        permission="agreement.sign",
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+
+    if agreement.status not in ("approved", "signing", "negotiating", "negotiation", "sent"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot sign agreement in status: {agreement.status}",
+        )
+
+    # Enforce signatory authority (spec 30): the signer's authority scope must
+    # cover the agreement value, or the required DOA approvals must be complete.
+    authority = await evaluate_signing_authority(
+        db,
+        org_id=org_id,
+        agreement=agreement,
+        user_id=current_user.id,
+    )
+    if not authority.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "signing_authority_denied",
+                "reason": authority.reason,
+                "message": authority.message,
+                "required_approvals": authority.required_approvals,
+            },
+        )
+
+    # Get latest version
+    version = await get_latest_version(db, agreement_id)
+    if version is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No version available to sign",
+        )
+
+    # Compute signature hash
+    timestamp_str = datetime.now(timezone.utc).isoformat()
+    signature_input = f"{current_user.id}:{version.content_hash}:{timestamp_str}"
+    signature_hash = hashlib.sha256(signature_input.encode()).hexdigest()
+
+    # Create signature record
+    signature = InternalSignature(
+        agreement_id=agreement_id,
+        user_id=current_user.id,
+        version_id=version.id,
+        signed_at=datetime.now(timezone.utc),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        consent_text=data.consent_text,
+        signature_hash=signature_hash,
+    )
+    db.add(signature)
+
+    # Update agreement status
+    if agreement.status != "signing":
+        try:
+            await apply_transition(
+                db,
+                agreement=agreement,
+                action_key="sign",
+                actor_id=current_user.id,
+                org_id=org_id,
+                actor_type="user",
+                ip_address=request.client.host if request.client else None,
+            )
+        except TransitionNotAllowed as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+
+    # Record audit event
+    await _record_audit_event(
+        db,
+        tenant_id=org_id,
+        agreement_id=agreement_id,
+        actor_id=current_user.id,
+        actor_type="user",
+        action="SIGNED",
+        resource_type="agreement",
+        resource_id=agreement_id,
+        metadata={
+            "signature_hash": signature_hash,
+            "version_number": version.version_number,
+        },
+        ip_address=request.client.host if request.client else None,
+    )
+
+    await db.flush()
+
+    # Check if we should auto-execute
+    executed = await _check_and_execute(db, agreement, org_id)
+
+    # Dispatch e-signature alerts
+    _send_esign_alert(
+        org_id=str(org_id),
+        agreement_id=str(agreement_id),
+        action="signed",
+        actor=current_user.email,
+        executed=executed,
+    )
+
+    return SignResponse(
+        signature_id=signature.id,
+        signed_at=signature.signed_at.isoformat(),
+        message="Agreement signed successfully"
+        + (" and executed" if executed else ""),
+        agreement_status=agreement.status,
+    )
+
+
+@router.post(
+    "/{agreement_id}/send",
+    status_code=status.HTTP_200_OK,
+)
+async def send_agreement(
+    agreement_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send agreement to counterparty.
+
+    Transitions DRAFT/INTERNAL_REVIEW → SENT.
+    """
+    agreement = await verify_agreement_access(
+        agreement_id=agreement_id,
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+
+    if agreement.status not in ("draft", "internal_review"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot send agreement in status: {agreement.status}",
+        )
+
+    previous_status = agreement.status
+    try:
+        await apply_transition(
+            db,
+            agreement=agreement,
+            action_key="send",
+            actor_id=current_user.id,
+            org_id=org_id,
+            actor_type="user",
+            ip_address=request.client.host if request.client else None,
+        )
+    except TransitionNotAllowed as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    # Record audit event
+    await _record_audit_event(
+        db,
+        tenant_id=org_id,
+        agreement_id=agreement_id,
+        actor_id=current_user.id,
+        actor_type="user",
+        action="SENT",
+        resource_type="agreement",
+        resource_id=agreement_id,
+        metadata={"previous_status": previous_status},
+    )
+
+    await db.flush()
+
+    # Alert on agreement sent
+    _send_esign_alert(
+        org_id=str(org_id),
+        agreement_id=str(agreement_id),
+        action="sent",
+        actor=current_user.email,
+    )
+
+    return {"status": "sent", "message": "Agreement sent to counterparty"}

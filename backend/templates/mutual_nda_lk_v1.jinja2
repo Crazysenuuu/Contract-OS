@@ -1,0 +1,309 @@
+MUTUAL NON-DISCLOSURE AGREEMENT
+
+This Mutual Non-Disclosure Agreement ("Agreement") is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ party_a_legal_name | default("_______________") }}, a company incorporated under the laws of {{ party_a_country | default("Sri Lanka") }}, with its registered office at {{ party_a_address | default("_______________") }} ("Party A"),
+
+AND
+
+{{ party_b_legal_name | default("_______________") }}, a company incorporated under the laws of {{ party_b_country | default("Sri Lanka") }}, with its registered office at {{ party_b_address | default("_______________") }} ("Party B").
+
+Party A and Party B are individually referred to as a "Party" and collectively as the "Parties."
+
+{% if registration_number_a %}
+Party A Registration Number: {{ registration_number_a }}
+{% endif %}
+{% if registration_number_b %}
+Party B Registration Number: {{ registration_number_b }}
+{% endif %}
+
+RECITALS
+
+WHEREAS, the Parties wish to explore and evaluate a potential business relationship, including but not limited to {{ purpose | default("a potential business collaboration") }} (the "Purpose"); and
+
+WHEREAS, in connection with the Purpose, each Party may disclose to the other Party certain confidential and proprietary information; and
+
+WHEREAS, the Parties desire to protect the confidentiality of such information in accordance with the terms of this Agreement;
+
+NOW, THEREFORE, in consideration of the mutual covenants and agreements set forth herein, and for other good and valuable consideration, the receipt and sufficiency of which are hereby acknowledged, the Parties agree as follows:
+
+
+1. DEFINITIONS
+
+1.1 "Confidential Information" means any and all non-public information, in any form or medium, disclosed by one Party (the "Disclosing Party") to the other Party (the "Receiving Party"), including but not limited to:
+
+{% if includes_technical_info %}
+    (a) technical data, trade secrets, know-how, inventions, processes, formulas, algorithms, software code, source code, object code, databases, and technical drawings;
+{% endif %}
+{% if includes_business_info %}
+    (b) business information, including but not limited to financial data, pricing, cost information, business plans, marketing strategies, customer lists, and supplier information;
+{% endif %}
+{% if includes_financial_info %}
+    (c) financial information, including but not limited to revenue, profit margins, investment plans, and funding information;
+{% endif %}
+{% if includes_product_info %}
+    (d) product information, including but not limited to product designs, specifications, prototypes, and product development plans;
+{% endif %}
+{% if includes_personal_data %}
+    (e) personal data and personally identifiable information of employees, customers, or third parties;
+{% endif %}
+{% if includes_legal_info %}
+    (f) legal information, including but not limited to pending or threatened litigation, regulatory matters, and compliance information;
+{% endif %}
+    (g) any other information that is designated as "Confidential," "Proprietary," or with similar markings; and
+
+    (h) all notes, analyses, compilations, studies, summaries, or other documents prepared by the Receiving Party that contain, reflect, or are derived from any of the foregoing.
+
+1.2 "Representative" means, with respect to a Party, such Party's directors, officers, employees, agents, advisors (including legal counsel, accountants, and financial advisors), and contractors who have a need to know the Confidential Information for the Purpose and who are bound by obligations of confidentiality no less restrictive than those contained herein.
+
+
+2. EXCLUSIONS FROM CONFIDENTIAL INFORMATION
+
+Confidential Information shall not include information that the Receiving Party can demonstrate by competent evidence:
+
+    (a) was already in the public domain at the time of disclosure through no fault of the Receiving Party;
+
+    (b) becomes publicly available after disclosure through no fault of the Receiving Party;
+
+    (c) was already known to the Receiving Party, without restriction, at the time of disclosure, as evidenced by written records;
+
+    (d) is independently developed by the Receiving Party without reference to or use of the Disclosing Party's Confidential Information, as evidenced by written records; or
+
+    (e) is lawfully received by the Receiving Party from a third party who is not under any obligation of confidentiality with respect to such information.
+
+
+3. OBLIGATIONS OF THE RECEIVING PARTY
+
+3.1 The Receiving Party shall:
+
+    (a) hold and maintain all Confidential Information in strict confidence;
+
+    (b) not disclose Confidential Information to any third party except as expressly permitted under this Agreement;
+
+    (c) use the Confidential Information solely for the Purpose;
+
+    (d) protect Confidential Information using at least the same degree of care it uses to protect its own confidential information of like importance, but in no event less than a reasonable degree of care;
+
+{% if requires_security_measures %}
+    (e) implement and maintain appropriate technical and organizational security measures to protect Confidential Information, including but not limited to:
+        - Encryption of Confidential Information in transit and at rest
+        - Access controls limiting access to authorized Representatives only
+        - Regular security assessments and audits
+        - Incident response procedures for any unauthorized disclosure
+{% endif %}
+
+    (f) promptly notify the Disclosing Party of any unauthorized use or disclosure of Confidential Information; and
+
+    (g) cooperate with the Disclosing Party in any effort to regain control of Confidential Information and prevent further unauthorized use or disclosure.
+
+
+4. PERMITTED DISCLOSURE
+
+4.1 The Receiving Party may disclose Confidential Information to its Representatives who:
+
+    (a) have a legitimate need to know the Confidential Information for the Purpose;
+
+    (b) have been informed of the confidential nature of the information; and
+
+    (c) are bound by written obligations of confidentiality no less restrictive than those set forth in this Agreement.
+
+4.2 The Receiving Party shall be responsible for any breach of this Agreement by any of its Representatives.
+
+{% if allows_subcontractor_disclosure %}
+4.3 The Receiving Party may disclose Confidential Information to subcontractors engaged to assist with the Purpose, provided that:
+
+    (a) such subcontractors have been approved in advance in writing by the Disclosing Party;
+
+    (b) such subcontractors are bound by written obligations of confidentiality no less restrictive than those set forth in this Agreement; and
+
+    (c) the Receiving Party remains fully responsible for any breach by such subcontractors.
+{% endif %}
+
+
+5. COMPELLED DISCLOSURE
+
+5.1 If the Receiving Party is compelled by law, regulation, or legal process (including a court order or governmental directive) to disclose Confidential Information, the Receiving Party shall:
+
+    (a) provide the Disclosing Party with prompt written notice of such requirement prior to disclosure (to the extent legally permitted);
+
+    (b) cooperate with the Disclosing Party in seeking a protective order or other appropriate remedy to limit such disclosure; and
+
+    (c) disclose only that portion of the Confidential Information that is legally required to be disclosed.
+
+5.2 Any Confidential Information disclosed pursuant to this Section shall continue to be treated as Confidential Information for all other purposes under this Agreement.
+
+
+{% if includes_ip_clause %}
+6. INTELLECTUAL PROPERTY
+
+6.1 Nothing in this Agreement shall be construed as granting any license or rights, by implication or otherwise, to any Confidential Information, patent, trademark, copyright, or other intellectual property right.
+
+6.2 All Confidential Information shall remain the exclusive property of the Disclosing Party.
+
+6.3 The Receiving Party shall not reverse engineer, disassemble, or decompile any prototypes, software, or other tangible objects that embody the Disclosing Party's Confidential Information.
+{% endif %}
+
+
+{% if duration_years %}
+7. TERM AND DURATION
+
+7.1 This Agreement shall commence on the Effective Date and shall remain in effect for {{ duration_years }} year{{ "s" if duration_years > 1 else "" }} from the Effective Date, unless terminated earlier in accordance with Section 7.2.
+
+7.2 Either Party may terminate this Agreement at any time by providing {{ termination_notice_days | default(30) }} days' prior written notice to the other Party.
+
+7.3 The obligations of confidentiality under Section 3 shall survive termination or expiration of this Agreement for a period of {{ confidentiality_survival_years | default(5) }} years from the date of disclosure of the applicable Confidential Information.
+{% else %}
+7. TERM AND DURATION
+
+7.1 This Agreement shall commence on the Effective Date and shall remain in effect for {{ duration_years | default(5) }} year{{ "s" if duration_years | default(5) > 1 else "" }} from the Effective Date, unless terminated earlier in accordance with Section 7.2.
+
+7.2 Either Party may terminate this Agreement at any time by providing {{ termination_notice_days | default(30) }} days' prior written notice to the other Party.
+
+7.3 The obligations of confidentiality under Section 3 shall survive termination or expiration of this Agreement for a period of {{ confidentiality_survival_years | default(5) }} years from the date of disclosure of the applicable Confidential Information.
+{% endif %}
+
+
+8. RETURN OR DESTRUCTION OF CONFIDENTIAL INFORMATION
+
+8.1 Upon the Disclosing Party's written request, or upon termination or expiration of this Agreement, the Receiving Party shall promptly:
+
+    (a) return to the Disclosing Party all originals, copies, and summaries of Confidential Information in any form; or
+
+    (b) destroy all such Confidential Information and certify such destruction in writing.
+
+{% if allows_retention_of_copies %}
+8.2 Notwithstanding Section 8.1, the Receiving Party may retain:
+
+    (a) one copy of Confidential Information solely for legal/compliance archival purposes; and
+
+    (b) copies automatically retained in standard backup or archival systems, provided such copies are not accessed except for legal/compliance purposes.
+{% endif %}
+
+
+9. NO WARRANTY
+
+9.1 ALL CONFIDENTIAL INFORMATION IS PROVIDED "AS IS." THE DISCLOSING PARTY MAKES NO WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTY OF ACCURACY, COMPLETENESS, PERFORMANCE, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+
+9.2 THE DISCLOSING PARTY SHALL NOT BE LIABLE FOR ANY DAMAGES ARISING FROM THE RECEIVING PARTY'S USE OF OR RELIANCE UPON ANY CONFIDENTIAL INFORMATION.
+
+
+10. REMEDIES
+
+10.1 The Parties acknowledge that Confidential Information is valuable and unique, and that a breach of this Agreement may cause irreparable harm to the Disclosing Party for which monetary damages alone would be an inadequate remedy.
+
+10.2 Accordingly, the Disclosing Party shall be entitled to seek injunctive and other equitable relief to prevent or restrain any actual or threatened breach of this Agreement, without the necessity of proving actual damages or posting any bond.
+
+10.3 The rights and remedies provided herein are cumulative and are in addition to any other rights and remedies available at law, in equity, or otherwise.
+
+
+11. NON-SOLICITATION
+
+{% if includes_non_solicitation %}
+11.1 During the term of this Agreement and for a period of {{ non_solicitation_period | default(12) }} months following its termination or expiration, neither Party shall, directly or indirectly, solicit, recruit, or hire, or attempt to solicit, recruit, or hire, any employee, contractor, or consultant of the other Party who has been introduced to such Party in connection with the Purpose, without the prior written consent of the other Party.
+
+11.2 This restriction shall not apply to general employment solicitations not specifically targeted at such individuals.
+{% else %}
+11.1 The Parties acknowledge that they may engage in general business activities that do not involve the use or disclosure of Confidential Information.
+{% endif %}
+
+
+12. ASSIGNMENT
+
+12.1 Neither Party may assign or transfer this Agreement or any of its rights or obligations hereunder without the prior written consent of the other Party, except that either Party may assign this Agreement to a successor in connection with a merger, acquisition, or sale of all or substantially all of its assets.
+
+
+13. GOVERNING LAW AND DISPUTE RESOLUTION
+
+13.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}, without regard to its conflict of laws principles.
+
+{% if dispute_resolution_method == "arbitration" %}
+13.2 Any dispute arising out of or relating to this Agreement shall be submitted to binding arbitration in {{ arbitration_seat | default("Colombo, Sri Lanka") }} in accordance with the rules of the {{ arbitration_body | default("Sri Lanka Arbitration Centre") }}. The arbitral tribunal shall consist of {{ arbitrator_count | default(1) }} arbitrator{{ "s" if arbitrator_count | default(1) > 1 else "" }}. The language of the arbitration shall be English.
+
+13.3 Notwithstanding Section 13.2, either Party may seek injunctive or other equitable relief from any court of competent jurisdiction.
+{% elif dispute_resolution_method == "mediation" %}
+13.2 Any dispute arising out of or relating to this Agreement shall first be submitted to mediation in {{ mediation_seat | default("Colombo, Sri Lanka") }} in accordance with the rules of the {{ mediation_body | default("Sri Lanka Mediation Centre") }}.
+
+13.3 If the dispute is not resolved through mediation within {{ mediation_period | default(60) }} days, either Party may submit the dispute to the courts specified in Section 13.4.
+
+13.4 The courts of {{ jurisdiction_court | default("Sri Lanka") }} shall have exclusive jurisdiction to hear and determine any disputes arising out of or relating to this Agreement.
+{% else %}
+13.2 The courts of {{ jurisdiction_court | default("Sri Lanka") }} shall have exclusive jurisdiction to hear and determine any disputes arising out of or relating to this Agreement.
+{% endif %}
+
+
+14. GENERAL PROVISIONS
+
+14.1 Entire Agreement. This Agreement constitutes the entire agreement between the Parties with respect to the subject matter hereof and supersedes all prior and contemporaneous agreements, understandings, negotiations, and discussions, whether oral or written.
+
+14.2 Amendment. This Agreement may not be amended or modified except by a written instrument signed by both Parties.
+
+14.3 Waiver. No failure or delay by either Party in exercising any right, power, or privilege under this Agreement shall operate as a waiver thereof.
+
+14.4 Severability. If any provision of this Agreement is held to be invalid or unenforceable, the remaining provisions shall continue in full force and effect.
+
+14.5 Notices. All notices required or permitted under this Agreement shall be in writing and shall be deemed delivered when:
+
+    (a) delivered personally;
+    (b) sent by confirmed email to the addresses specified below; or
+    (c) received or refused after deposit with a nationally recognized overnight courier.
+
+14.6 Counterparts. This Agreement may be executed in counterparts, each of which shall be deemed an original, but all of which together shall constitute one and the same instrument.
+
+{% if includes_electronic_signatures %}
+14.7 Electronic Signatures. The Parties agree that this Agreement may be executed by electronic signatures, which shall be deemed to be original signatures for all purposes. Electronic signatures shall be valid and binding to the same extent as original signatures, in accordance with the Electronic Transactions Act No. 19 of 2006 (as amended) of Sri Lanka.
+{% endif %}
+
+14.8 No Agency. Nothing contained in this Agreement shall be construed to create a partnership, joint venture, or agency relationship between the Parties.
+
+14.9 Confidentiality of Agreement. The existence and terms of this Agreement shall be treated as Confidential Information by both Parties.
+
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+
+PARTY A: {{ party_a_legal_name | default("_______________") }}
+
+Signature: _________________________________
+
+Name: {{ party_a_signatory_name | default("_______________") }}
+
+Title: {{ party_a_signatory_title | default("_______________") }}
+
+Date: _________________________________
+
+
+PARTY B: {{ party_b_legal_name | default("_______________") }}
+
+Signature: _________________________________
+
+Name: {{ party_b_signatory_name | default("_______________") }}
+
+Title: {{ party_b_signatory_title | default("_______________") }}
+
+Date: _________________________________
+
+
+{% if includes_witnesses %}
+WITNESSES:
+
+Witness 1:
+
+Signature: _________________________________
+
+Name: _________________________________
+
+NIC No.: _________________________________
+
+Address: _________________________________
+
+
+Witness 2:
+
+Signature: _________________________________
+
+Name: _________________________________
+
+NIC No.: _________________________________
+
+Address: _________________________________
+{% endif %}

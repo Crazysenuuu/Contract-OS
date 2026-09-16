@@ -1,0 +1,95 @@
+MASTER SERVICES AGREEMENT
+
+THIS MASTER SERVICES AGREEMENT (this "Agreement") is made and entered into as of {{ effective_date | default("__________") }} (the "Effective Date"), by and between:
+
+{{ provider_name | default("[Service Provider]") }}, {{ provider_address | default("[Address]") }} ("Provider"); and
+
+{{ client_name | default("[Client]") }}, {{ client_address | default("[Address]") }} ("Client").
+
+Each of Provider and Client is referred to as a "Party" and together as the "Parties".
+
+RECITALS
+
+WHEREAS, Client desires to engage Provider to perform services more particularly described in one or more Statements of Work issued under this Agreement; and
+
+WHEREAS, Provider desires to perform such services on the terms and conditions set forth herein.
+
+NOW, THEREFORE, in consideration of the mutual covenants contained herein, and for other good and valuable consideration, the receipt and sufficiency of which are hereby acknowledged, the Parties agree as follows:
+
+1.  ENGAGEMENT OF SERVICES. Provider shall provide to Client the services, deliverables, and other work products described in each Statement of Work executed in accordance with Section 2. Each Statement of Work shall specify the scope, fees, milestones, and delivery schedule for the services to be performed thereunder.
+
+2.  STATEMENTS OF WORK. The parties may, from time to time during the Term, enter into Statements of Work ("SOW"). Each SOW shall be in writing, signed by both Parties, and shall identify: (i) the services to be performed; (ii) deliverables and milestones; (iii) fees and payment schedule; and (iv) any specific terms supplementing or overriding this Agreement. In the event of any conflict between a SOW and this Agreement, the terms of this Agreement shall govern unless the SOW expressly states that it overrides a specific provision of this Agreement and is approved in writing by both Parties.
+
+3.  RESPONSIBILITIES.
+    3.1  Provider shall perform the services in a professional and workmanlike manner, in accordance with industry standards and applicable laws, and shall comply with Client's reasonable policies of which Provider has been notified.
+    3.2  Client shall provide such access to its personnel, systems, facilities, and information as is reasonably necessary for Provider to perform the services, shall make timely decisions, and shall otherwise cooperate in good faith in the performance of the services.
+
+4.  FEES AND PAYMENT.
+    4.1  Fees. Client shall pay Provider the fees set forth in each SOW (the "Fees"). All Fees are exclusive of applicable taxes unless otherwise stated.
+    4.2  Invoicing. Provider shall invoice Client in accordance with the billing cycle set out in the relevant SOW ({{ billing_cycle | default("[billing cycle]") }}). Client shall pay each invoice within {{ payment_terms | default("Net 30") }} of receipt.
+    4.3  Taxes. Client shall pay all sales, use, value added, goods and services, withholding, and other taxes that are
+     payable with respect to the Fees, other than taxes on Provider's net income.
+    4.4  Expenses. Unless otherwise stated in a SOW, the Fees include all expenses incurred by Provider in performing the services. Out-of-pocket expenses pre-approved in writing by Client shall be reimbursed within thirty (30) days of an itemized invoice.
+
+5.  INTELLECTUAL PROPERTY.
+    5.1  Pre-Existing Materials. Each Party retains all right, title, and interest in and to its pre-existing intellectual property and materials ("Pre-Existing Materials").
+    5.2  Work Product. All deliverables and work product produced for Client under a SOW ("Work Product") shall be owned by Client upon full payment of the Fees for that SOW, and Provider hereby assigns to Client all rights, title, and interest in and to the Work Product.
+    5.3  License to Provider Materials. To the extent any Work Product incorporates Provider Pre-Existing Materials, Provider grants Client a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to use such materials solely as incorporated in, and to support use of, the Work Product.
+
+6.  WARRANTIES. Provider warrants that: (i) the services will be performed in a professional and workmanlike manner; (ii) the services and Work Product will conform to the specifications set out in the applicable SOW; and (iii) the Work Product does not and will not infringe the intellectual property rights of any third party.
+
+7.  LIMITATION OF LIABILITY. IN NO EVENT SHALL EITHER PARTY BE LIABLE TO THE OTHER FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOSS OF PROFITS, REVENUE, OR DATA, ARISING OUT OF OR IN CONNECTION WITH THIS AGREEMENT. EXCEPT FOR A PARTY'S INDEMNIFICATION OBLIGATIONS UNDER SECTION 8 OR ITS BREACH OF CONFIDENTIALITY OBLIGATIONS UNDER SECTION 10, EACH PARTY'S AGGREGATE LIABILITY UNDER THIS AGREEMENT SHALL NOT EXCEED THE TOTAL FEES PAID OR PAYABLE BY CLIENT TO PROVIDER DURING THE TWELVE (12) MONTHS IMMEDIATELY PRECEDING THE EVENT GIVING RISE TO THE CLAIM.
+
+8.  INDEMNIFICATION. Each Party (the "Indemnifying Party") shall defend, indemnify, and hold harmless the other Party from and against any third-party claim, loss, or expense (including reasonable attorneys' fees) arising out of the Indemnifying Party's gross negligence or willful misconduct, or, with respect to Provider, an allegation that the Work Product infringes a third party's intellectual property rights.
+
+9.  CONFIDENTIALITY.
+    9.1  Definition. "Confidential Information" means all non-public information disclosed by one Party to the other in connection with this Agreement, whether oral or written, including business plans, financial data, customer information, technology, and the terms of this Agreement.
+    9.2  Obligations. The receiving Party shall (i) use Confidential Information solely in connection with this Agreement; (ii) protect it with at least the same degree of care it uses for its own confidential information; and (iii) not disclose it to any third party without the disclosing Party's prior written consent, except to its employees and advisors on a need-to-know basis who are bound by confidentiality obligations.
+    9.3  Survival. The obligations of this Section 9 shall survive termination of this Agreement for a period of five (5) years, or with respect to trade secrets, for so long as such information remains a trade secret.
+
+10. DATA PROTECTION. Provider shall process any personal data provided by Client in accordance with applicable data protection laws and shall maintain reasonable administrative, physical, and technical safeguards to protect Confidential Information and personal data from unauthorized access, use, or disclosure.
+
+11. COMPLIANCE. Each Party shall comply with all applicable laws, rules, and regulations in performing its obligations under this Agreement, including laws relating to anti-bribery, anti-corruption, sanctions, and export controls.
+
+12. INSURANCE. Provider shall maintain, at its own expense, commercial general liability insurance, workers' compensation insurance as required by law, and such other insurance as is reasonably required by Client, with coverage limits of at least USD 1,000,000 per occurrence, and shall provide certificates of insurance upon Client's reasonable request.
+
+13. TERM AND RENEWAL. This Agreement shall commence on the Effective Date and, unless earlier terminated in accordance with this Agreement, shall continue for an initial term of {{ term_months | default("12") }} months (the "Initial Term"). Thereafter, this Agreement shall renew automatically for successive renewal terms of equal duration (each a "Renewal Term") unless either Party gives the other written notice of non-renewal at least {{ notice_period_days | default("30") }} days prior to the end of the then-current term{% if auto_renew %}. However, if auto-renewal is not enabled, this Agreement shall not renew at the end of the then-current term{% endif %} (each renewal term together with the Initial Term, the "Term").
+
+14. TERMINATION.
+    14.1  For Convenience. Either Party may terminate any SOW or this Agreement for convenience upon ninety (90) days' prior written notice to the other Party.
+    14.2  For Cause. Either Party may terminate this Agreement or any SOW immediately upon written notice if the other Party (i) materially breaches this Agreement and fails to cure such breach within thirty (30) days of receiving written notice thereof, or (ii) becomes insolvent, makes a general assignment for the benefit of creditors, or commences or has commenced against it any proceeding under any bankruptcy or insolvency law.
+    14.3  Effect of Termination. Upon termination: (i) each Party shall pay all Fees accrued and unpaid as of the effective date of termination; (ii) Client shall pay Provider for all services, deliverables, and Work Product performed or produced up to the date of termination on a pro rata basis; and (iii) Sections 5, 7, 8, 9, 10, 22, and 23 shall survive.
+
+15. FORCE MAJEURE. Neither Party shall be liable for any delay or failure to perform caused by events beyond its reasonable control, including acts of God, war, terrorism, epidemics, pandemics, fire, flood, or governmental action, provided that the affected Party gives prompt written notice and uses reasonable efforts to resume performance.
+
+16. GOVERNING LAW. This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("[jurisdiction]") }}, without regard to its conflict of laws principles.
+
+17. DISPUTE RESOLUTION. [Dispute resolution method: {{ dispute_resolution | default("arbitration") }}] shall be used for any dispute arising out of or in connection with this Agreement not resolved through good-faith negotiation between the Parties.
+
+18. ASSIGNMENT. Neither Party may assign or transfer this Agreement, in whole or in part, without the prior written consent of the other Party, except that either Party may assign this Agreement in connection with a merger, acquisition, or sale of all or substantially all of its assets. Any purported assignment in violation of this Section shall be void.
+
+19. NOTICES. All notices under this Agreement shall be in writing and shall be deemed duly given when delivered personally, sent by confirmed email or fax, or three (3) business days after deposit with a nationally recognized overnight courier, to the addresses first set forth above.
+
+20. ENTIRE AGREEMENT. This Agreement, together with all Statements of Work, constitutes the entire agreement between the Parties with respect to the subject matter hereof and supersedes all prior discussions, agreements, and understandings. No amendment to this Agreement shall be effective unless in writing and signed by both Parties.
+
+21. AMENDMENT. This Agreement may be amended only by a written instrument signed by both Parties.
+
+22. INDEMNIFICATION AND CONFIDENTIALITY SURVIVAL. Sections 8, 9, and 10 shall survive the expiration or termination of this Agreement for any reason.
+
+23. CONFLICT AND SEVERABILITY. If any provision of this Agreement is held to be invalid or unenforceable, the remaining provisions shall continue in full force and effect. This Agreement may be executed in counterparts, each of which shall be deemed an original.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+{{ provider_name | default("[Service Provider]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________
+
+{{ client_name | default("[Client]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________

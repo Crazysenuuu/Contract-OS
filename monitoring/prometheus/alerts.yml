@@ -1,0 +1,119 @@
+groups:
+  - name: contractos_alerts
+    rules:
+      # High Translation Queue Size
+      - alert: HighTranslationQueueSize
+        expr: contractos_translation_queue_pending > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High translation queue size"
+          description: "Translation queue has {{ $value }} pending items"
+
+      # Too Many Failed Translations
+      - alert: TooManyFailedTranslations
+        expr: contractos_translation_queue_failed > 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Too many failed translations"
+          description: "{{ $value }} translations have failed"
+
+      # High API Error Rate
+      - alert: HighAPIErrorRate
+        expr: rate(contractos_api_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate is {{ $value | humanizePercentage }}"
+
+      # Backend Service Down
+      - alert: BackendServiceDown
+        expr: up{job="contractos-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend service is down"
+          description: "ContractOS backend has been down for more than 1 minute"
+
+      # High Response Time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(contractos_api_response_time_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API response time"
+          description: "95th percentile response time is {{ $value }}s"
+
+      # Database Connection Issues
+      - alert: DatabaseConnectionIssues
+        expr: contractos_db_translation_queue_size == 0 and contractos_translation_queue_pending > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection issues"
+          description: "Unable to read database metrics"
+
+      # Low Translation Throughput
+      - alert: LowTranslationThroughput
+        expr: contractos_translation_throughput_last_hour < 10 and contractos_translation_queue_pending > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low translation throughput"
+          description: "Only {{ $value }} translations completed in the last hour with {{ $value }} pending"
+
+      # === Migration-Specific Alerts ===
+
+      # Migration Failed
+      - alert: MigrationFailed
+        expr: contractos_migrations_failed > 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Database migration failed"
+          description: "{{ $value }} migration(s) have failed. Investigate immediately."
+          runbook_url: "https://docs.contractos.dev/runbooks/migration-failure"
+
+      # Migration High Rollback Rate
+      - alert: MigrationHighRollbackRate
+        expr: contractos_migrations_rollbacks > (contractos_migrations_successful * 0.2)
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High migration rollback rate"
+          description: "{{ $value }} rollbacks detected. Consider improving migration testing."
+
+      # Migration Slow
+      - alert: MigrationSlow
+        expr: contractos_migration_avg_duration > 120
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Migrations are slow"
+          description: "Average migration duration is {{ $value }}s. Consider optimizing large table migrations."
+
+      # Migration Success Rate Low
+      - alert: MigrationSuccessRateLow
+        expr: (contractos_migrations_successful / (contractos_migrations_successful + contractos_migrations_failed)) < 0.9
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Migration success rate is low"
+          description: "Success rate is {{ $value | humanizePercentage }}. Immediate investigation required."

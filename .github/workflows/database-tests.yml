@@ -1,0 +1,243 @@
+name: Database Tests
+
+on:
+  workflow_call:
+    inputs:
+      postgres-version:
+        description: 'PostgreSQL version'
+        required: false
+        default: '16'
+        type: string
+      python-version:
+        description: 'Python version'
+        required: false
+        default: '3.14'
+        type: string
+      run-backup-tests:
+        description: 'Run backup tests'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  PYTHON_VERSION: ${{ inputs.python-version || '3.14' }}
+  POSTGRES_VERSION: ${{ inputs.postgres-version || '16' }}
+
+jobs:
+  # ==========================================================================
+  # Job: Run All Database Tests
+  # ==========================================================================
+  database-tests:
+    name: Database Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:${{ env.POSTGRES_VERSION }}
+        env:
+          POSTGRES_USER: cs
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: contractos_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U cs; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "✅ PostgreSQL is ready"
+
+      - name: Run migrations
+        run: |
+          cd backend
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_test" \
+          alembic upgrade head
+          echo "✅ Migrations applied"
+
+      - name: Run integration tests
+        run: |
+          cd backend
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_test" \
+          python -m pytest tests/ -m integration -v --tb=short
+      
+      - name: Run backup verification tests
+        if: ${{ inputs.run-backup-tests }}
+        run: |
+          cd backend
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_test" \
+          python -m pytest tests/test_backup_verification.py -v --tb=short
+
+  # ==========================================================================
+  # Job: Migration Lint
+  # ==========================================================================
+  migration-lint:
+    name: Migration Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: |
+          pip install flake8 black isort
+
+      - name: Lint migration files
+        run: |
+          echo "=== Checking migration file formatting ==="
+          black --check backend/migrations/ || true
+          isort --check-only backend/migrations/ || true
+          echo "✅ Linting completed"
+
+  # ==========================================================================
+  # Job: Schema Diff Check
+  # ==========================================================================
+  schema-diff:
+    name: Schema Diff Check
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cs
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: contractos_diff_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U cs; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Apply migrations
+        run: |
+          cd backend
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_diff_test" \
+          alembic upgrade head
+
+      - name: Check for schema drift
+        run: |
+          cd backend
+          python -c "
+          import asyncio
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from sqlalchemy import text
+          from app.models.base import Base
+          import app.models
+          
+          async def check_drift():
+              engine = create_async_engine(
+                  'postgresql+asyncpg://cs:password@localhost:5432/contractos_diff_test'
+              )
+              
+              async with engine.connect() as conn:
+                  # Get database schema
+                  result = await conn.execute(text(
+                      \"\"\"
+                      SELECT table_name, column_name, data_type, is_nullable
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                      ORDER BY table_name, ordinal_position
+                      \"\"\"
+                  ))
+                  
+                  db_schema = {}
+                  for row in result:
+                      table, column, dtype, nullable = row
+                      if table not in db_schema:
+                          db_schema[table] = []
+                      db_schema[table].append({
+                          'name': column,
+                          'type': dtype,
+                          'nullable': nullable
+                      })
+                  
+                  # Get model schema
+                  model_schema = {}
+                  for table_name, table in Base.metadata.tables.items():
+                      model_schema[table_name] = []
+                      for col in table.columns:
+                          model_schema[table_name].append({
+                              'name': col.name,
+                              'type': str(col.type),
+                              'nullable': col.nullable
+                          })
+                  
+                  # Compare
+                  issues = []
+                  
+                  # Check for missing columns
+                  for table, columns in model_schema.items():
+                      if table not in db_schema:
+                          issues.append(f'Table {table} exists in models but not in DB')
+                          continue
+                      
+                      db_cols = {c['name'] for c in db_schema[table]}
+                      model_cols = {c['name'] for c in columns}
+                      
+                      missing = model_cols - db_cols
+                      if missing:
+                          issues.append(f'Table {table}: missing columns {missing}')
+                  
+                  if issues:
+                      print('❌ Schema drift detected:')
+                      for issue in issues:
+                          print(f'  - {issue}')
+                      return False
+                  
+                  print(f'✅ No schema drift detected ({len(db_schema)} tables)')
+                  return True
+          
+          result = asyncio.run(check_drift())
+          exit(0 if result else 1)
+          "

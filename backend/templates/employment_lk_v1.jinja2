@@ -1,0 +1,154 @@
+EMPLOYMENT AGREEMENT
+
+This Employment Agreement (the "Agreement") is entered into on {{ effective_date | default("_______________") }} ("Start Date") between:
+
+{{ employer_name | default("_______________") }} ("Employer"), a company duly organized and validly existing under the laws of {{ governing_law | default("Sri Lanka") }}, with its registered office at {{ employer_address | default("_______________") }},
+
+AND
+
+{{ employee_name | default("_______________") }} ("Employee"), of {{ employee_address | default("_______________") }}.
+
+The Employer and the Employee are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. POSITION AND DUTIES
+
+1.1 The Employer employs the Employee, and the Employee accepts employment with the Employer, in the position of {{ job_title | default("_______________") }} (the "Position").
+
+1.2 The Employee shall perform such duties and responsibilities as are customarily associated with the Position and as the Employer may reasonably direct from time to time, subject to the terms of this Agreement.
+
+1.3 The Employee shall devote their full professional time, attention, and abilities to the faithful and diligent performance of the duties assigned to them and shall serve the Employer exclusively during the term of employment.
+
+1.4 The Employee shall report to {{ reports_to | default("the Employer's designated manager") }}.
+
+
+2. COMPENSATION
+
+2.1 The Employer shall pay the Employee an annual gross salary of {{ salary | default("_______________") }} {{ currency | default("LKR") }} (the "Salary"), payable in accordance with the Employer's standard payroll schedule, net of any required statutory deductions and withholdings.
+
+2.2 The Employer may, in its sole discretion, pay the Employee bonuses or other incentive compensation as determined from time to time. Any such payments are discretionary and do not form part of the Salary.
+
+2.3 The Employer shall reimburse the Employee for reasonable, documented, out-of-pocket business expenses incurred in the performance of the Employee's duties with prior written approval.
+
+
+3. BENEFITS
+
+3.1 The Employee shall be entitled to such employee benefits as the Employer generally provides to employees holding comparable positions, as such benefits may change from time to time.
+
+3.2 The Employee shall be entitled to {{ annual_leave_days | default(14) }} days of paid annual leave per year and {{ sick_leave_days | default(7) }} days of paid sick leave per year, accrued and taken in accordance with the Employer's policies.
+
+3.3 The Employee shall be entitled to such other statutory benefits (including gratuity, employees' provident fund, and employees' trust fund contributions) as are required by applicable law.
+
+
+4. PROBATION PERIOD
+
+{% if probation_period and probation_period != "None" %}
+4.1 The Employee shall serve a probationary period of {{ probation_period }} (the "Probation Period") commencing on the Start Date.
+
+4.2 During the Probation Period, either Party may terminate this Agreement by providing {{ probation_notice_days | default(14) }} days' written notice to the other Party.
+
+4.3 Upon satisfactory completion of the Probation Period, the Employee's employment shall continue on the terms of this Agreement, and the Probation Period shall be deemed part of the term of employment.
+{% else %}
+4.1 No probationary period applies to the Employee's employment.
+{% endif %}
+
+
+5. WORKING HOURS AND LOCATION
+
+5.1 The Employee's normal working hours shall be as prescribed by the Employer's policies and applicable law.
+
+5.2 The Employee shall perform their duties at the Employer's premises at {{ work_location | default("the Employer's principal office") }}, or at such other location as the Employer may reasonably require from time to time.
+
+
+6. CONFIDENTIALITY
+
+6.1 "Confidential Information" means any non-public information of or relating to the Employer, its affiliates, customers, suppliers, or employees, including but not limited to trade secrets, business plans, financial data, customer and supplier lists, pricing, and technical data.
+
+6.2 The Employee shall not, during or after the term of employment, disclose Confidential Information to any third party or use it for any purpose other than the performance of employment duties, except as required by law.
+
+6.3 Upon termination of employment, the Employee shall return to the Employer all documents, materials, and data containing Confidential Information in the Employee's possession or control.
+
+6.4 The obligations of confidentiality shall survive termination of this Agreement indefinitely.
+
+
+7. NON-COMPETE
+
+7.1 During the term of employment and for a period of {{ non_compete_period_months | default(12) }} months following termination of employment (the "Restricted Period"), the Employee shall not, directly or indirectly, within {{ non_compete_region | default("Sri Lanka") }}:
+
+    (a) engage in, own, manage, operate, or be employed by any business that competes with the Employer's business; or
+
+    (b) solicit, attempt to solicit, or accept any business from any customer of the Employer with whom the Employee had material contact during the term of employment.
+
+7.2 The covenants in this Section are intended to be reasonable and in consideration of the Employee's compensation under this Agreement.
+
+
+8. NON-SOLICITATION
+
+8.1 During the Restricted Period, the Employee shall not, directly or indirectly, solicit, recruit, or hire, or attempt to solicit, recruit, or hire, any employee or contractor of the Employer who was engaged by the Employer at any time during the term of employment.
+
+8.2 This Section shall not apply to general employment solicitations not specifically targeted at such individuals.
+
+
+9. INTELLECTUAL PROPERTY
+
+9.1 The Employee agrees that all inventions, works of authorship, designs, and other intellectual property created by the Employee during the term of employment that arise out of or relate to the Employee's duties (the "Works") shall be the sole and exclusive property of the Employer.
+
+9.2 The Employee assigns to the Employer all right, title, and interest in and to the Works, and shall promptly disclose and execute all documents reasonably necessary to perfect or protect the Employer's rights in the Works.
+
+9.3 The Employer shall own all intellectual property rights in any materials or content produced by the Employee in the course of employment.
+
+
+10. TERMINATION
+
+10.1 This Agreement shall continue until terminated in accordance with this Section.
+
+10.2 Either Party may terminate this Agreement at any time by providing {{ notice_period | default("1 month") }} written notice to the other Party.
+
+10.3 The Employer may terminate this Agreement immediately upon written notice for the Employee's material breach of this Agreement, gross misconduct, or as otherwise permitted by law.
+
+10.4 Upon termination of employment, the Employee shall be entitled to payment for all accrued but unpaid salary and any benefits required by applicable law, and shall return all Employer property and Confidential Information.
+
+10.5 The provisions of Sections 6, 7, 8, and 9 shall survive termination of this Agreement.
+
+
+11. GOVERNING LAW AND DISPUTE RESOLUTION
+
+11.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}, without regard to its conflict of laws principles.
+
+11.2 Any dispute arising out of or relating to this Agreement shall first be referred to the appropriate labour tribunal or court of competent jurisdiction in {{ governing_law | default("Sri Lanka") }}.
+
+
+12. GENERAL PROVISIONS
+
+12.1 Entire Agreement. This Agreement constitutes the entire agreement between the Parties with respect to the subject matter hereof and supersedes all prior and contemporaneous agreements, understandings, and discussions, whether oral or written.
+
+12.2 Amendment. This Agreement may not be amended or modified except by a written instrument signed by both Parties.
+
+12.3 Waiver. No failure or delay by either Party in exercising any right, power, or privilege under this Agreement shall operate as a waiver thereof.
+
+12.4 Severability. If any provision of this Agreement is held to be invalid or unenforceable, the remaining provisions shall continue in full force and effect, and the offending provision shall be construed to the maximum extent permitted by law.
+
+12.5 Notices. All notices required or permitted under this Agreement shall be in writing and shall be deemed delivered when delivered personally, sent by confirmed email, or deposited with a nationally recognized overnight courier.
+
+12.6 Counterparts. This Agreement may be executed in counterparts, each of which shall be deemed an original, but all of which together shall constitute one and the same instrument.
+
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Start Date.
+
+
+EMPLOYER: {{ employer_name | default("_______________") }}
+
+Signature: _________________________________
+
+Name: _________________________________
+
+Title: _________________________________
+
+Date: _________________________________
+
+
+EMPLOYEE: {{ employee_name | default("_______________") }}
+
+Signature: _________________________________
+
+Date: _________________________________

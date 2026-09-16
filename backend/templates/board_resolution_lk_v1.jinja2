@@ -1,0 +1,24 @@
+{% if company_name %}{{ company_name }}{% else %}[COMPANY NAME]{% endif %}
+(Company Registration No. {{ company_registration_number | default("_______________") }})
+
+WRITTEN RESOLUTION OF THE BOARD OF DIRECTORS
+(Passed pursuant to the Articles of Association)
+
+Date: {{ meeting_date | default(effective_date) | default("_______________") }}
+
+{% if directors_present %}PRESENT: {{ directors_present }}{% endif %}
+
+{% if resolution_subject %}BACKGROUND
+
+{{ resolution_subject }}{% endif %}
+
+IT WAS RESOLVED THAT:
+
+{{ resolution_text | default("________________________________________________________________") }}
+
+{% if signatory_name %}CERTIFIED A TRUE COPY
+
+_______________________________
+{{ signatory_name }}
+{{ signatory_title | default("Chairperson / Director") }}
+Date: {{ meeting_date | default(effective_date) | default("_______________") }}{% endif %}

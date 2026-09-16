@@ -1,0 +1,144 @@
+SERVICE AGREEMENT
+
+This Service Agreement ("Agreement") is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ provider_name | default("_______________") }} ("Provider"), a company with its principal place of business at {{ provider_address | default("_______________") }},
+
+AND
+
+{{ client_name | default("_______________") }} ("Client"), with its principal place of business at {{ client_address | default("_______________") }}.
+
+The Provider and the Client are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. ENGAGEMENT OF SERVICES
+
+1.1 The Client engages the Provider, and the Provider agrees to provide, the services described below (the "Services"):
+
+{{ service_description | default("Description of services to be provided by Provider.") }}
+
+1.2 The Services shall be performed with reasonable skill and care and in accordance with the standards of the industry, applicable law, and the terms of this Agreement.
+
+1.3 The Provider shall assign qualified personnel to perform the Services and shall ensure such personnel act in the best interests of the Client while performing the Services.
+
+
+2. FEES AND PAYMENT
+
+2.1 In consideration for the Services, the Client shall pay the Provider the service fee of {{ service_fee | default("_______________") }} {{ currency | default("LKR") }} (the "Fees").
+
+2.2 Unless otherwise agreed in writing, the Fees shall be payable on {{ payment_terms | default("Net 30") }} from the date of the Provider's invoice.
+
+2.3 The Provider shall invoice the Client for the Fees. All amounts are exclusive of any applicable taxes, which the Client shall be responsible for paying to the extent imposed by law.
+
+2.4 Late payments shall accrue interest at the rate of {{ late_payment_interest | default(1.5) }}% per month on any amount outstanding after the due date.
+
+
+3. TERM, RENEWAL AND TERMINATION
+
+3.1 This Agreement shall commence on the Effective Date and continue for the initial term of {{ term_length | default("1 year") }} (the "Initial Term").
+
+{% if auto_renew %}
+3.2 This Agreement shall automatically renew for successive periods of equal length unless either Party provides written notice of non-renewal at least {{ notice_period_days | default(30) }} days prior to the end of the then-current term.
+{% else %}
+3.2 This Agreement shall not renew automatically. A renewal or extension shall require a separate written agreement between the Parties.
+{% endif %}
+
+3.3 Either Party may terminate this Agreement:
+
+    (a) for convenience, upon {{ termination_notice_days | default(30) }} days' prior written notice to the other Party; or
+
+    (b) for material breach, immediately upon written notice if the other Party fails to cure a material breach within {{ cure_period_days | default(15) }} days after written notice of such breach.
+
+3.4 Upon termination, the Client shall pay all Fees earned or accrued through the effective date of termination, and each Party shall return or destroy any materials or information of the other Party in accordance with this Agreement.
+
+
+4. CONFIDENTIALITY
+
+4.1 "Confidential Information" means any non-public information disclosed by one Party (the "Disclosing Party") to the other Party (the "Receiving Party"), including but not limited to business plans, customer information, financial data, technical data, trade secrets, and pricing.
+
+4.2 The Receiving Party shall hold Confidential Information in strict confidence and shall not disclose it to any third party or use it except as necessary to perform its obligations under this Agreement.
+
+4.3 The obligations of confidentiality shall survive termination or expiration of this Agreement for a period of {{ confidentiality_survival_years | default(3) }} years.
+
+
+5. INTELLECTUAL PROPERTY
+
+5.1 Any intellectual property owned by a Party prior to this Agreement shall remain that Party's property.
+
+5.2 Any intellectual property created by the Provider in the performance of the Services shall be owned by {{ ip_owner | default("the Provider") }} unless otherwise agreed in writing.
+
+5.3 The Provider grants the Client a non-exclusive, non-transferable, royalty-free license to use any materials delivered under this Agreement solely for the Client's internal business purposes.
+
+
+6. WARRANTIES
+
+6.1 The Provider warrants that the Services will be performed in a professional and workmanlike manner and will conform to the specifications set out in this Agreement.
+
+6.2 The Provider warrants that it has the right, power, and authority to enter into this Agreement and to grant the rights granted herein.
+
+6.3 Each Party warrants that it has the full power and authority to enter into this Agreement.
+
+
+7. LIMITATION OF LIABILITY
+
+7.1 EXCEPT FOR BREACH OF CONFIDENTIALITY OBLIGATIONS, INFRINGEMENT OF INTELLECTUAL PROPERTY RIGHTS, FRAUD OR WILLFUL MISCONDUCT, NEITHER PARTY SHALL BE LIABLE TO THE OTHER FOR ANY INDIRECT, INCIDENTAL, CONSEQUENTIAL, SPECIAL, OR PUNITIVE DAMAGES RELATING TO OR ARISING OUT OF THIS AGREEMENT.
+
+7.2 EXCEPT AS SET FORTH ABOVE, EACH PARTY'S TOTAL AGGREGATE LIABILITY UNDER THIS AGREEMENT SHALL NOT EXCEED THE TOTAL AMOUNT OF FEES PAID OR PAYABLE BY THE CLIENT TO THE PROVIDER UNDER THIS AGREEMENT IN THE {{ liability_period_months | default(12) }} MONTHS IMMEDIATELY PRECEDING THE EVENT GIVING RISE TO SUCH LIABILITY.
+
+
+8. INDEMNIFICATION
+
+8.1 The Provider shall indemnify, defend, and hold harmless the Client from and against any claims, damages, and costs arising out of the Provider's gross negligence, willful misconduct, or breach of this Agreement.
+
+8.2 The Client shall indemnify, defend, and hold harmless the Provider from and against any claims, damages, and costs arising out of the Client's gross negligence, willful misconduct, or breach of this Agreement.
+
+
+9. GOVERNING LAW AND DISPUTE RESOLUTION
+
+9.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}, without regard to its conflict of laws principles.
+
+9.2 Any dispute arising out of or relating to this Agreement shall be resolved by {{ dispute_resolution | default("negotiation in good faith") }}, and if not resolved, submitted to the courts of {{ governing_law | default("Sri Lanka") }} which shall have exclusive jurisdiction.
+
+
+10. GENERAL PROVISIONS
+
+10.1 Entire Agreement. This Agreement constitutes the entire agreement between the Parties with respect to the subject matter hereof and supersedes all prior and contemporaneous agreements, understandings, negotiations, and discussions, whether oral or written.
+
+10.2 Amendment. This Agreement may not be amended or modified except by a written instrument signed by both Parties.
+
+10.3 Waiver. No failure or delay by either Party in exercising any right, power, or privilege under this Agreement shall operate as a waiver thereof.
+
+10.4 Severability. If any provision of this Agreement is held to be invalid or unenforceable, the remaining provisions shall continue in full force and effect.
+
+10.5 Assignment. Neither Party may assign or transfer this Agreement or any of its rights or obligations hereunder without the prior written consent of the other Party, except to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.
+
+10.6 Independent Contractor. The Provider is an independent contractor and nothing in this Agreement shall create an employment, partnership, joint venture, or agency relationship between the Parties.
+
+10.7 Notices. All notices required or permitted under this Agreement shall be in writing and shall be deemed delivered when delivered personally, sent by confirmed email, or deposited with a nationally recognized overnight courier.
+
+10.8 Counterparts. This Agreement may be executed in counterparts, each of which shall be deemed an original, but all of which together shall constitute one and the same instrument.
+
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+
+PROVIDER: {{ provider_name | default("_______________") }}
+
+Signature: _________________________________
+
+Name: _________________________________
+
+Title: _________________________________
+
+Date: _________________________________
+
+
+CLIENT: {{ client_name | default("_______________") }}
+
+Signature: _________________________________
+
+Name: _________________________________
+
+Title: _________________________________
+
+Date: _________________________________

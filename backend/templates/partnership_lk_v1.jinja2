@@ -1,0 +1,52 @@
+PARTNERSHIP AGREEMENT
+
+THIS PARTNERSHIP AGREEMENT (this "Agreement") is made and entered into as of {{ effective_date | default("__________") }} (the "Effective Date"), by and among the parties identified as partners under this Agreement (each a "Partner" and collectively the "Partners"):
+
+{{ partners | default("[Partners]") }}
+
+1.  FORMATION. The Partners hereby form a general partnership under the name {{ partnership_name | default("[Partnership Name]") }} (the "Partnership"), governed by the laws of the jurisdiction set out in Section 11 and, to the extent applicable, the provisions of any applicable partnership law, as the same may be amended. This Agreement constitutes the partnership agreement of the Partnership.
+
+2.  PURPOSE. The purpose of the Partnership is to conduct the business described as follows and such other lawful business as the Partners may agree:
+
+    {{ purpose | default("[Purpose of Partnership]") }}
+
+3.  CAPITAL CONTRIBUTIONS. Each Partner shall make the capital contributions described below, which shall be satisfied in cash or property as agreed:
+
+    {{ capital_contribution | default("[Capital Contribution]") }}
+
+No Partner shall be required to make any additional capital contribution without its prior written consent. Capital accounts shall be maintained for each Partner in accordance with generally accepted accounting principles consistently applied.
+
+4.  PROFIT AND LOSS. The net profits and net losses of the Partnership shall be allocated among the Partners as follows: {{ profit_split | default("[Profit & Loss Split]") }}. Distributions of available cash shall be made as the Partners determine from time to time, in proportion to the profit allocation shares in effect at the time of each distribution.
+
+5.  MANAGEMENT AND DECISION MAKING. The Partnership shall be managed in accordance with: {{ management | default("[Management Structure]") }}. In particular:
+
+    5.1  Ordinary Decisions. Ordinary decisions in the conduct of the Partnership's business shall be made by a majority in interest of the Partners.
+    5.2  Extraordinary Decisions. Decisions outside the ordinary course of business, including admissions of new Partners, dissolution, the sale of all or substantially all of the Partnership's assets, or the incurrence of indebtedness beyond agreed limits, shall require the unanimous consent of the Partners.
+
+6.  FIDUCIARY DUTIES. Each Partner shall act in good faith and deal fairly with the Partnership and with the other Partners. A Partner acting in good faith shall not be liable to the Partnership or the other Partners for any error of judgment or for any act it believed was in the best interests of the Partnership.
+
+7.  ACCOUNTING AND RECORDS. The Partnership shall maintain accurate books and records reflecting the financial condition of the Partnership, and shall prepare and file all tax returns and other reports required by law. Each Partner shall have access to the Partnership's books and records during reasonable business hours.
+
+8.  WITHDRAWAL AND ADMISSION OF PARTNERS.
+    8.1  Withdrawal. A Partner may withdraw from the Partnership upon written notice to the other Partners. The Partnership shall purchase the withdrawing Partner's interest for its then-current value, determined as of the withdrawal date, payable within ninety (90) days.
+    8.2  Admission. No new Partner shall be admitted without the unanimous written consent of the existing Partners.
+
+9.  DISSOLUTION. The Partnership shall dissolve and wind up upon the earliest of: (i) the expiration of its term of {{ term_months | default("12") }} months from the Effective Date, if not extended by unanimous consent of the Partners; (ii) the unanimous agreement of the Partners; (iii) the occurrence of an event of dissolution under applicable partnership law; or (iv) the withdrawal, death, bankruptcy, incapacity, or expulsion of a Partner, unless the remaining Partners unanimously agree to continue the business. Upon dissolution, the Partnership's assets shall be liquidated, and its liabilities paid, and the remaining proceeds distributed to the Partners in accordance with their capital accounts and profit allocation shares.
+
+10. DISPUTE RESOLUTION. Any dispute arising out of or in connection with this Agreement shall first be resolved through good-faith negotiation among the Partners. If not resolved within sixty (60) days, the dispute shall be [submitted to mediation followed by arbitration / referred to the courts] of the applicable jurisdiction.
+
+11. GOVERNING LAW. This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("[jurisdiction]") }}.
+
+12. ENTIRE AGREEMENT. This Agreement constitutes the entire agreement among the Partners with respect to the Partnership and supersedes all prior agreements and understandings. This Agreement may be amended only by a written instrument signed by all Partners.
+
+IN WITNESS WHEREOF, the Partners have executed this Agreement as of the Effective Date.
+
+Each of the Partners:
+
+Signature: ____________________________
+Name: __________________________
+Date: __________________________
+
+Signature: ____________________________
+Name: __________________________
+Date: __________________________

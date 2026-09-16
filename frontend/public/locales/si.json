@@ -1,0 +1,36 @@
+{
+  "common": {
+    "save": "සුරකින්න",
+    "cancel": "අවලංගු කරන්න",
+    "edit": "සංස්කරණය කරන්න",
+    "delete": "මකන්න",
+    "confirm": "තහවුරු කරන්න",
+    "loading": "පූරණය වෙමින් පවතී...",
+    "search": "සොයන්න"
+  },
+  "agreements": {
+    "title": "ගිවිසුම්",
+    "new_agreement": "නව ගිවිසුමක්",
+    "drafts": "කෙටුම්පත්",
+    "pending_signature": "අත්සන් කිරීමට ඇති",
+    "completed": "සම්පූර්ණයි",
+    "sign_now": "දැන් අත්සන් කරන්න",
+    "status": {
+      "draft": "කෙටුම්පත",
+      "review": "සමාලෝචනය",
+      "approved": "අනුමතයි",
+      "signed": "අත්සන් කර ඇත"
+    }
+  },
+  "dashboard": {
+    "overview": "දළ විශ්ලේෂණය",
+    "recent_activity": "මෑත ක්‍රියාකාරකම්",
+    "action_required": "අවධානය අවශ්‍යයි"
+  },
+  "signing": {
+    "biometric_prompt": "අත්සන් කිරීමට අනන්‍යතාව තහවුරු කරන්න",
+    "consent_text": "මම මෙම ගිවිසුම කියවා තේරුම් ගෙන ඇති අතර ඊට එකඟ වෙමි.",
+    "success": "සාර්ථකයි",
+    "error": "දෝෂයකි"
+  }
+}

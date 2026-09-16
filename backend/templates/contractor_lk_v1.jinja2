@@ -1,0 +1,53 @@
+INDEPENDENT CONTRACTOR AGREEMENT
+
+THIS INDEPENDENT CONTRACTOR AGREEMENT (this "Agreement") is made and entered into as of {{ effective_date | default("__________") }} (the "Effective Date"), by and between {{ company_name | default("[Engaging Company]") }} ("Company") and {{ contractor_name | default("[Contractor]") }} ("Contractor").
+
+1.  ENGAGEMENT. Company engages Contractor to provide the services described in this Agreement (the "Services"), and Contractor accepts such engagement, on the terms and conditions set forth in this Agreement.
+
+    {{ services_description | default("[Services to be Provided]") }}
+
+2.  COMPENSATION.
+    2.1  Fees. Company shall pay Contractor {{ compensation | default("__________") }}, on a {{ compensation_basis | default("hourly") }} basis. Contractor shall invoice Company for Services performed, and Company shall pay each invoice within the parties' agreed payment terms.
+    2.2  Expenses. Contractor shall bear all expenses incurred in performing the Services unless the parties agree in writing that Company shall reimburse specific pre-approved expenses.
+
+3.  INDEPENDENT CONTRACTOR STATUS.
+    3.1  No Employment Relationship. The Parties expressly acknowledge and agree that Contractor is an independent contractor and NOT an employee or agent of Company. Nothing in this Agreement creates an employment, agency, joint venture, or partnership relationship between the Parties.
+    3.2  Control. Contractor shall perform the Services as an independent business, exercising independent judgment and control over the manner and means of performance, and shall be responsible for the results obtained. Company controls only the results to be accomplished and general expectations of performance.
+    3.3  Not an Agent. Contractor has no authority to bind Company by contract, representation, or act, except as expressly authorized in writing by Company.
+    3.4  No Benefits. Contractor is not entitled to, and shall not be eligible to receive, any employee benefits of Company, including paid leave, health insurance, retirement contributions, or workers' compensation coverage provided by Company.
+
+4.  TAXES AND OBLIGATIONS. Contractor is solely responsible for all federal, state, and local taxes, social security contributions, self-employment taxes, and other contributions or withholdings relating to the compensation paid under this Agreement. Company will not withhold income tax or make contributions to social security or any other payroll tax or benefit on Contractor's behalf. Contractor shall obtain and maintain any permits, licenses, and registrations required for the performance of the Services.
+
+5.  INTELLECTUAL PROPERTY.
+    5.1  Work Product. All work product, deliverables, materials, and inventions created by Contractor in connection with the Services (the "Work Product") shall be the sole and exclusive property of Company, and Contractor hereby assigns to Company all right, title, and interest in and to the Work Product, including all intellectual property rights therein.
+    5.2  Pre-Existing Materials. Contractor retains ownership of any pre-existing tools, libraries, and materials it brings to the engagement, and grants Company a perpetual, worldwide, royalty-free license to use such materials solely as incorporated into the Work Product.
+
+6.  CONFIDENTIALITY. Contractor shall hold in confidence and shall not disclose to any third party, and shall protect from unauthorized use, all Confidential Information of Company. "Confidential Information" includes all non-public technical and business information disclosed in connection with this Agreement, including trade secrets, client lists, financial data, and business plans. Contractor may use Confidential Information solely to perform the Services. This Section shall survive termination of this Agreement for five (5) years.
+
+7.  NON-SOLICITATION. During the Term and for twelve (12) months thereafter, Contractor shall not directly or indirectly solicit, recruit, or hire any employee or independent contractor of Company, or encourage any such person to terminate their relationship with Company.
+
+8.  NON-COMPETE. During the Term and for twelve (12) months thereafter, Contractor shall not, without Company's prior written consent, provide competing services of the same nature as the Services to any client of Company with whom Contractor had material contact, where such client is a Company client with which Company has an active commercial relationship.
+
+9.  LIABILITY AND INSURANCE. Contractor shall maintain commercially reasonable insurance coverage for the Services and shall comply with all applicable laws and regulations in performing the Services.
+
+10. TERM AND TERMINATION.
+    10.1 Term. This Agreement shall commence on the Effective Date and continue for a term of {{ term_months | default("12") }} months (the "Term").
+    10.2 Termination. Either Party may terminate this Agreement at any time upon written notice. Upon termination, Company shall pay Contractor for all Services satisfactorily performed to the effective date of termination.
+
+11. GOVERNING LAW. This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("[jurisdiction]") }}.
+
+12. ENTIRE AGREEMENT. This Agreement constitutes the entire agreement between the Parties with respect to the engagement of Contractor and supersedes all prior agreements and understandings, whether written or oral. No amendment shall be effective unless in writing and signed by both Parties.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+{{ contractor_name | default("[Contractor]") }}
+
+Signature: ____________________________
+Date: __________________________
+
+{{ company_name | default("[Engaging Company]") }}
+
+Signature: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________

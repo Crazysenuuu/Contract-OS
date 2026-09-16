@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 15, 23, 42;
+  --background-start-rgb: 248, 250, 252;
+  --background-end-rgb: 241, 245, 249;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background:
+    radial-gradient(circle at 15% 50%, rgba(104, 117, 245, 0.12), transparent 30%),
+    radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.12), transparent 30%),
+    radial-gradient(circle at 50% 100%, rgba(168, 85, 247, 0.08), transparent 35%),
+    linear-gradient(to bottom right, rgb(var(--background-start-rgb)), rgb(var(--background-end-rgb)));
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* Floating decorative orbs behind the glass panels */
+.orb {
+  position: fixed;
+  border-radius: 9999px;
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .glass-panel {
+    @apply bg-white/70 backdrop-blur-md border border-white/50 shadow-xl;
+  }
+  
+  .glass-card {
+    @apply bg-white/60 backdrop-blur-sm border border-white/40 shadow-lg hover:shadow-xl transition-all duration-300;
+  }
+
+  /* Micro-interaction for table rows */
+  .row-hover {
+    @apply relative transition-all duration-200 hover:bg-white/50;
+  }
+  .row-hover::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(to bottom, #5850ec, #8b5cf6);
+    opacity: 0;
+    transform: scaleY(0.4);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .row-hover:hover::before {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}

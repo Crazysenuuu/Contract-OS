@@ -1,0 +1,30 @@
+global:
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@contractos.com'
+  smtp_auth_username: 'alerts@contractos.com'
+  smtp_auth_password: 'your-password'
+
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'web.hook'
+
+receivers:
+  - name: 'web.hook'
+    email_configs:
+      - to: 'admin@contractos.com'
+        send_resolved: true
+        headers:
+          Subject: '{{ .GroupLabels.alertname }}'
+    webhook_configs:
+      - url: 'http://localhost:5001/'
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      alertname: 'BackendServiceDown'
+    target_match:
+      alertname: 'HighAPIErrorRate'
+    equal: ['alertname', 'dev', 'instance']

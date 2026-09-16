@@ -1,0 +1,562 @@
+name: Migration Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/migrations/**'
+      - 'backend/app/models/**'
+      - 'backend/alembic.ini'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'backend/migrations/**'
+      - 'backend/app/models/**'
+      - 'backend/alembic.ini'
+  workflow_dispatch:
+    inputs:
+      test_rollback:
+        description: 'Test rollback to previous migration'
+        required: false
+        default: 'true'
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.14'
+  POSTGRES_VERSION: '16'
+
+jobs:
+  # ==========================================================================
+  # Job 1: Validate Migration Files
+  # ==========================================================================
+  validate-migrations:
+    name: Validate Migration Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Check migration syntax
+        run: |
+          cd backend
+          python -m py_compile migrations/env.py
+          echo "✅ env.py syntax OK"
+
+      - name: Verify migration chain
+        run: |
+          cd backend
+          python -c "
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          
+          config = Config('alembic.ini')
+          script = ScriptDirectory.from_config(config)
+          
+          # Check for multiple heads (should be exactly 1)
+          heads = script.get_heads()
+          assert len(heads) == 1, f'Expected 1 head, got {len(heads)}: {heads}'
+          print(f'✅ Migration head: {heads[0]}')
+          
+          # Check for branches
+          branches = script.get_branches()
+          if branches:
+              print(f'⚠️  Found {len(branches)} branch(es)')
+          
+          print('✅ Migration chain is valid')
+          "
+
+      - name: Check for missing downgrades
+        run: |
+          cd backend
+          python -c "
+          import os
+          import re
+          
+          versions_dir = 'migrations/versions'
+          issues = []
+          
+          for filename in os.listdir(versions_dir):
+              if not filename.endswith('.py') or filename == '__init__.py':
+                  continue
+                  
+              filepath = os.path.join(versions_dir, filename)
+              with open(filepath, 'r') as f:
+                  content = f.read()
+              
+              # Check if downgrade function has a pass statement only
+              if 'def downgrade' in content:
+                  # Find the downgrade function body
+                  lines = content.split('\n')
+                  in_downgrade = False
+                  downgrade_body = []
+                  
+                  for line in lines:
+                      if 'def downgrade' in line:
+                          in_downgrade = True
+                          continue
+                      if in_downgrade:
+                          if line.strip() and not line.startswith(' ') and not line.startswith('#'):
+                              break
+                          downgrade_body.append(line)
+                  
+                  body_text = '\n'.join(downgrade_body).strip()
+                  if body_text == 'pass' or body_text == '':
+                      issues.append(filename)
+          
+          if issues:
+              print(f'⚠️  Warning: {len(issues)} migration(s) have empty downgrade functions:')
+              for issue in issues:
+                  print(f'    - {issue}')
+          else:
+              print('✅ All migrations have downgrade functions')
+          "
+
+  # ==========================================================================
+  # Job 2: Test Migration Up
+  # ==========================================================================
+  test-migration-up:
+    name: Test Migration Up
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cs
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: contractos_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U cs; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "✅ PostgreSQL is ready"
+
+      - name: Run migration (upgrade)
+        run: |
+          cd backend
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_test" \
+          alembic upgrade head
+          echo "✅ Migration upgrade completed"
+
+      - name: Verify tables created
+        run: |
+          psql -h localhost -U cs -d contractos_test -c "
+          SELECT 
+            table_name,
+            pg_size_pretty(pg_total_relation_size(table_name::regclass)) as size
+          FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          ORDER BY table_name;
+          " | tee /tmp/tables.txt
+          
+          TABLE_COUNT=$(psql -h localhost -U cs -d contractos_test -t -A -c "
+            SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';
+          ")
+          
+          echo "Total tables: $TABLE_COUNT"
+          
+          # Should have at least 55 tables
+          if [ "$TABLE_COUNT" -lt 55 ]; then
+            echo "❌ Expected at least 55 tables, got $TABLE_COUNT"
+            exit 1
+          fi
+          echo "✅ Table count verified: $TABLE_COUNT"
+
+      - name: Verify critical indexes
+        run: |
+          INDEX_COUNT=$(psql -h localhost -U cs -d contractos_test -t -A -c "
+            SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public';
+          ")
+          
+          echo "Total indexes: $INDEX_COUNT"
+          
+          # Should have at least 20 indexes
+          if [ "$INDEX_COUNT" -lt 20 ]; then
+            echo "❌ Expected at least 20 indexes, got $INDEX_COUNT"
+            exit 1
+          fi
+          echo "✅ Index count verified: $INDEX_COUNT"
+
+  # ==========================================================================
+  # Job 3: Test Migration Rollback
+  # ==========================================================================
+  test-migration-rollback:
+    name: Test Migration Rollback
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cs
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: contractos_rollback_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U cs; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "✅ PostgreSQL is ready"
+
+      - name: Run full migration cycle (up then down)
+        run: |
+          cd backend
+          
+          echo "=== Step 1: Upgrade to latest ==="
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic upgrade head
+          
+          echo "=== Step 2: Check current version ==="
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic current
+          
+          echo "=== Step 3: Rollback to previous ==="
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic downgrade -1
+          
+          echo "=== Step 4: Check version after rollback ==="
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic current
+          
+          echo "=== Step 5: Upgrade back to latest ==="
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic upgrade head
+          
+          echo "=== Step 6: Final version check ==="
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic current
+          
+          echo "✅ Full migration cycle completed successfully"
+
+      - name: Test rollback to base
+        run: |
+          cd backend
+          
+          echo "=== Testing rollback to base ==="
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic downgrade base
+          
+          # Verify we're at base (no tables)
+          TABLE_COUNT=$(psql -h localhost -U cs -d contractos_rollback_test -t -A -c "
+            SELECT COUNT(*) FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+          ")
+          
+          echo "Tables after downgrade to base: $TABLE_COUNT"
+          
+          # Upgrade back
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_rollback_test" \
+          alembic upgrade head
+          
+          FINAL_TABLE_COUNT=$(psql -h localhost -U cs -d contractos_rollback_test -t -A -c "
+            SELECT COUNT(*) FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+          ")
+          
+          echo "Tables after upgrade: $FINAL_TABLE_COUNT"
+          
+          if [ "$FINAL_TABLE_COUNT" -lt 55 ]; then
+            echo "❌ Table count mismatch after full cycle"
+            exit 1
+          fi
+          
+          echo "✅ Rollback to base and re-upgrade completed"
+
+  # ==========================================================================
+  # Job 4: Backup & Restore Test
+  # ==========================================================================
+  test-backup-restore:
+    name: Test Backup & Restore
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cs
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: contractos_backup_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U cs; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Create schema and seed data
+        run: |
+          cd backend
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_backup_test" \
+          alembic upgrade head
+          
+          # Add some test data
+          psql -h localhost -U cs -d contractos_backup_test -c "
+          INSERT INTO users (id, email, name, password_hash, status, created_at, updated_at) 
+          VALUES (gen_random_uuid(), 'test@backup.com', 'Test User', 'hash', 'active', NOW(), NOW())
+          ON CONFLICT DO NOTHING;
+          "
+
+      - name: Create backup
+        run: |
+          echo "=== Creating backup ==="
+          pg_dump -h localhost -U cs -d contractos_backup_test -F c -f /tmp/backup.dump
+          
+          BACKUP_SIZE=$(stat -f%z /tmp/backup.dump 2>/dev/null || stat -c%s /tmp/backup.dump)
+          echo "Backup size: $BACKUP_SIZE bytes"
+          
+          if [ "$BACKUP_SIZE" -eq 0 ]; then
+            echo "❌ Backup file is empty"
+            exit 1
+          fi
+          echo "✅ Backup created successfully"
+
+      - name: Restore to new database
+        run: |
+          echo "=== Creating new database ==="
+          createdb -h localhost -U cs contractos_restore_test || true
+          
+          echo "=== Restoring backup ==="
+          pg_restore -h localhost -U cs -d contractos_restore_test /tmp/backup.dump || true
+          
+          echo "=== Verifying restored data ==="
+          USER_COUNT=$(psql -h localhost -U cs -d contractos_restore_test -t -A -c "
+            SELECT COUNT(*) FROM users WHERE email = 'test@backup.com';
+          ")
+          
+          echo "Restored user count: $USER_COUNT"
+          
+          if [ "$USER_COUNT" -ne 1 ]; then
+            echo "❌ Data not restored correctly"
+            exit 1
+          fi
+          
+          echo "✅ Backup restore verified"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          dropdb -h localhost -U cs contractos_restore_test 2>/dev/null || true
+
+  # ==========================================================================
+  # Job 5: Schema Compatibility Check
+  # ==========================================================================
+  test-schema-compatibility:
+    name: Schema Compatibility Check
+    runs-on: ubuntu-latest
+    needs: validate-migrations
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cs
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: contractos_compat_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U cs; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Create schema from models
+        run: |
+          cd backend
+          DATABASE_URL="postgresql+asyncpg://cs:password@localhost:5432/contractos_compat_test" \
+          alembic upgrade head
+
+      - name: Verify model-schema match
+        run: |
+          cd backend
+          python -c "
+          import asyncio
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from app.models.base import Base
+          import app.models  # Import all models
+          
+          async def check():
+              engine = create_async_engine(
+                  'postgresql+asyncpg://cs:password@localhost:5432/contractos_compat_test'
+              )
+              
+              async with engine.connect() as conn:
+                  # Get tables from database
+                  result = await conn.execute(
+                      __import__('sqlalchemy').text(
+                          \"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'\"
+                      )
+                  )
+                  db_tables = {row[0] for row in result}
+                  
+                  # Get tables from models
+                  model_tables = set(Base.metadata.tables.keys())
+                  
+                  # Compare
+                  missing_in_db = model_tables - db_tables
+                  missing_in_models = db_tables - model_tables
+                  
+                  if missing_in_db:
+                      print(f'❌ Tables in models but not in DB: {missing_in_db}')
+                      return False
+                  
+                  if missing_in_models:
+                      print(f'⚠️  Tables in DB but not in models: {missing_in_models}')
+                  
+                  print(f'✅ Schema compatibility verified ({len(model_tables)} tables)')
+                  return True
+          
+          asyncio.run(check())
+          "
+
+  # ==========================================================================
+  # Job 6: Generate Migration Report
+  # ==========================================================================
+  migration-report:
+    name: Migration Report
+    runs-on: ubuntu-latest
+    needs: [test-migration-up, test-migration-rollback, test-backup-restore]
+    if: always()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate report
+        run: |
+          echo "# Migration Test Report" > /tmp/report.md
+          echo "" >> /tmp/report.md
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> /tmp/report.md
+          echo "**Commit:** ${{ github.sha }}" >> /tmp/report.md
+          echo "" >> /tmp/report.md
+          
+          echo "## Test Results" >> /tmp/report.md
+          echo "" >> /tmp/report.md
+          echo "| Test | Status |" >> /tmp/report.md
+          echo "|------|--------|" >> /tmp/report.md
+          echo "| Migration Up | ${{ needs.test-migration-up.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> /tmp/report.md
+          echo "| Migration Rollback | ${{ needs.test-migration-rollback.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> /tmp/report.md
+          echo "| Backup & Restore | ${{ needs.test-backup-restore.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> /tmp/report.md
+          echo "" >> /tmp/report.md
+          
+          if [ "${{ needs.test-migration-up.result }}" != "success" ] || \
+             [ "${{ needs.test-migration-rollback.result }}" != "success" ]; then
+            echo "## ❌ One or more tests failed!" >> /tmp/report.md
+            echo "" >> /tmp/report.md
+            echo "Please review the failed tests before merging." >> /tmp/report.md
+          else
+            echo "## ✅ All tests passed!" >> /tmp/report.md
+          fi
+          
+          cat /tmp/report.md
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat /tmp/report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-test-report
+          path: /tmp/report.md

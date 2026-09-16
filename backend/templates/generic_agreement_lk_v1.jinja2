@@ -1,0 +1,160 @@
+GENERIC AGREEMENT
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ party_a_name | default("_______________") }} ("Party A"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ party_b_name | default("_______________") }} ("Party B"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+Party A and Party B are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. PURPOSE
+
+1.1 The purpose of this Agreement is:
+
+{{ purpose | default("State the commercial purpose of this Agreement.") }}
+
+1.2 The Parties agree to perform their respective obligations under this Agreement in good faith and in accordance with applicable law.
+
+
+2. SCOPE OF ENGAGEMENT
+
+2.1 The Parties agree to the description and scope set out below:
+
+{% if services_description %}2.1.1 Services to be provided: {{ services_description }}
+{% endif %}{% if goods_description %}2.1.1 Goods to be supplied: {{ goods_description }}
+{% if quantity %}2.1.2 Quantity: {{ quantity }}
+{% endif %}{% if unit_price %}2.1.3 Unit price: {{ unit_price }} {{ currency | default("LKR") }}
+{% endif %}{% endif %}{% if scope_of_grant %}2.1.4 Scope of grant: {{ scope_of_grant }}
+{% endif %}{% if ip_description %}2.1.5 Intellectual property: {{ ip_description }}
+{% endif %}{% if deliverables %}2.1.6 Deliverables: {{ deliverables }}
+{% endif %}{% if campaign_description %}2.1.7 Campaign / deliverables: {{ campaign_description }}
+{% endif %}{% if dispute_subject %}2.1.8 Subject matter: {{ dispute_subject }}
+{% endif %}
+
+2.2 Personnel assigned under this Agreement shall act in the best interests of [the engaging party] and in accordance with the standards of the industry and applicable law.
+
+2.3 The Parties acknowledge that the nature of the obligations under this Agreement is determined by the purpose set out in Clause 1 and the scope set out in this Clause 2.
+
+
+3. FEES, PAYMENT AND FINANCIAL TERMS
+
+{% if principal_amount %}
+3.1 Principal amount: {{ principal_amount }} {{ currency | default("LKR") }}
+3.2 Interest rate: {{ interest_rate | default("_______________") }}% per annum
+3.3 Repayment schedule: {{ repayment_schedule | default("As agreed by the Parties") }}
+3.4 Security / collateral: {{ collateral | default("None unless otherwise agreed") }}
+{% elif rent_amount %}
+3.1 Rent: {{ rent_amount }} {{ currency | default("LKR") }} payable {{ rent_frequency | default("monthly") }}
+3.2 Security deposit: {{ security_deposit | default("As agreed by the Parties") }}
+3.3 Rent shall be paid in full on the due date. Late payment shall accrue interest at a commercially reasonable rate.
+{% else %}
+3.1 In consideration for the obligations under this Agreement, [the paying party] shall pay [the provider] {{ settlement_amount | default("fees") }} {{ currency | default("LKR") }} in accordance with the payment terms agreed between the Parties.
+
+3.2 Unless otherwise agreed in writing, fees shall be payable on Net 30 terms from the date of invoice. Late payments shall accrue interest at 1.5% per month on any amount outstanding after the due date.
+{% endif %}
+
+3.3 All amounts are exclusive of applicable taxes, which shall be borne as required by law.
+
+
+4. TERM, RENEWAL AND TERMINATION
+
+4.1 This Agreement shall commence on the Effective Date and continue for the term of {{ term_months | default("12") }} months (the "Term").
+
+4.2 Either Party may terminate this Agreement upon material breach by the other Party that remains uncured for 14 days after written notice, or by mutual written agreement, or immediately upon insolvency of the other Party.
+
+4.3 Obligations that by their nature survive termination, including confidentiality, intellectual property, indemnity and limitation of liability, shall survive.
+
+4.4 Upon termination, each Party shall return or destroy the other Party's confidential information and any property of the other Party in its possession.
+
+
+5. CONFIDENTIALITY
+
+5.1 Each Party agrees to maintain the confidentiality of all Confidential Information disclosed by the other Party and shall not disclose such information to any third party without the prior written consent of the disclosing party.
+
+5.2 This obligation shall survive termination for {{ confidentiality_period | default("3") }} years or as otherwise required by law.
+
+
+6. INTELLECTUAL PROPERTY
+
+6.1 Except as expressly set out in this Agreement, each Party retains all rights in its pre-existing intellectual property.
+
+{% if ip_ownership %}6.2 Ownership of intellectual property created under this Agreement: {{ ip_ownership }}
+{% else %}6.2 Ownership of intellectual property created under this Agreement shall be as expressly agreed in writing by the Parties.{% endif %}
+
+
+7. REPRESENTATIONS, WARRANTIES AND LIMITATION OF LIABILITY
+
+7.1 Each Party represents and warrants that it has the power and authority to enter into and perform this Agreement.
+
+7.2 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, REVENUES, DATA, USE OR GOODWILL, WHETHER INCURRED DIRECTLY OR INDIRECTLY.
+
+7.3 THE AGGREGATE LIABILITY OF EACH PARTY UNDER THIS AGREEMENT SHALL NOT EXCEED THE AMOUNTS PAID OR PAYABLE UNDER THIS AGREEMENT IN THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM.
+
+
+8. DISPUTE RESOLUTION AND GOVERNING LAW
+
+8.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+8.2 Either Party may seek injunctive or other equitable relief to protect its intellectual property or confidential information in any court of competent jurisdiction.
+
+8.3 Any other dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} administered in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+9. GENERAL PROVISIONS
+
+9.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings, whether written or oral.
+
+9.2 No amendment or waiver of any provision of this Agreement shall be binding unless in writing and signed by both Parties.
+
+9.3 Nothing in this Agreement shall be construed to create a partnership, joint venture, agency, or employment relationship between the Parties.
+
+9.4 This Agreement may be executed in counterparts, each of which shall be deemed an original.
+
+9.5 Force Majeure: neither Party shall be liable for failure to perform its obligations to the extent caused by events outside its reasonable control.
+
+{% if service_levels or uptime_target or response_time_hours %}
+10. SERVICE LEVELS
+
+{% if uptime_target %}10.1 The service shall be available not less than {{ uptime_target }}% of the time, measured monthly, excluding scheduled maintenance notified in advance.{% endif %}
+{% if response_time_hours %}10.2 The provider shall respond to support requests within {{ response_time_hours }} hours of receipt.{% endif %}
+{% if resolution_time_hours %}10.3 The provider shall use commercially reasonable efforts to resolve support requests within {{ resolution_time_hours }} hours.{% endif %}
+{% if service_credits %}10.4 Service credits: {{ service_credits }}{% endif %}
+{% if escalation_contacts %}10.5 Escalation: {{ escalation_contacts }}{% endif %}
+
+{% endif %}{% if governance_structure or share_transfer or reserved_matters %}
+10. GOVERNANCE
+
+{% if governance_structure %}10.1 Governance structure: {{ governance_structure }}{% endif %}
+{% if share_capital %}10.2 Share capital: {{ share_capital }}{% endif %}
+{% if share_transfer %}10.3 Transfer of shares: {{ share_transfer }}{% endif %}
+{% if reserved_matters %}10.4 Reserved matters requiring approval: {{ reserved_matters }}{% endif %}
+{% if board_representation %}10.5 Board representation: {{ board_representation }}{% endif %}
+{% if tag_along_rights and tag_along_rights == "Yes" %}10.6 Tag-along rights apply: a shareholder receiving an offer for shares must include minority shareholders on the same terms.{% endif %}
+{% if drag_along_rights and drag_along_rights == "Yes" %}10.7 Drag-along rights apply: majority shareholders may require minority shareholders to join a sale on the same terms.{% endif %}
+{% if dividend_policy %}10.8 Dividend policy: {{ dividend_policy }}{% endif %}
+{% if deadlock_resolution %}10.9 Deadlock resolution: {{ deadlock_resolution }}{% endif %}
+
+{% endif %}
+
+
+MUTUAL SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For Party A:
+
+Signature: _______________________________
+Name: _______________________________
+Title: _______________________________
+Date: _______________________________
+
+For Party B:
+
+Signature: _______________________________
+Name: _______________________________
+Title: _______________________________
+Date: _______________________________

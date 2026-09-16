@@ -1,0 +1,58 @@
+SOFTWARE-AS-A-SERVICE SUBSCRIPTION AGREEMENT
+
+THIS SOFTWARE-AS-A-SERVICE SUBSCRIPTION AGREEMENT (this "Agreement") is made and entered into as of {{ effective_date | default("__________") }} (the "Effective Date"), by and between {{ provider_name | default("[Service Provider]") }} ("Provider") and {{ client_name | default("[Customer]") }} ("Customer").
+
+NOW, THEREFORE, in consideration of the mutual covenants contained herein, the Parties agree as follows:
+
+1.  SUBSCRIPTION SERVICES. Subject to the terms of this Agreement, Provider shall provide Customer with a subscription to use the software-as-a-service offering described in the order form or subscription plan set out as {{ subscription_plan | default("[Plan / Tier]") }} (the "Service") for up to {{ seats_number | default("1") }} authorized users (each a "User"). Customer may access and use the Service only for its internal business purposes during the Term, in accordance with the documentation published by Provider.
+
+2.  SERVICE LEVELS. Provider shall use commercially reasonable efforts to maintain an uptime for the Service of at least {{ uptime_sla | default("99.9") }}% measured monthly (the "SLA"). If Provider fails to meet the SLA, Customer shall be entitled to service credits as set out in Provider's service level documentation, subject to the Exclusions described therein.
+
+3.  SUPPORT. Provider shall provide technical support to Customer during the Term at the support levels described in its published support policy.
+
+4.  FEES AND PAYMENT.
+    4.1  Fees. Customer shall pay the subscription fees set forth in the applicable order (the "Subscription Fees") of {{ subscription_fee | default("__________") }}, billed {{ billing_frequency | default("monthly") }} in advance. Subscription Fees are exclusive of applicable taxes.
+    4.2  Taxes. Customer shall pay all applicable taxes, duties, and levies imposed in connection with this Agreement, other than taxes on Provider's net income.
+    4.3  Renewal Pricing. Provider may adjust Subscription Fees upon renewal of the Term by providing Customer written notice at least thirty (30) days prior to the end of the then-current Term.
+
+5.  USE RESTRICTIONS. Customer shall not, and shall not permit any third party to: (i) license, sublicense, sell, resell, rent, lease, transfer, assign, or distribute the Service; (ii) reverse engineer, decompile, disassemble, or otherwise attempt to discover the source code of the Service; (iii) copy, modify, or create derivative works of the Service or its documentation; (iv) access or use the Service to build a competing product; or (v) circumvent or attempt to circumvent any access control or security measure of the Service.
+
+6.  CUSTOMER DATA. Customer owns all right, title, and interest in and to the data that Customer or its Users submits to the Service (the "Customer Data"). Customer grants Provider a limited, non-exclusive, non-transferable right and license to use the Customer Data solely to provide, maintain, and support the Service and to comply with law. Provider shall not access Customer Data except (i) to provide the Service, (ii) as directed by Customer, or (iii) as required by law.
+
+7.  PRIVACY AND DATA PROTECTION. Provider shall process personal data in Customer Data in accordance with the terms of this Agreement and applicable data protection laws, and shall maintain appropriate technical and organizational measures to protect personal data against unauthorized or unlawful processing and against accidental loss, destruction, or damage.
+
+8.  SECURITY. Provider shall implement and maintain appropriate security safeguards, including encryption of data in transit and at rest, access controls, monitoring, and incident response procedures, consistent with industry standards.
+
+9.  INTELLECTUAL PROPERTY. As between the Parties, Provider owns all right, title, and interest in and to the Service, its software, and all related documentation. This Agreement does not grant Customer any ownership interest in the Service, other than the limited subscription rights expressly granted in this Agreement. Provider may use usage data derived from the Service in an aggregated and de-identified form for analytics and service improvement.
+
+10. CONFIDENTIALITY. Each Party (the "Receiving Party") shall (i) use the other Party's Confidential Information solely in connection with this Agreement; (ii) protect it with no less than reasonable care; and (iii) not disclose it to third parties without the prior written consent of the disclosing Party. "Confidential Information" includes the terms of this Agreement, Customer Data, and all non-public business and technical information of the disclosing Party.
+
+11. WARRANTIES. Provider warrants that the Service will perform substantially in accordance with its documentation and the applicable SLA. Except as expressly set forth herein, Provider disclaims all other warranties, express or implied, including any implied warranties of merchantability, fitness for a particular purpose, and non-infringement.
+
+12. LIMITATION OF LIABILITY. IN NO EVENT SHALL EITHER PARTY BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES OR LOSS OF PROFITS OR DATA. EXCEPT FOR BREACHES OF CONFIDENTIALITY, INDEMNIFICATION OBLIGATIONS, OR INFRINGEMENT OF THE OTHER PARTY'S INTELLECTUAL PROPERTY, EACH PARTY'S MAXIMUM AGGREGATE LIABILITY UNDER THIS AGREEMENT SHALL NOT EXCEED THE SUBSCRIPTION FEES PAID OR PAYABLE BY CUSTOMER DURING THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM.
+
+13. TERM AND RENEWAL. This Agreement shall commence on the Effective Date and continue for an initial term of {{ term_months | default("12") }} months (the "Initial Term"). At the end of the Initial Term and each subsequent renewal term, this Agreement shall renew automatically for additional terms equal to the prior term unless either Party gives written notice of non-renewal at least thirty (30) days before the end of the then-current Term{{ "" if auto_renew else ", or not at all" }} (the "Term").
+
+14. SUSPENSION AND TERMINATION. Provider may suspend Service access upon seven (7) days' notice for unpaid fees, or immediately for material breach. Either Party may terminate this Agreement (i) upon thirty (30) days' notice for the other Party's uncured material breach, or (ii) immediately if the other Party is insolvent or bankrupt. Upon termination, Provider shall provide Customer with the ability to export Customer Data for a period of thirty (30) days following termination.
+
+15. GOVERNING LAW. This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("[jurisdiction]") }}.
+
+16. DISPUTE RESOLUTION. Any dispute arising out of or in connection with this Agreement shall be resolved through good-faith negotiation, followed by [mediation/arbitration/litigation] if not resolved within sixty (60) days.
+
+17. ENTIRE AGREEMENT. This Agreement, together with any order forms, constitutes the entire agreement between the Parties and supersedes all prior agreements and understandings relating to its subject matter. No amendment shall be effective unless in writing and signed by both Parties.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+{{ provider_name | default("[Service Provider]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________
+
+{{ client_name | default("[Customer]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________

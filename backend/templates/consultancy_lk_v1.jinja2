@@ -1,0 +1,47 @@
+CONSULTANCY AGREEMENT
+
+THIS CONSULTANCY AGREEMENT (this "Agreement") is made and entered into as of {{ effective_date | default("__________") }} (the "Effective Date"), by and between {{ client_name | default("[Client]") }} ("Client") and {{ consultant_name | default("[Consultant]") }} ("Consultant").
+
+1.  SERVICES. Client engages Consultant to provide the consulting services described in this Agreement (the "Services"), and Consultant accepts such engagement. The Services are as follows:
+
+    {{ services_description | default("[Consulting Services]") }}
+
+2.  DELIVERABLES. Consultant shall deliver the following deliverables in connection with the Services:
+
+    {{ deliverables | default("[List of Deliverables]") }}
+
+3.  SCHEDULING. Consultant shall perform the Services at times and locations reasonably agreed with Client, using professional judgment and standards of care appropriate to the field. Consultant shall not be required to perform work that is unsafe, unlawful, or inconsistent with its professional standards.
+
+4.  FEES AND EXPENSES. Client shall pay Consultant the consulting fee of {{ consulting_fee | default("__________") }} (the "Consulting Fee") for the Services, in accordance with the payment terms {{ payment_terms | default("Net 30") }}. The Consulting Fee is exclusive of out-of-pocket expenses pre-approved in writing by Client, which shall be reimbursed within thirty (30) days of receipt of an itemized accounting. The Consulting Fee is exclusive of applicable taxes.
+
+5.  INTELLECTUAL PROPERTY.
+    5.1  Client Ownership. The final deliverables produced by Consultant specifically for Client under this Agreement ("Work Product") shall be owned by Client upon full payment of the Consulting Fee, and Consultant hereby assigns to Client all rights, title, and interest in the Work Product, including all intellectual property rights.
+    5.2  Consultant Materials. Consultant retains ownership of its pre-existing methodologies, processes, tools, frameworks, and materials, and grants Client a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to use such materials solely as incorporated in the Work Product.
+
+6.  CONFIDENTIALITY. During and after the Term, Consultant shall hold in confidence and shall not disclose or use, except as required to perform the Services, any Confidential Information of Client. "Confidential Information" includes all non-public business, financial, technical, and strategic information disclosed by Client in connection with this Agreement. This Section shall survive termination of this Agreement for five (5) years.
+
+7.  INDEPENDENT STATUS. Consultant is an independent contractor, not an employee of Client. Consultant is not entitled to employee benefits, and Client shall not withhold taxes on behalf of Consultant. Consultant shall be responsible for its own taxes, insurance, and professional obligations, including maintaining professional liability insurance where required.
+
+8.  WARRANTIES. Consultant warrants that it has the professional skill, experience, and qualifications to perform the Services, and that the Services will be performed in a professional and workmanlike manner consistent with the standards of the profession.
+
+9.  TERM AND TERMINATION. This Agreement shall commence on the Effective Date and continue for a term of {{ term_months | default("12") }} months (the "Term"). Either Party may terminate this Agreement upon thirty (30) days' written notice, or immediately upon the other Party's material breach that remains uncured for fifteen (15) days after notice. Upon termination, Client shall pay Consultant for all Services satisfactorily performed to the effective date of termination.
+
+10. GOVERNING LAW. This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("[jurisdiction]") }}.
+
+11. DISPUTE RESOLUTION. Any dispute arising out of or in connection with this Agreement shall first be referred to mediation in good faith before [arbitration/litigation].
+
+12. ENTIRE AGREEMENT. This Agreement constitutes the entire agreement between the Parties with respect to the Services and supersedes all prior agreements and understandings. No amendment shall be effective unless in writing and signed by both Parties.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+{{ consultant_name | default("[Consultant]") }}
+
+Signature: ____________________________
+Date: __________________________
+
+{{ client_name | default("[Client]") }}
+
+Signature: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________

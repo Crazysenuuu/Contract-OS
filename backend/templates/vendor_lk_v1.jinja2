@@ -1,0 +1,53 @@
+VENDOR / SUPPLIER AGREEMENT
+
+THIS VENDOR / SUPPLIER AGREEMENT (this "Agreement") is made and entered into as of {{ effective_date | default("__________") }} (the "Effective Date"), by and between {{ buyer_name | default("[Buyer]") }} ("Buyer") and {{ supplier_name | default("[Supplier]") }} ("Supplier").
+
+1.  SUPPLY OF GOODS/SERVICES. Supplier shall supply to Buyer the goods and/or services described in this Agreement (the "Products") on the terms and conditions set forth herein:
+
+    {{ goods_services | default("[Goods/Services Supplied]") }}
+
+2.  DELIVERY. Supplier shall deliver the Products in accordance with the quantities, delivery schedules, and delivery terms specified in purchase orders issued by Buyer. The applicable delivery terms are {{ delivery_terms | default("[Delivery Terms / Incoterms]") }}. Risk of loss shall pass in accordance with the applicable delivery terms. Title to goods shall pass to Buyer upon payment.
+
+3.  QUALITY AND WARRANTIES. Supplier warrants that the Products: (i) conform to the specifications, samples, and descriptions agreed with Buyer; (ii) are free from defects in material and workmanship; (iii) are fit for the purposes for which such Products are ordinarily used and for any particular purpose made known to Supplier; and (iv) do not infringe any third party's intellectual property rights. Warranty obligations run for the benefit of Buyer and its customers.
+
+4.  PRICING. Buyer shall pay Supplier the price set forth in each purchase order, at the rate of {{ pricing | default("__________") }} for the Products. All prices are exclusive of applicable taxes and delivery charges unless otherwise stated.
+
+5.  PAYMENT TERMS. Supplier shall issue invoices for Products delivered or services performed. Buyer shall pay each undisputed invoice within {{ payment_terms | default("Net 30") }} of receipt. Buyer may withhold payment of disputed amounts, provided that it gives prompt written notice of the dispute.
+
+6.  INSPECTION AND REJECTION. Buyer may inspect Products upon delivery and shall have a reasonable period to reject non-conforming Products. Buyer may require Supplier to repair or replace non-conforming Products at Supplier's expense, or may reject them and obtain a refund of the purchase price.
+
+7.  INTELLECTUAL PROPERTY. To the extent any Product is supplied to Buyer's specifications or includes customized work product, Supplier assigns to Buyer all rights, title, and interest in such deliverables created specifically for Buyer upon payment therefor. Supplier retains ownership of its pre-existing materials, licensed to Buyer as necessary for the use of the Products.
+
+8.  CONFIDENTIALITY. Each Party shall hold in confidence and shall protect the other Party's Confidential Information, including pricing, specifications, business plans, and non-public technical information disclosed in connection with this Agreement, and shall use it solely in connection with this Agreement. This Section shall survive termination for five (5) years.
+
+9.  COMPLIANCE. Supplier shall comply with all applicable laws, rules, and regulations in performing this Agreement, including labour and safety laws, environmental laws, anti-bribery and anti-corruption laws, sanctions, and export controls, and shall maintain required licenses and certifications.
+
+10. LIMITATION OF LIABILITY. IN NO EVENT SHALL EITHER PARTY BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES ARISING OUT OF THIS AGREEMENT. EXCEPT FOR BREACHES OF CONFIDENTIALITY, IP INFRINGEMENT, OR INDEMNIFICATION OBLIGATIONS, EACH PARTY'S MAXIMUM AGGREGATE LIABILITY SHALL NOT EXCEED THE TOTAL AMOUNTS PAID OR PAYABLE BY BUYER UNDER THIS AGREEMENT DURING THE TWELVE (12) MONTHS PRECEDING THE CLAIM.
+
+11. INDEMNIFICATION. Supplier shall defend, indemnify, and hold harmless Buyer from and against third-party claims arising out of (i) Supplier's breach of this Agreement, negligence, or willful misconduct; (ii) a claim that any Product infringes a third party's intellectual property rights; or (iii) Supplier's violation of applicable law.
+
+12. TERM AND RENEWAL. This Agreement shall commence on the Effective Date and continue for a term of {{ term_months | default("12") }} months (the "Term"), and shall renew automatically for additional terms of equal duration unless either Party gives written notice of non-renewal at least thirty (30) days before the end of the then-current term{% if not auto_renew %}; if automatic renewal is disabled, the Term may instead be extended by the Parties' written agreement{% endif %}.
+
+13. TERMINATION. Either Party may terminate this Agreement (i) for convenience upon sixty (60) days' written notice, or (ii) for the other Party's material breach that remains uncured for thirty (30) days after notice, or (iii) immediately upon the insolvency or bankruptcy of the other Party. Outstanding purchase orders shall be completed unless terminated by their terms.
+
+14. GOVERNING LAW. This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("[jurisdiction]") }}.
+
+15. DISPUTE RESOLUTION. Any dispute arising out of or in connection with this Agreement shall be resolved through good-faith negotiation and thereafter by [mediation/arbitration/litigation].
+
+16. ENTIRE AGREEMENT. This Agreement, together with any purchase orders issued under it, constitutes the entire agreement between the Parties with respect to the supply of Products and supersedes all prior agreements and understandings. No amendment shall be effective unless in writing and signed by both Parties.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+{{ supplier_name | default("[Supplier]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________
+
+{{ buyer_name | default("[Buyer]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________

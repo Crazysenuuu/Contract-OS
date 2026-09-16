@@ -1,0 +1,69 @@
+SOFTWARE DEVELOPMENT AGREEMENT
+
+THIS SOFTWARE DEVELOPMENT AGREEMENT (this "Agreement") is made and entered into as of {{ effective_date | default("__________") }} (the "Effective Date"), by and between:
+
+{{ developer_name | default("[Developer]") }}, a developer providing custom software development services, with a principal place of business at {{ developer_name | default("[Developer]") }} ("Developer"); and
+
+{{ client_name | default("[Client]") }} ("Client").
+
+RECITALS
+
+WHEREAS, Client desires to engage Developer to develop the custom software described in this Agreement, and Developer desires to perform such development on the terms and conditions set forth herein.
+
+NOW, THEREFORE, in consideration of the mutual covenants contained herein, the Parties agree as follows:
+
+1.  PROJECT SCOPE. Developer shall develop the software described in this Agreement (the "Software") in accordance with the project requirements, specifications, and functional descriptions agreed by the Parties (the "Specifications"). The initial Specifications are as follows:
+
+    {{ project_description | default("[Project Description]") }}
+
+2.  DELIVERABLES. Developer shall deliver the Software, together with the following deliverables:
+
+    {{ deliverables | default("[List of Deliverables]") }}
+
+Deliverables shall include reasonably complete and accurate machine-readable source code of the Software, build and installation instructions, and such documentation as is necessary for Client to use and maintain the Software.
+
+3.  DEVELOPMENT PROCESS. Developer shall perform the development in a professional and workmanlike manner and shall comply with the milestones and schedule agreed between the Parties. Client shall provide timely access to its personnel, systems, and information reasonably required for the development and shall review and approve specifications, designs, and prototypes in a timely manner.
+
+4.  ACCEPTANCE. Client shall have fifteen (15) business days from delivery of each deliverable or stage to test and either accept or submit written notice of deficiencies. Developer shall correct notified deficiencies within ten (10) business days. Repeated failure to progress toward acceptance in accordance with the agreed schedule may constitute a material breach of this Agreement.
+
+5.  OWNERSHIP AND INTELLECTUAL PROPERTY.
+    5.1  Client Ownership. As between Developer and Client, and subject to payment of the amounts due under this Agreement, Client shall own all right, title, and interest in and to the Software and deliverables, including all source code, object code, documentation, schemas, and related materials, and all intellectual property rights therein. Developer hereby assigns to Client all such rights on creation. {{ "The Parties acknowledge that ownership of the Software vests in Client as work made for hire or commissioned work." if ip_ownership == "Client owns all" else "" }}
+    5.2  Developer Materials. To the extent the Software incorporates pre-existing tools, libraries, or materials owned by Developer, Developer grants Client a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to use such materials solely as incorporated into the Software.
+    5.3  Third-Party Components. Developer shall disclose in writing any third-party open-source or commercial components incorporated into the Software, together with their applicable licenses. Developer shall not incorporate components with license terms materially inconsistent with Client's intended use, unless approved in writing by Client.
+    5.4  Moral Rights. To the extent any moral rights in the Software cannot be assigned, Developer waives such rights in favor of Client to the fullest extent permitted by applicable law.
+
+6.  SOURCE CODE ESCROW. {% if source_code_escrow %}The parties may enter into a source code escrow arrangement for the Software, under which the Developer deposits the source code and documentation with an escrow agent, with release conditions as agreed by the Parties.{% else %}The Parties may from time to time agree to place the source code in escrow on terms to be agreed.{% endif %}
+
+7.  WARRANTIES. Developer warrants that: (i) the Software and deliverables will substantially conform to the Specifications; (ii) the Software will be developed in a professional and workmanlike manner using skilled and experienced personnel; and (iii) to Developer's knowledge, the Software does not infringe the intellectual property rights of any third party.
+
+8.  SUPPORT AND MAINTENANCE. For a period of {{ support_period_months | default("12") }} months after final acceptance of the Software (the "Support Period"), Developer shall provide reasonable support and maintenance, including correction of errors and defects reported by Client, at no additional cost. Thereafter, the Parties may agree on extended support and maintenance terms.
+
+9.  FEES AND PAYMENT. Client shall pay Developer the development fee of {{ development_fee | default("__________") }} (the "Development Fee") in accordance with the payment terms {{ payment_terms | default("Net 30") }} set out in this Agreement. The Development Fee is exclusive of applicable taxes.
+
+10. CONFIDENTIALITY. Each Party shall protect the Confidential Information (as defined below) of the other Party with the same degree of care it uses for its own confidential information, shall use it solely in connection with this Agreement, and shall not disclose it to third parties except to employees and advisors bound by confidentiality obligations. "Confidential Information" includes the Specifications, the Software prior to release, source code, and all non-public technical and business information disclosed in connection with this Agreement. This Section shall survive termination for five (5) years.
+
+11. LIMITATION OF LIABILITY. IN NO EVENT SHALL EITHER PARTY BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES ARISING OUT OF THIS AGREEMENT. EXCEPT FOR BREACHES OF OWNERSHIP OBLIGATIONS UNDER SECTION 5, CONFIDENTIALITY OBLIGATIONS UNDER SECTION 10, AND INDEMNIFICATION OBLIGATIONS, EACH PARTY'S AGGREGATE LIABILITY SHALL NOT EXCEED THE DEVELOPMENT FEE PAID OR PAYABLE.
+
+12. TERMINATION. Either Party may terminate this Agreement immediately upon written notice if the other Party (i) materially breaches this Agreement and fails to cure within thirty (30) days of notice, or (ii) becomes insolvent or bankrupt. Upon termination, Client shall pay Developer for all work performed and deliverables delivered to the effective date of termination, and Developer shall deliver all work product produced to date.
+
+13. GOVERNING LAW. This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("[jurisdiction]") }}.
+
+14. DISPUTE RESOLUTION. [Dispute resolution method: {{ ip_ownership | default("") }}] The Parties shall attempt to resolve disputes through good-faith negotiation. Any dispute not so resolved shall be [submitted to arbitration/litigation] in {{ governing_law | default("[jurisdiction]") }}.
+
+15. ENTIRE AGREEMENT. This Agreement constitutes the entire agreement between the Parties with respect to the Software development and supersedes all prior agreements and understandings. No amendment shall be effective unless in writing and signed by both Parties.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+{{ developer_name | default("[Developer]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________
+
+{{ client_name | default("[Client]") }}
+
+By: ____________________________
+Name: __________________________
+Title: _________________________
+Date: __________________________

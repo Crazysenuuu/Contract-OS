@@ -1,0 +1,43 @@
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+pydantic[email]>=2.5.0
+sqlalchemy[asyncio]>=2.0.23
+asyncpg>=0.29.0
+alembic>=1.13.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+httpx>=0.25.0
+greenlet>=3.0.0
+python-dotenv>=1.0.0
+jinja2>=3.1.0
+pyotp>=2.9.0
+celery>=5.3.0
+docusign_esign>=6.0.0
+# PDF generation (spec 1.23 / 2.07): agreement rendering, PDF export and
+# watermark stamping. WeasyPrint needs the Pango/cairo system libraries
+# installed in the image (see backend/Dockerfile); pypdf/reportlab power
+# the PDF watermark overlay in document_storage.py.
+weasyprint>=61.0
+pypdf>=4.0.0
+reportlab>=4.0.0
+# Push notifications (spec 2.02 §24-26): FCM delivery to registered device
+# tokens. Import is lazy; without FCM_CREDENTIALS_JSON the sender no-ops.
+firebase-admin>=6.5.0
+
+boto3==1.34.14
+google-cloud-documentai==2.27.0
+azure-ai-formrecognizer==3.3.3
+temporalio>=1.4.0
+business-rules>=1.1.1
+
+# Distributed tracing (spec 23 / 1.23). OpenTelemetry spans propagate a
+# service/operation/duration/status/trace_id for every request; the span
+# payload never carries legal-document contents. Import is lazy: if the
+# SDK packages are absent the tracing middleware degrades to a no-op tracer
+# instead of failing the request.
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+opentelemetry-exporter-otlp-proto-http>=1.24.0

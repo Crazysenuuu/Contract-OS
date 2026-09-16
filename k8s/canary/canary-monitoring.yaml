@@ -1,0 +1,55 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: contractos-backend-canary
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: contractos-backend
+      track: canary
+  endpoints:
+    - port: http
+      path: /api/v1/metrics/prometheus
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: canary-alerts
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: canary.rules
+      rules:
+        - alert: CanaryHighErrorRate
+          expr: |
+            rate(canary_request_errors_total[5m]) / rate(canary_request_total[5m]) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Canary deployment has high error rate"
+            description: "Error rate is {{ $value | humanizePercentage }}"
+
+        - alert: CanaryHighLatency
+          expr: |
+            histogram_quantile(0.95, rate(canary_request_duration_seconds_bucket[5m])) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Canary deployment has high latency"
+            description: "p95 latency is {{ $value }}s"
+
+        - alert: CanaryNeedsRollback
+          expr: |
+            canary_request_errors_total > 100
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Canary deployment needs rollback"
+            description: "Canary has {{ $value }} errors"

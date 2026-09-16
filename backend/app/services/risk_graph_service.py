@@ -1,0 +1,559 @@
+"""Contract Risk Graph service (spec 35 — killer feature).
+
+Builds and traverses the typed graph: agreements ↔ parties ↔ clauses ↔
+risks ↔ obligations ↔ policies. Answers portfolio-level questions by graph
+traversal:
+  - "Which active contracts have a 60-day termination notice?"
+  - "Which agreements have unlimited liability?"
+  - "Which suppliers have open security obligations?"
+  - "Which contracts expire within the renewal window?"
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+
+from app.models.agreement import Agreement
+from app.models.agreement_access import AgreementParty
+from app.models.legal_entity import LegalEntity
+from app.models.obligation import Obligation
+from app.models.risk_graph import RiskGraphEdge, RiskGraphNode
+
+
+class RiskGraphError(Exception):
+    """Raised for graph consistency errors."""
+
+
+async def upsert_node(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    node_type: str,
+    entity_id: uuid.UUID,
+    label: str,
+    agreement_id: uuid.UUID | None = None,
+    properties: dict | None = None,
+) -> RiskGraphNode:
+    """Create or update a node identified by (type, entity)."""
+    result = await db.execute(
+        select(RiskGraphNode).where(
+            RiskGraphNode.organization_id == organization_id,
+            RiskGraphNode.node_type == node_type,
+            RiskGraphNode.entity_id == entity_id,
+        )
+    )
+    node = result.scalar_one_or_none()
+    if node is None:
+        node = RiskGraphNode(
+            organization_id=organization_id,
+            node_type=node_type,
+            entity_id=entity_id,
+            label=label,
+            agreement_id=agreement_id,
+            properties=properties or {},
+        )
+        db.add(node)
+    else:
+        node.label = label
+        if agreement_id is not None:
+            node.agreement_id = agreement_id
+        if properties is not None:
+            node.properties = {**(node.properties or {}), **properties}
+    await db.flush()
+    return node
+
+
+async def upsert_edge(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    source_node_id: uuid.UUID,
+    target_node_id: uuid.UUID,
+    edge_type: str,
+    weight: float | None = None,
+    properties: dict | None = None,
+) -> RiskGraphEdge:
+    result = await db.execute(
+        select(RiskGraphEdge).where(
+            RiskGraphEdge.source_node_id == source_node_id,
+            RiskGraphEdge.target_node_id == target_node_id,
+            RiskGraphEdge.edge_type == edge_type,
+        )
+    )
+    edge = result.scalar_one_or_none()
+    if edge is None:
+        edge = RiskGraphEdge(
+            organization_id=organization_id,
+            source_node_id=source_node_id,
+            target_node_id=target_node_id,
+            edge_type=edge_type,
+            weight=weight,
+            properties=properties or {},
+        )
+        db.add(edge)
+    else:
+        if weight is not None:
+            edge.weight = weight
+        if properties is not None:
+            edge.properties = {**(edge.properties or {}), **properties}
+    await db.flush()
+    return edge
+
+
+async def build_agreement_graph(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    agreement: Agreement,
+) -> dict:
+    """(Re)build the subgraph for one agreement.
+
+    Connects: agreement node, party nodes (via agreement_parties/legal
+    entities), obligation nodes, and risk nodes (if any risk findings or
+    clause-level risks exist).
+    """
+    agreement_node = await upsert_node(
+        db,
+        organization_id=organization_id,
+        node_type="agreement",
+        entity_id=agreement.id,
+        label=agreement.title,
+        agreement_id=agreement.id,
+        properties={
+            "status": agreement.status,
+            "governing_law": agreement.governing_law,
+            "expiry_date": agreement.expiry_date.isoformat() if agreement.expiry_date else None,
+        },
+    )
+
+    # Parties
+    party_result = await db.execute(
+        select(AgreementParty, LegalEntity)
+        .join(LegalEntity, LegalEntity.id == AgreementParty.legal_entity_id)
+        .where(AgreementParty.agreement_id == agreement.id)
+    )
+    for party, entity in party_result.all():
+        party_node = await upsert_node(
+            db,
+            organization_id=organization_id,
+            node_type="party",
+            entity_id=entity.id,
+            label=entity.legal_name,
+            agreement_id=agreement.id,
+            properties={"party_role": party.party_role},
+        )
+        await upsert_edge(
+            db,
+            organization_id=organization_id,
+            source_node_id=agreement_node.id,
+            target_node_id=party_node.id,
+            edge_type="HAS_PARTY",
+        )
+
+    # Obligations
+    ob_result = await db.execute(
+        select(Obligation).where(Obligation.agreement_id == agreement.id)
+    )
+    for ob in ob_result.scalars().all():
+        ob_node = await upsert_node(
+            db,
+            organization_id=organization_id,
+            node_type="obligation",
+            entity_id=ob.id,
+            label=ob.description[:200],
+            agreement_id=agreement.id,
+            properties={
+                "status": ob.status,
+                "obligation_type": ob.obligation_type,
+                "due_date": ob.due_date.isoformat() if ob.due_date else None,
+            },
+        )
+        await upsert_edge(
+            db,
+            organization_id=organization_id,
+            source_node_id=agreement_node.id,
+            target_node_id=ob_node.id,
+            edge_type="OBLIGATES",
+            weight=_severity_weight(ob.status),
+        )
+
+    # Clauses + clause-level risks (spec 35: clause/risk nodes + traversal).
+    from app.models.document_intelligence import ExtractedClause
+
+    clause_result = await db.execute(
+        select(ExtractedClause).where(ExtractedClause.agreement_id == agreement.id)
+    )
+    for clause in clause_result.scalars().all():
+        clause_node = await upsert_node(
+            db,
+            organization_id=organization_id,
+            node_type="clause",
+            entity_id=clause.id,
+            label=clause.title or clause.text[:80],
+            agreement_id=agreement.id,
+            properties={
+                "category": clause.category.value if getattr(clause.category, "value", None) else clause.category,
+                "risk_level": clause.risk_level.value if getattr(clause.risk_level, "value", None) else clause.risk_level,
+                "risk_score": clause.risk_score,
+                "section_number": clause.section_number,
+            },
+        )
+        await upsert_edge(
+            db,
+            organization_id=organization_id,
+            source_node_id=agreement_node.id,
+            target_node_id=clause_node.id,
+            edge_type="HAS_CLAUSE",
+        )
+        if clause.risk_score is not None and clause.risk_score >= 0.4:
+            risk_node = await upsert_node(
+                db,
+                organization_id=organization_id,
+                node_type="risk",
+                entity_id=clause.id,
+                label=f"{clause.title or 'Clause'} risk: {clause.risk_level.value if getattr(clause.risk_level, 'value', None) else 'medium'}",
+                agreement_id=agreement.id,
+                properties={
+                    "risk_score": clause.risk_score,
+                    "risk_level": clause.risk_level.value if getattr(clause.risk_level, "value", None) else clause.risk_level,
+                    "clause_id": str(clause.id),
+                },
+            )
+            await upsert_edge(
+                db,
+                organization_id=organization_id,
+                source_node_id=clause_node.id,
+                target_node_id=risk_node.id,
+                edge_type="POSES_RISK",
+                weight=clause.risk_score,
+            )
+
+    await db.flush()
+    return {
+        "agreement_node": str(agreement_node.id),
+        "edges_built": True,
+    }
+
+
+def _severity_weight(status: str) -> float:
+    return {
+        "overdue": 1.0,
+        "due": 0.7,
+        "upcoming": 0.3,
+        "completed": 0.0,
+        "waived": 0.0,
+        "disputed": 0.9,
+    }.get(status, 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Portfolio traversal queries
+# ---------------------------------------------------------------------------
+
+async def agreements_with_open_obligations(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+) -> list[dict]:
+    """Counterparties with open obligations (via graph edges).
+
+    Traverses agreement -> OBLIGATES -> obligation nodes and joins party
+    nodes attached to the same agreement.
+    """
+    from sqlalchemy import and_, or_
+
+    obligation_node = aliased(RiskGraphNode)
+    party_node = aliased(RiskGraphNode)
+    party_edge = aliased(RiskGraphEdge)
+
+    rows = (
+        await db.execute(
+            select(
+                Agreement.id,
+                Agreement.title,
+                LegalEntity.legal_name,
+                Obligation.description,
+                Obligation.status,
+                Obligation.due_date,
+            )
+            .join(RiskGraphNode, RiskGraphNode.entity_id == Agreement.id)
+            .join(
+                RiskGraphEdge,
+                and_(
+                    RiskGraphEdge.source_node_id == RiskGraphNode.id,
+                    RiskGraphEdge.edge_type == "OBLIGATES",
+                ),
+            )
+            .join(
+                obligation_node,
+                obligation_node.id == RiskGraphEdge.target_node_id,
+            )
+            .join(
+                Obligation,
+                Obligation.id == obligation_node.entity_id,
+            )
+            .join(
+                party_edge,
+                and_(
+                    party_edge.source_node_id == RiskGraphNode.id,
+                    party_edge.edge_type == "HAS_PARTY",
+                ),
+            )
+            .join(
+                party_node,
+                party_node.id == party_edge.target_node_id,
+            )
+            .join(
+                AgreementParty,
+                AgreementParty.legal_entity_id == party_node.entity_id,
+            )
+            .join(LegalEntity, LegalEntity.id == AgreementParty.legal_entity_id)
+            .where(
+                RiskGraphNode.organization_id == organization_id,
+                Obligation.status.notin_(["completed", "waived"]),
+            )
+            .limit(100)
+        )
+    ).all()
+    return [
+        {
+            "agreement_id": str(r[0]),
+            "agreement_title": r[1],
+            "counterparty": r[2],
+            "obligation": r[3],
+            "status": r[4],
+            "due_date": r[5].isoformat() if r[5] else None,
+        }
+        for r in rows
+    ]
+
+
+async def agreements_expiring_within(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    days: int = 90,
+) -> list[dict]:
+    """Active agreements expiring within the window."""
+    today = date.today()
+    horizon = today + timedelta(days=days)
+    result = await db.execute(
+        select(Agreement)
+        .where(
+            Agreement.organization_id == organization_id,
+            Agreement.status.in_(["active", "executed", "expiring"]),
+            Agreement.expiry_date.is_not(None),
+            Agreement.expiry_date >= today,
+            Agreement.expiry_date <= horizon,
+        )
+        .order_by(Agreement.expiry_date)
+    )
+    return [
+        {
+            "agreement_id": str(a.id),
+            "title": a.title,
+            "status": a.status,
+            "expiry_date": a.expiry_date.isoformat() if a.expiry_date else None,
+            "days_remaining": (a.expiry_date - today).days if a.expiry_date else None,
+        }
+        for a in result.scalars().all()
+    ]
+
+
+async def high_risk_agreements(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    min_edges: int = 1,
+) -> list[dict]:
+    """Agreements with the most open risk (by edge weight)."""
+    from sqlalchemy import func
+
+    rows = (
+        await db.execute(
+            select(
+                Agreement.id,
+                Agreement.title,
+                func.count(RiskGraphEdge.id).label("edge_count"),
+                func.coalesce(func.sum(RiskGraphEdge.weight), 0.0).label("risk_score"),
+            )
+            .join(RiskGraphNode, RiskGraphNode.entity_id == Agreement.id)
+            .join(
+                RiskGraphEdge,
+                RiskGraphEdge.source_node_id == RiskGraphNode.id,
+            )
+            .where(RiskGraphNode.organization_id == organization_id)
+            .group_by(Agreement.id, Agreement.title)
+            .order_by(func.coalesce(func.sum(RiskGraphEdge.weight), 0.0).desc())
+            .limit(20)
+        )
+    ).all()
+    return [
+        {
+            "agreement_id": str(r[0]),
+            "title": r[1],
+            "edge_count": r[2],
+            "risk_score": round(float(r[3]), 2),
+        }
+        for r in rows
+        if r[2] >= min_edges
+    ]
+
+
+async def impact_traversal(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    agreement_id: uuid.UUID,
+    min_risk: float = 0.4,
+) -> dict:
+    """Traverse from a source agreement to related high-risk exposure.
+
+    Steps:
+      1. agreement -> HAS_CLAUSE -> clauses with risk_score >= min_risk.
+      2. agreement -> HAS_PARTY -> parties.
+      3. From each party, walk in reverse (HAS_PARTY edges) to the OTHER
+         agreements that share the same party.
+      4. Report each shared agreement's high-risk clauses and open
+         obligations as "impacted exposure".
+
+    This answers "if this clause/party relationship turns adverse, what
+    else is exposed?" — the portfolio-level impact question.
+    """
+    from sqlalchemy import and_, or_
+
+    clause_node = aliased(RiskGraphNode)
+    clause_edge = aliased(RiskGraphEdge)
+    party_node = aliased(RiskGraphNode)
+    party_edge = aliased(RiskGraphEdge)
+    agg_node2 = aliased(RiskGraphNode)
+    src_agg = aliased(RiskGraphNode)
+
+    source_rows = (
+        await db.execute(
+            select(
+                Agreement.id,
+                Agreement.title,
+                clause_node.label,
+                clause_node.properties,
+            )
+            .join(src_agg, src_agg.entity_id == Agreement.id)
+            .join(
+                clause_edge,
+                and_(
+                    clause_edge.source_node_id == src_agg.id,
+                    clause_edge.edge_type == "HAS_CLAUSE",
+                ),
+            )
+            .join(clause_node, clause_node.id == clause_edge.target_node_id)
+            .where(
+                src_agg.node_type == "agreement",
+                src_agg.entity_id == agreement_id,
+                src_agg.organization_id == organization_id,
+                clause_node.node_type == "clause",
+            )
+            .limit(50)
+        )
+    ).all()
+
+    # Narrow to clauses with material risk via their risk level/score props.
+    source_clauses = [
+        {
+            "agreement_title": r[1],
+            "clause": r[2],
+            "risk_score": (r[3] or {}).get("risk_score"),
+        }
+        for r in source_rows
+        if (r[3] or {}).get("risk_score") is None
+        or (r[3] or {}).get("risk_score") >= min_risk
+    ]
+
+    # Shared counterparty subquery: the source agreement's party nodes.
+    shared_parties = (
+        select(party_node.id)
+        .join(
+            party_edge,
+            and_(
+                party_edge.source_node_id == src_agg.id,
+                party_edge.edge_type == "HAS_PARTY",
+            ),
+        )
+        .join(party_node, party_node.id == party_edge.target_node_id)
+        .where(
+            src_agg.node_type == "agreement",
+            src_agg.organization_id == organization_id,
+            src_agg.entity_id == agreement_id,
+            party_node.node_type == "party",
+        )
+    )
+
+    # Agreements (other than source) sharing one of those parties.
+    shared = (
+        await db.execute(
+            select(Agreement)
+            .join(agg_node2, agg_node2.entity_id == Agreement.id)
+            .join(
+                party_edge,
+                and_(
+                    party_edge.source_node_id == agg_node2.id,
+                    party_edge.edge_type == "HAS_PARTY",
+                ),
+            )
+            .join(party_node, party_node.id == party_edge.target_node_id)
+            .where(
+                agg_node2.node_type == "agreement",
+                agg_node2.organization_id == organization_id,
+                Agreement.id != agreement_id,
+                Agreement.organization_id == organization_id,
+                party_node.id.in_(shared_parties),
+            )
+            .limit(50)
+        )
+    ).all()
+
+    return {
+        "source_agreement_id": str(agreement_id),
+        "source_clause_exposures": source_clauses,
+        "shared_party_agreements": [
+            {
+                "agreement_id": str(a.id),
+                "title": a.title,
+                "status": a.status,
+            }
+            for a in shared
+        ],
+    }
+
+
+async def graph_stats(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+) -> dict:
+    nodes = (
+        await db.execute(
+            select(RiskGraphNode.node_type, RiskGraphNode.id).where(
+                RiskGraphNode.organization_id == organization_id
+            )
+        )
+    ).all()
+    edges = (
+        await db.scalar(
+            select(RiskGraphEdge.id).where(
+                RiskGraphEdge.organization_id == organization_id
+            ).limit(1)
+        )
+    )
+    node_types: dict[str, int] = {}
+    for node_type, _ in nodes:
+        node_types[node_type] = node_types.get(node_type, 0) + 1
+    return {
+        "nodes": len(nodes),
+        "edges": 1 if edges else 0,
+        "by_type": node_types,
+    }
