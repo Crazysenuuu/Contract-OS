@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage, LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -29,22 +29,14 @@ interface GlossaryTerm {
 
 export default function I18nPage() {
   const router = useRouter();
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const { language, setLanguage } = useLanguage();
   const [languages, setLanguages] = useState<Language[]>([]);
   const [glossary, setGlossary] = useState<GlossaryTerm[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"languages" | "glossary" | "document">("languages");
 
-  useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-    loadData();
-  }, [token]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [langRes, glossaryRes] = await Promise.all([
@@ -58,7 +50,15 @@ export default function I18nPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [language]);
+
+  useEffect(() => {
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+    void Promise.resolve().then(loadData);
+  }, [token, router, loadData]);
 
   const getDirectionIcon = (dir: string) => (dir === "rtl" ? "←" : "→");
 
@@ -233,7 +233,7 @@ export default function I18nPage() {
 
           {glossary.length === 0 && !loading && (
             <div className="p-8 text-center text-gray-500">
-              No glossary terms found. Click "Add Term" to create one.
+              No glossary terms found. Click &quot;Add Term&quot; to create one.
             </div>
           )}
         </div>

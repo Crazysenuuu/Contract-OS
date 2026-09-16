@@ -1,15 +1,13 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useCallback } from "react";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   listAgreements,
   getVersionTranslations,
-  syncTranslations,
   bulkSyncTranslations,
-  compareVersionTranslations,
   getTranslationDashboard,
 } from "@/lib/api";
 
@@ -54,7 +52,7 @@ interface TranslationStatus {
 function TranslationsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const [agreements, setAgreements] = useState<Array<{ id: string; title: string }>>([]);
   const [selectedAgreement, setSelectedAgreement] = useState<string>(searchParams.get("agreement") || "");
   const [dashboard, setDashboard] = useState<TranslationDashboard | null>(null);
@@ -63,27 +61,10 @@ function TranslationsContent() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-    loadAgreements();
-  }, [token]);
-
-  useEffect(() => {
-    if (selectedAgreement && token) {
-      loadDashboard();
-    }
-  }, [selectedAgreement, token]);
-
-  useEffect(() => {
-    if (selectedVersion && selectedAgreement && token) {
-      loadTranslationStatus();
-    }
-  }, [selectedVersion, token]);
-
-  const loadAgreements = async () => {
+  // Loaders declared before the effects that call them (block-scoped consts
+  // can't be referenced before declaration); no leading setLoading(true) so
+  // mount effects never cascade synchronously.
+  const loadAgreements = useCallback(async () => {
     if (!token) return;
     try {
       const data = await listAgreements(token);
@@ -91,11 +72,10 @@ function TranslationsContent() {
     } catch (err) {
       console.error("Failed to load agreements:", err);
     }
-  };
+  }, [token]);
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     if (!token || !selectedAgreement) return;
-    setLoading(true);
     try {
       const data = await getTranslationDashboard(token, selectedAgreement);
       setDashboard(data);
@@ -107,9 +87,9 @@ function TranslationsContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, selectedAgreement]);
 
-  const loadTranslationStatus = async () => {
+  const loadTranslationStatus = useCallback(async () => {
     if (!token || !selectedAgreement || !selectedVersion) return;
     try {
       const data = await getVersionTranslations(token, selectedAgreement, selectedVersion);
@@ -117,24 +97,27 @@ function TranslationsContent() {
     } catch (err) {
       console.error("Failed to load translation status:", err);
     }
-  };
+  }, [token, selectedAgreement, selectedVersion]);
 
-  const handleSync = async (fromVersionId: string, toVersionId: string) => {
-    if (!token || !selectedAgreement) return;
-    setSyncing(true);
-    try {
-      const result = await syncTranslations(token, selectedAgreement, {
-        from_version_id: fromVersionId,
-        to_version_id: toVersionId,
-      });
-      alert(`Sync completed!\n${result.synced_languages.length} synced, ${result.outdated_languages.length} outdated, ${result.pending_languages.length} pending`);
-      loadDashboard();
-    } catch (err) {
-      alert(`Sync failed: ${err instanceof Error ? err.message : "unknown error"}`);
-    } finally {
-      setSyncing(false);
+  useEffect(() => {
+    if (!token) {
+      router.push("/login");
+      return;
     }
-  };
+    queueMicrotask(() => loadAgreements());
+  }, [token, loadAgreements, router]);
+
+  useEffect(() => {
+    if (selectedAgreement && token) {
+      queueMicrotask(() => loadDashboard());
+    }
+  }, [selectedAgreement, token, loadDashboard]);
+
+  useEffect(() => {
+    if (selectedVersion && selectedAgreement && token) {
+      queueMicrotask(() => loadTranslationStatus());
+    }
+  }, [selectedVersion, selectedAgreement, token, loadTranslationStatus]);
 
   const handleBulkSync = async (versionId: string) => {
     if (!token || !selectedAgreement) return;

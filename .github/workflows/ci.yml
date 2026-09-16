@@ -8,7 +8,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.14"
-  NODE_VERSION: "18"
+  NODE_VERSION: "20"
 
 jobs:
   # ===== Migration Tests =====
@@ -77,6 +77,7 @@ jobs:
 
       - name: Verify tables created
         run: |
+          export PGPASSWORD=password
           TABLE_COUNT=$(psql -h localhost -U cs -d contractos_migration_test -t -A -c "
             SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';
           ")
@@ -165,7 +166,10 @@ jobs:
       - name: Run backend tests
         working-directory: backend
         env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/contractos_test
+          # Async driver: the app's engine is async-only (asyncpg). A bare
+          # postgresql:// URL would make SQLAlchemy pick the psycopg2 dialect,
+          # which isn't installed.
+          DATABASE_URL: postgresql+asyncpg://test_user:test_password@localhost:5432/contractos_test
           JWT_SECRET_KEY: test-secret-key-for-ci
           ENVIRONMENT: testing
         run: |

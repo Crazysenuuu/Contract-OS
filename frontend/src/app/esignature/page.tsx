@@ -6,13 +6,6 @@ import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { createEnvelope, getEnvelopeStatus, simulateSigning } from "@/lib/api";
 
-interface EnvelopeData {
-  envelope_id: string;
-  status: string;
-  signing_url: string | null;
-  created_at: string | null;
-}
-
 interface EnvelopeStatus {
   envelope_id: string;
   status: string;

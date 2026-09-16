@@ -61,14 +61,6 @@ export default function SearchPage() {
       .catch(() => {});
   }, [token]);
 
-  // Auto-run search when arriving with a ?q= deep link (e.g. dashboard box).
-  useEffect(() => {
-    if (token && query && !searched) {
-      runSearch(query, filters);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, query, searched]);
-
   const runSearch = useCallback(
     async (q: string, f: SearchFilters) => {
       if (!token) return;
@@ -88,6 +80,13 @@ export default function SearchPage() {
     },
     [token]
   );
+
+  // Auto-run search when arriving with a ?q= deep link (e.g. dashboard box).
+  useEffect(() => {
+    if (token && query && !searched) {
+      void Promise.resolve().then(() => runSearch(query, filters));
+    }
+  }, [token, query, searched, runSearch, filters]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

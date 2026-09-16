@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiClient } from "@/lib/api";
@@ -62,7 +62,7 @@ const severityColors: Record<string, string> = {
 };
 
 export default function AlertingSettingsPage() {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
 
   // ── State ────────────────────────────────────────────────
   const [preferences, setPreferences] = useState<AlertingPreferences | null>(null);
@@ -79,14 +79,10 @@ export default function AlertingSettingsPage() {
   const [activeTab, setActiveTab] = useState<"preferences" | "policies" | "history">("preferences");
 
   // ── Fetch data ───────────────────────────────────────────
-  useEffect(() => {
+  // Declared before the effect that calls it; no leading setLoading(true)
+  // (loading starts true) so the mount effect never cascades synchronously.
+  const fetchData = useCallback(async () => {
     if (!token) return;
-    fetchData();
-  }, [token]);
-
-  async function fetchData() {
-    setLoading(true);
-    setError(null);
     try {
       const headers = { Authorization: `Bearer ${token}` };
 
@@ -123,7 +119,11 @@ export default function AlertingSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [token]);
+
+  useEffect(() => {
+    if (token) queueMicrotask(() => fetchData());
+  }, [token, fetchData]);
 
   // ── Save preferences ─────────────────────────────────────
   async function savePreferences() {

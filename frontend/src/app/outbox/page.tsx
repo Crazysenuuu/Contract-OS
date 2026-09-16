@@ -57,7 +57,7 @@ export default function OutboxPage() {
   }, [token]);
 
   useEffect(() => {
-    reload();
+    void Promise.resolve().then(reload);
   }, [reload]);
 
 

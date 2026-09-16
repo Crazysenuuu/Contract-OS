@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getTranslationProgressDashboard,
-  getLiveMetrics,
 } from "@/lib/api";
 
 interface DashboardData {
@@ -56,19 +55,33 @@ interface DashboardData {
 
 export default function TranslationProgressPage() {
   const router = useRouter();
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Declared before the effects that call it; no leading setLoading(true)
+  // so the mount effect never cascades synchronously.
+  const loadDashboard = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await getTranslationProgressDashboard(token);
+      setDashboard(data);
+    } catch (err) {
+      console.error("Failed to load dashboard:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
       router.push("/login");
       return;
     }
-    loadDashboard();
-  }, [token]);
+    queueMicrotask(() => loadDashboard());
+  }, [token, loadDashboard, router]);
 
   useEffect(() => {
     if (autoRefresh && token) {
@@ -79,19 +92,7 @@ export default function TranslationProgressPage() {
         clearInterval(intervalRef.current);
       }
     };
-  }, [autoRefresh, token]);
-
-  const loadDashboard = async () => {
-    if (!token) return;
-    try {
-      const data = await getTranslationProgressDashboard(token);
-      setDashboard(data);
-    } catch (err) {
-      console.error("Failed to load dashboard:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [autoRefresh, token, loadDashboard]);
 
   const formatTime = (seconds: number) => {
     if (seconds < 60) return `${Math.round(seconds)}s`;

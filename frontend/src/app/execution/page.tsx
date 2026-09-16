@@ -52,7 +52,7 @@ export default function ExecutionPage() {
   const [reqName, setReqName] = useState("");
   const [reqEmail, setReqEmail] = useState("");
   const [reqVersion, setReqVersion] = useState("");
-  const [consentText, setConsentText] = useState(
+  const [consentText] = useState(
     "I agree to sign this agreement electronically. I consent to do business electronically."
   );
 
@@ -109,7 +109,8 @@ export default function ExecutionPage() {
   }, [token, agreementId]);
 
   useEffect(() => {
-    if (token && agreementId) reload();
+    if (!token || !agreementId) return;
+    void Promise.resolve().then(reload);
   }, [token, agreementId, reload]);
 
   const run = async (fn: () => Promise<unknown>, successMsg: string) => {

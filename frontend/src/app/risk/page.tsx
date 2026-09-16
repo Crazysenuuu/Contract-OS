@@ -85,7 +85,7 @@ export default function RiskPage() {
   }, [token]);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   const handleAsk = async () => {

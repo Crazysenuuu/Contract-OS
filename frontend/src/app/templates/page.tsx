@@ -48,7 +48,7 @@ export default function TemplatesPage() {
 
   useEffect(() => {
     if (!token) { router.push("/login"); return; }
-    load();
+    void Promise.resolve().then(load);
   }, [token, router, load]);
 
   const filtered = templates.filter(

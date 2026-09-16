@@ -115,13 +115,15 @@ export default function IntelligencePage() {
 
   useEffect(() => {
     if (!token) return;
-    refreshConversations();
-    refreshFeedback();
-    listAgreements(token).then(setAgreements).catch(() => {});
-    getRiskGraphStats(token).then(setStats).catch(() => {});
-    getHighRiskAgreements(token).then(setHighRisk).catch(() => {});
-    getOpenObligations(token).then(setOpenObligations).catch(() => {});
-    getExpiringAgreements(token, 90).then(setExpiring).catch(() => {});
+    void Promise.resolve().then(() => {
+      refreshConversations();
+      refreshFeedback();
+      listAgreements(token).then(setAgreements).catch(() => {});
+      getRiskGraphStats(token).then(setStats).catch(() => {});
+      getHighRiskAgreements(token).then(setHighRisk).catch(() => {});
+      getOpenObligations(token).then(setOpenObligations).catch(() => {});
+      getExpiringAgreements(token, 90).then(setExpiring).catch(() => {});
+    });
   }, [token, refreshConversations, refreshFeedback]);
 
   const openConversation = useCallback(
@@ -215,7 +217,7 @@ export default function IntelligencePage() {
         setPromotingId(null);
       }
     },
-    [token, refreshFeedback]
+    [token, isAdmin, refreshFeedback]
   );
 
   const submitQuestion = useCallback(
