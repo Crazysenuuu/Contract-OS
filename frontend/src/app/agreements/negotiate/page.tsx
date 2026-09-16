@@ -11,9 +11,11 @@ import {
   getAgreement,
   listVersions,
   getDiff,
+  getRedline,
   listChanges,
   acceptChange,
   rejectChange,
+  proposeChange,
 } from "@/lib/api";
 
 interface Agreement {
@@ -58,6 +60,15 @@ function NegotiateContent() {
   const [comparedVersion, setComparedVersion] = useState<number>(2);
   const [diffClauses, setDiffClauses] = useState<DiffClause[]>([]);
   const [summary, setSummary] = useState<Record<string, number> | null>(null);
+  const [redlineHtml, setRedlineHtml] = useState<string>("");
+  const [viewMode, setViewMode] = useState<"structured" | "redline">("structured");
+  const [proposal, setProposal] = useState({
+    change_type: "clarification",
+    clause_identifier: "",
+    new_content: "",
+    reason: "",
+  });
+  const [proposing, setProposing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState("");
@@ -93,8 +104,36 @@ function NegotiateContent() {
         })
         .catch(console.error)
         .finally(() => setDiffLoading(false));
+      getRedline(token, agreementId, baseVersion, comparedVersion)
+        .then((data) => setRedlineHtml(data.redline_html))
+        .catch(() => setRedlineHtml(""));
     }
   }, [token, agreementId, baseVersion, comparedVersion]);
+
+  const handlePropose = async () => {
+    if (!token || !agreementId || !proposal.clause_identifier || !proposal.new_content) return;
+    setProposing(true);
+    try {
+      await proposeChange(token, agreementId, {
+        change_type: proposal.change_type,
+        explanation: proposal.reason || undefined,
+        modifications: [
+          {
+            clause_identifier: proposal.clause_identifier,
+            change_type: proposal.change_type === "scope_change" ? "modified" : "modified",
+            new_content: proposal.new_content,
+            reason: proposal.reason || undefined,
+          },
+        ],
+      });
+      setProposal({ change_type: "clarification", clause_identifier: "", new_content: "", reason: "" });
+      setChanges(await listChanges(token, agreementId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Proposal failed");
+    } finally {
+      setProposing(false);
+    }
+  };
 
   const handleAccept = async (changeId: string) => {
     if (!token || !agreementId) return;
@@ -277,16 +316,96 @@ function NegotiateContent() {
               </div>
             )}
           </div>
+
+          {/* New Proposal Form */}
+          <div className="bg-white shadow rounded-lg p-4">
+            <h2 className="text-sm font-medium text-gray-900 mb-3">
+              Propose Change
+            </h2>
+            <div className="space-y-2">
+              <select
+                value={proposal.change_type}
+                onChange={(e) => setProposal({ ...proposal, change_type: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+              >
+                <option value="clarification">Clarification</option>
+                <option value="term_change">Term change</option>
+                <option value="scope_change">Scope change</option>
+                <option value="legal_review">Legal review</option>
+              </select>
+              <input
+                type="text"
+                placeholder="Clause identifier (e.g. 5.2 Liability)"
+                value={proposal.clause_identifier}
+                onChange={(e) => setProposal({ ...proposal, clause_identifier: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+              />
+              <textarea
+                placeholder="Proposed content"
+                rows={3}
+                value={proposal.new_content}
+                onChange={(e) => setProposal({ ...proposal, new_content: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+              />
+              <input
+                type="text"
+                placeholder="Reason (optional)"
+                value={proposal.reason}
+                onChange={(e) => setProposal({ ...proposal, reason: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5"
+              />
+              <button
+                onClick={handlePropose}
+                disabled={proposing || !proposal.clause_identifier || !proposal.new_content}
+                className="w-full text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {proposing ? "Submitting..." : "Submit proposal"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Main Diff View */}
         <div className="lg:col-span-3">
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">
-              Redline View
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-gray-900">Redline View</h2>
+              <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+                <button
+                  onClick={() => setViewMode("structured")}
+                  className={`text-xs px-3 py-1.5 ${
+                    viewMode === "structured"
+                      ? "bg-gray-900 text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Structured
+                </button>
+                <button
+                  onClick={() => setViewMode("redline")}
+                  className={`text-xs px-3 py-1.5 ${
+                    viewMode === "redline"
+                      ? "bg-gray-900 text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  Legal redline
+                </button>
+              </div>
+            </div>
 
-            {diffLoading ? (
+            {viewMode === "redline" ? (
+              redlineHtml ? (
+                <div
+                  className="prose prose-sm max-w-none [&_ins]:bg-green-100 [&_ins]:text-green-800 [&_ins]:no-underline [&_del]:bg-red-100 [&_del]:text-red-700"
+                  dangerouslySetInnerHTML={{ __html: redlineHtml }}
+                />
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  No redline available for this comparison
+                </div>
+              )
+            ) : diffLoading ? (
               <div className="text-center py-8 text-gray-500">
                 Loading diff...
               </div>

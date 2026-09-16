@@ -215,12 +215,44 @@ export default function DashboardLayout({
                 <span aria-hidden="true">🚨</span>
               </Link>
               <Link
+                href="/settings/organization"
+                title="Organization settings"
+                aria-label="Organization settings"
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                <span aria-hidden="true">🏢</span>
+              </Link>
+              <Link
                 href="/settings/branding"
                 title="Branding settings"
                 aria-label="Branding settings"
                 className="text-sm text-gray-500 hover:text-gray-700"
               >
                 <span aria-hidden="true">🎨</span>
+              </Link>
+              <Link
+                href="/settings/webhooks"
+                title="Webhook settings"
+                aria-label="Webhook settings"
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                <span aria-hidden="true">🔗</span>
+              </Link>
+              <Link
+                href="/observability"
+                title="Observability"
+                aria-label="Observability"
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                <span aria-hidden="true">📈</span>
+              </Link>
+              <Link
+                href="/data-governance"
+                title="Data governance"
+                aria-label="Data governance"
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                <span aria-hidden="true">🛡️</span>
               </Link>
               <button
                 onClick={logout}

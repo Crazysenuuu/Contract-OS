@@ -267,6 +267,45 @@ export async function listTemplates() {
   );
 }
 
+export interface TemplateVariable {
+  id: string;
+  template_id: string;
+  key: string;
+  label: string;
+  var_type: string;
+  required: boolean;
+  default_value: string | null;
+  options: Array<{ value: string; label: string }> | null;
+  description: string | null;
+  sort_order: number;
+}
+
+export interface TemplateDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  jurisdiction: string | null;
+  language: string | null;
+  status: string;
+  is_system: boolean;
+  agreement_type_id: string | null;
+  variables: TemplateVariable[];
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listTemplatesPage(token: string) {
+  return apiRequest<TemplateDetail[]>("/templates?page_size=100", { token });
+}
+
+export async function getTemplateById(token: string, templateId: string) {
+  return apiRequest<TemplateDetail>(`/templates/${templateId}`, { token });
+}
+
+export async function listTemplateVersions(token: string, templateId: string) {
+  return apiRequest<Array<{ id: string; template_id: string; version_number: number; content: string; created_by: string | null; locked_at: string | null; created_at: string; updated_at: string }>>(`/templates/${templateId}/versions`, { token });
+}
+
 export async function getTemplateQuestions(templateKey: string) {
   return apiRequest<
     Array<{
@@ -1317,6 +1356,28 @@ export async function getQueueStats(token: string) {
   return apiRequest<{ total_jobs: number; by_status: Record<string, number>; oldest_pending: string | null }>("/phase4/jobs/queue/stats", { token });
 }
 
+// Metrics / Observability
+export async function getMetricsSummary(token: string) {
+  return apiRequest<{
+    uptime: number;
+    requests: { total: number; errors: number };
+    translations: { queue_size: number; completed_last_hour: number };
+    database: Record<string, unknown>;
+  }>("/metrics/summary", { token });
+}
+
+export async function getMetricsAlerts(token: string) {
+  return apiRequest<{
+    alerts: Array<{ severity: string; message: string; metric: string; value: number; threshold: number }>;
+    alert_count: number;
+    has_critical: boolean;
+  }>("/metrics/alerts", { token });
+}
+
+export async function getMetricsDashboard(token: string) {
+  return apiRequest<Record<string, unknown>>("/metrics/dashboard", { token });
+}
+
 // Translation Sync
 export async function createVersionWithTranslations(token: string, agreementId: string, data: { content: string; sync_existing?: boolean }) {
   return apiRequest<{ version_id: string; version_number: number; translation_sync: Record<string, unknown> }>(`/translation-sync/agreements/${agreementId}/versions/translate`, { method: "POST", body: data, token });
@@ -1402,6 +1463,44 @@ export async function getTranslationProgressDashboard(token: string) {
 
 export async function getTranslationStats(token: string) {
   return apiRequest<{ overall: { total: number; completed: number; pending: number; progress_percent: number }; by_language: Record<string, { total: number; completed: number; progress_percent: number }>; throughput: { items_per_minute: number; items_last_hour: number }; live: { active_workers: number; current_processing: number } }>("/translation-progress/stats", { token });
+}
+
+// Data Governance: Retention & Legal Holds
+export async function listRetentionPolicies(token: string) {
+  return apiRequest<Array<{ id: string; name: string; description: string | null; scope: string; agreement_type_key: string | null; retention_months: number; disposition: string; is_active: boolean; created_at: string }>>("/retention/policies", { token });
+}
+
+export async function createRetentionPolicy(token: string, data: { name: string; description?: string; scope: string; agreement_type_key?: string; retention_months: number; disposition: string; is_active?: boolean }) {
+  return apiRequest<{ id: string; name: string; scope: string; retention_months: number; disposition: string }>("/retention/policies", { method: "POST", body: data, token });
+}
+
+export async function updateRetentionPolicy(token: string, policyId: string, data: { retention_months?: number; disposition?: string; is_active?: boolean }) {
+  return apiRequest<{ id: string }>(`/retention/policies/${policyId}`, { method: "PATCH", body: data, token });
+}
+
+export async function listLegalHolds(token: string, agreementId?: string) {
+  return apiRequest<Array<{ id: string; agreement_id: string | null; reason: string; hold_type: string; released_at: string | null; created_at: string }>>(`/retention/holds${agreementId ? `?agreement_id=${agreementId}` : ""}`, { token });
+}
+
+export async function createLegalHold(token: string, data: { agreement_id?: string; reason: string; hold_type?: string }) {
+  return apiRequest<{ id: string; reason: string; hold_type: string }>("/retention/holds", { method: "POST", body: data, token });
+}
+
+export async function releaseLegalHold(token: string, holdId: string) {
+  return apiRequest<{ id: string; released_at: string | null }>(`/retention/holds/${holdId}/release`, { method: "POST", token });
+}
+
+// Data Governance: Privacy (GDPR erasure)
+export async function listErasureRequests(token: string) {
+  return apiRequest<Array<{ id: string; data_subject: string; regulation: string; status: string; agreement_id: string | null; shredded_fields: string[] | null; completed_at: string | null }>>("/privacy/erasure-requests", { token });
+}
+
+export async function createErasureRequest(token: string, data: { data_subject: string; agreement_id?: string; regulation?: string }) {
+  return apiRequest<{ id: string; status: string }>("/privacy/erasure-requests", { method: "POST", body: data, token });
+}
+
+export async function executeErasureRequest(token: string, requestId: string, data: { field_paths?: string[]; agreement_id?: string; preserved_notes?: string }) {
+  return apiRequest<{ id: string; status: string; shredded_fields: string[] }>(`/privacy/erasure-requests/${requestId}/execute`, { method: "POST", body: data, token });
 }
 
 // Feature Flags

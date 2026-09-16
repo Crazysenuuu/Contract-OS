@@ -3,49 +3,53 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  getTemplateById,
+  listTemplateVersions,
+  type TemplateDetail,
+  type TemplateVariable,
+} from "@/lib/api";
 
 interface TemplateVersion {
   id: string;
+  template_id: string;
   version_number: number;
-  status: string;
-  created_at: string;
+  content: string;
+  created_by: string | null;
   locked_at: string | null;
-}
-
-interface Template {
-  id: string;
-  name: string;
-  description: string | null;
-  jurisdiction: string | null;
-  language: string;
-  status: string;
-  is_system: boolean;
   created_at: string;
   updated_at: string;
-  agreement_type_name: string | null;
-  versions: TemplateVersion[];
 }
 
 export default function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { token } = useAuth();
   const router = useRouter();
-  const [template, setTemplate] = useState<Template | null>(null);
+  const [template, setTemplate] = useState<TemplateDetail | null>(null);
+  const [versions, setVersions] = useState<TemplateVersion[]>([]);
+  const [variables, setVariables] = useState<TemplateVariable[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) { router.push("/login"); return; }
     if (!id) return;
-    fetch(`/api/v1/templates/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status}`);
-        return r.json();
+    Promise.all([
+      getTemplateById(token, id).catch(() => null),
+      listTemplateVersions(token, id).catch(() => []),
+    ])
+      .then(([tpl, vers]) => {
+        if (!tpl) {
+          setError("Template not found.");
+          return;
+        }
+        setTemplate(tpl);
+        setVersions(vers);
+        setVariables(tpl.variables ?? []);
       })
-      .then(setTemplate)
-      .catch((e) => setError(e.message))
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : "Failed to load template")
+      )
       .finally(() => setLoading(false));
   }, [token, id, router]);
 
@@ -108,16 +112,16 @@ export default function TemplateDetailPage() {
           </div>
           <dl className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
-              <dt className="text-xs text-gray-400 uppercase tracking-wide">Type</dt>
-              <dd className="mt-0.5 text-sm text-gray-700">{template.agreement_type_name ?? "—"}</dd>
-            </div>
-            <div>
               <dt className="text-xs text-gray-400 uppercase tracking-wide">Jurisdiction</dt>
               <dd className="mt-0.5 text-sm text-gray-700">{template.jurisdiction ?? "—"}</dd>
             </div>
             <div>
               <dt className="text-xs text-gray-400 uppercase tracking-wide">Language</dt>
-              <dd className="mt-0.5 text-sm uppercase text-gray-700">{template.language}</dd>
+              <dd className="mt-0.5 text-sm uppercase text-gray-700">{template.language ?? "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400 uppercase tracking-wide">Variables</dt>
+              <dd className="mt-0.5 text-sm text-gray-700">{variables.length}</dd>
             </div>
             <div>
               <dt className="text-xs text-gray-400 uppercase tracking-wide">Last updated</dt>
@@ -126,6 +130,62 @@ export default function TemplateDetailPage() {
               </dd>
             </div>
           </dl>
+        </div>
+
+        {/* Variables / questions */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-6">
+          <h2 className="text-base font-semibold text-gray-900 mb-4">
+            Fill-in Questions
+          </h2>
+          {variables.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">
+              This template has no fill-in variables — it renders as-is.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                    <th className="py-2 pr-4">Key</th>
+                    <th className="py-2 pr-4">Label</th>
+                    <th className="py-2 pr-4">Type</th>
+                    <th className="py-2 pr-4">Required</th>
+                    <th className="py-2">Default</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {[...variables]
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((v) => (
+                      <tr key={v.id}>
+                        <td className="py-2 pr-4 font-mono text-xs text-gray-700">{v.key}</td>
+                        <td className="py-2 pr-4 text-gray-900">
+                          {v.label}
+                          {v.description && (
+                            <span className="block text-xs text-gray-400">{v.description}</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4">
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                            {v.var_type}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          {v.required ? (
+                            <span className="text-red-500">required</span>
+                          ) : (
+                            <span className="text-gray-400">optional</span>
+                          )}
+                        </td>
+                        <td className="py-2 text-xs text-gray-500">
+                          {v.default_value ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Versions */}
@@ -140,11 +200,11 @@ export default function TemplateDetailPage() {
               + Add version
             </button>
           </div>
-          {template.versions.length === 0 ? (
+          {versions.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">No versions yet.</p>
           ) : (
             <div className="divide-y divide-gray-100">
-              {[...template.versions]
+              {[...versions]
                 .sort((a, b) => b.version_number - a.version_number)
                 .map((v) => (
                   <div key={v.id} className="py-3 flex items-center justify-between">
@@ -154,14 +214,12 @@ export default function TemplateDetailPage() {
                       </span>
                       <span
                         className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          v.status === "approved"
+                          v.locked_at
                             ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                            : v.status === "draft"
-                            ? "bg-gray-100 text-gray-600 border border-gray-200"
                             : "bg-amber-100 text-amber-700 border border-amber-200"
                         }`}
                       >
-                        {v.status}
+                        {v.locked_at ? "locked" : "draft"}
                       </span>
                     </div>
                     <div className="text-xs text-gray-400">

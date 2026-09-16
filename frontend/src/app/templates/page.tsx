@@ -4,18 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
-
-interface Template {
-  id: string;
-  name: string;
-  description: string | null;
-  jurisdiction: string | null;
-  language: string;
-  status: string;
-  is_system: boolean;
-  created_at: string;
-  agreement_type_name: string | null;
-}
+import { listTemplatesPage, type TemplateDetail } from "@/lib/api";
 
 const statusBadge: Record<string, string> = {
   draft: "bg-gray-100 text-gray-600 border border-gray-200",
@@ -26,7 +15,7 @@ const statusBadge: Record<string, string> = {
 export default function TemplatesPage() {
   const { token } = useAuth();
   const router = useRouter();
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templates, setTemplates] = useState<TemplateDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -34,15 +23,11 @@ export default function TemplatesPage() {
   const load = useCallback(() => {
     if (!token) return;
     setLoading(true);
-    fetch("/api/v1/templates?page_size=100", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status}`);
-        return r.json();
-      })
-      .then((d) => setTemplates(d.items ?? d))
-      .catch((e) => setError(e.message))
+    listTemplatesPage(token)
+      .then((d) => setTemplates(d))
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : "Failed to load templates")
+      )
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -144,9 +129,9 @@ export default function TemplatesPage() {
                   </p>
                 )}
                 <div className="flex flex-wrap gap-1.5 mt-auto">
-                  {t.agreement_type_name && (
+                  {t.variables && t.variables.length > 0 && (
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                      {t.agreement_type_name}
+                      {t.variables.length} variables
                     </span>
                   )}
                   {t.jurisdiction && (
