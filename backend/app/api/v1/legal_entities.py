@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.rbac import require_permission
 from app.dependencies.tenant import get_current_organization_id
 from app.models.legal_entity import LegalEntity
 from app.models.user import User
@@ -19,11 +20,14 @@ router = APIRouter(
     tags=["legal-entities"],
 )
 
+_perm_legal_entity_manage = Depends(require_permission("legal_entity.manage"))
+
 
 @router.post(
     "",
     response_model=LegalEntityResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[_perm_legal_entity_manage],
 )
 async def create_legal_entity(
     data: LegalEntityCreate,

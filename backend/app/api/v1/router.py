@@ -74,6 +74,8 @@ from app.api.v1.clauses import router as clauses_router
 from app.api.v1.sso import router as sso_router
 from app.api.v1.sso import scim_router
 from app.api.v1.templates import router as templates_router
+from app.api.v1.analytics import router as analytics_router
+from app.api.v1.compliance_summary import router as compliance_summary_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -150,6 +152,8 @@ api_router.include_router(clauses_router)
 api_router.include_router(sso_router)
 api_router.include_router(scim_router)
 api_router.include_router(templates_router)
+api_router.include_router(analytics_router)
+api_router.include_router(compliance_summary_router)
 
 # External party review endpoints are mounted directly in main.py
 # (no /api/v1 prefix - token-based auth)

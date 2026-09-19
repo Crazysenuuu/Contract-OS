@@ -8,6 +8,7 @@ that the connection-admin surface defers to a gateway in production.
 
 import secrets
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -19,6 +20,7 @@ from app.core.database import get_db
 from app.core.security import create_access_token
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
+from app.dependencies.rbac import require_permission
 from app.models.sso import SSOConnection
 from app.models.user import User
 from app.services import oidc_service, scim_service
@@ -26,6 +28,8 @@ from app.services.auth_security_service import create_refresh_token
 
 router = APIRouter(prefix="/sso", tags=["SSO"])
 scim_router = APIRouter(prefix="/scim/v2", tags=["SCIM"])
+
+_perm_org_manage_sso = Depends(require_permission("org.manage_sso"))
 
 settings = get_settings_lazy()
 
@@ -68,7 +72,7 @@ async def list_connections(
     return [_connection_dict(c) for c in result.scalars().all()]
 
 
-@router.post("/connections", status_code=status.HTTP_201_CREATED)
+@router.post("/connections", status_code=status.HTTP_201_CREATED, dependencies=[_perm_org_manage_sso])
 async def create_connection(
     data: SSOConnectionCreate,
     current_user: User = Depends(get_current_user),
@@ -126,7 +130,7 @@ class SCIMTokenCreate(BaseModel):
     name: str
 
 
-@router.post("/scim-tokens", status_code=status.HTTP_201_CREATED)
+@router.post("/scim-tokens", status_code=status.HTTP_201_CREATED, dependencies=[_perm_org_manage_sso])
 async def create_scim_token(
     data: SCIMTokenCreate,
     current_user: User = Depends(get_current_user),

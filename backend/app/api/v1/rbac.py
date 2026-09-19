@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.rbac import require_permission
 from app.dependencies.tenant import get_current_organization_id
 from app.models.rbac import (
     OrganizationMember,
@@ -23,6 +24,9 @@ from app.models.rbac import (
 from app.models.user import User
 
 router = APIRouter(prefix="/rbac", tags=["RBAC"])
+
+_manage_roles = Depends(require_permission("org.manage_roles"))
+_manage_members = Depends(require_permission("org.manage_members"))
 
 
 class RoleCreateRequest(BaseModel):
@@ -141,7 +145,7 @@ async def get_role(
     return _role_response(role, perms)
 
 
-@router.post("/roles", status_code=201)
+@router.post("/roles", status_code=201, dependencies=[_manage_roles])
 async def create_role(
     request: RoleCreateRequest,
     org_id: UUID = Depends(get_current_organization_id),
@@ -181,7 +185,7 @@ async def create_role(
     return _role_response(role, [{"key": k} for k in request.permission_keys])
 
 
-@router.put("/roles/{role_id}/permissions")
+@router.put("/roles/{role_id}/permissions", dependencies=[_manage_roles])
 async def update_role_permissions(
     role_id: str,
     request: PermissionsUpdateRequest,
@@ -211,7 +215,7 @@ async def update_role_permissions(
     return {"updated": True, "role_id": str(role.id), "permissions": request.permission_keys}
 
 
-@router.delete("/roles/{role_id}", status_code=200)
+@router.delete("/roles/{role_id}", status_code=200, dependencies=[_manage_roles])
 async def delete_role(
     role_id: str,
     org_id: UUID = Depends(get_current_organization_id),
@@ -234,7 +238,7 @@ async def delete_role(
     return {"deleted": True, "role_id": role_id}
 
 
-@router.post("/members", status_code=201)
+@router.post("/members", status_code=201, dependencies=[_manage_members])
 async def add_member(
     request: MemberAddRequest,
     org_id: UUID = Depends(get_current_organization_id),
@@ -274,7 +278,7 @@ async def add_member(
     }
 
 
-@router.put("/members/{member_id}/role")
+@router.put("/members/{member_id}/role", dependencies=[_manage_members])
 async def update_member_role(
     member_id: str,
     request: MemberRoleUpdateRequest,
@@ -310,7 +314,7 @@ async def update_member_role(
     }
 
 
-@router.delete("/members/{member_id}", status_code=200)
+@router.delete("/members/{member_id}", status_code=200, dependencies=[_manage_members])
 async def remove_member(
     member_id: str,
     org_id: UUID = Depends(get_current_organization_id),

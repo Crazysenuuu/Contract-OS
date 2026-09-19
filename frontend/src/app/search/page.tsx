@@ -15,19 +15,26 @@ import {
   updateSavedSearch,
 } from "@/lib/api";
 
+// Mirrors backend/app/domain/agreement_states.py (spec §66).
 const STATUSES = [
   "draft",
   "internal_review",
-  "approval",
-  "sent",
-  "negotiating",
+  "pending_approval",
   "approved",
+  "sent",
+  "viewed",
+  "negotiating",
+  "ready_for_signature",
   "signing",
+  "partially_signed",
   "executed",
   "active",
   "expiring",
+  "renewed",
   "expired",
   "terminated",
+  "superseded",
+  "cancelled",
 ];
 
 export default function SearchPage() {

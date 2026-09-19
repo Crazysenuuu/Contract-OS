@@ -557,3 +557,61 @@ async def graph_stats(
         "edges": 1 if edges else 0,
         "by_type": node_types,
     }
+async def supplier_risk_analysis(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    party_name: str,
+) -> dict:
+    """Evaluate supplier risk using the risk graph and AI copilot style analysis."""
+    from sqlalchemy import and_, func
+
+    # Find the party node
+    party_result = await db.execute(
+        select(RiskGraphNode).where(
+            RiskGraphNode.organization_id == organization_id,
+            RiskGraphNode.node_type == "party",
+            RiskGraphNode.label == party_name
+        )
+    )
+    party_node = party_result.scalar_one_or_none()
+    
+    if not party_node:
+        return {"error": "Supplier not found", "risk_score": 0.0, "details": []}
+
+    # Gather agreements involving this party
+    edge_result = await db.execute(
+        select(RiskGraphEdge).where(
+            RiskGraphEdge.organization_id == organization_id,
+            RiskGraphEdge.target_node_id == party_node.id,
+            RiskGraphEdge.edge_type == "HAS_PARTY"
+        )
+    )
+    edges = edge_result.scalars().all()
+    
+    agreement_ids = [e.source_node_id for e in edges]
+    
+    if not agreement_ids:
+        return {"risk_score": 0.0, "supplier": party_name, "details": [], "agreements_count": 0}
+
+    # Aggregate risks from those agreements
+    risk_result = await db.execute(
+        select(
+            func.coalesce(func.sum(RiskGraphEdge.weight), 0.0).label("risk_score")
+        )
+        .where(
+            RiskGraphEdge.organization_id == organization_id,
+            RiskGraphEdge.source_node_id.in_(agreement_ids),
+            RiskGraphEdge.edge_type == "HAS_CLAUSE"
+        )
+    )
+    total_risk = risk_result.scalar() or 0.0
+
+    return {
+        "supplier": party_name,
+        "agreements_count": len(agreement_ids),
+        "risk_score": round(float(total_risk), 2),
+        "details": [
+            {"type": "aggregated_clauses", "weight": round(float(total_risk), 2)}
+        ]
+    }

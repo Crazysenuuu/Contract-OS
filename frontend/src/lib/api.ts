@@ -143,7 +143,7 @@ export async function listAgreementTypes(token: string) {
 // generic template_key, so questions must be resolved per type id — the
 // template-key endpoint cannot disambiguate between types using the same
 // template.
-export async function getAgreementTypeQuestions(typeId: string) {
+export async function getAgreementTypeQuestions(typeId: string, token?: string) {
   return apiRequest<
     Array<{
       id: string;
@@ -153,8 +153,16 @@ export async function getAgreementTypeQuestions(typeId: string) {
       default?: unknown;
       options?: Array<{ value: string; label: string }>;
       section: string;
+      // Dynamic questionnaire (spec §4.2): declarative branch condition.
+      condition?: { field?: string; operator?: string; value?: unknown };
+      placeholder?: string;
+      helper_text?: string;
+      min?: number;
+      max?: number;
+      step?: number;
+      rows?: number;
     }>
-  >(`/agreements/types/${typeId}/questions`);
+  >(`/agreements/types/${typeId}/questions`, { token });
 }
 
 export async function listAgreements(token: string) {
@@ -2999,4 +3007,334 @@ export async function evaluateRules(
     total: number;
     matched_rule: RuleDefinitionPayload | null;
   }>("/rules-engine/evaluate", { method: "POST", body: context, token });
+}
+
+// ─── Signature progress (spec §67) ───────────────────────────────────────────
+
+export interface SignatureProgress {
+  agreement_id: string;
+  status: string;
+  required_external: number;
+  signed_external: number;
+  internal_signatures: number;
+  missing_external: string[];
+  all_signed: boolean;
+}
+
+export async function getSignatureProgress(token: string, agreementId: string) {
+  return apiRequest<SignatureProgress>(`/agreements/${agreementId}/signature-progress`, { token });
+}
+
+// ─── Amendments (spec §36) ───────────────────────────────────────────────────
+
+export interface AmendmentChange {
+  section_key: string;
+  change_type: string;
+  old_text?: string | null;
+  new_text: string;
+}
+
+export interface Amendment {
+  id: string;
+  agreement_id: string;
+  amendment_number: number;
+  title: string;
+  description: string | null;
+  reason: string | null;
+  status: string;
+  version_number: number;
+  effective_date: string | null;
+  created_at: string;
+  changes?: AmendmentChange[] | null;
+}
+
+export async function listAmendments(token: string, agreementId: string) {
+  return apiRequest<Amendment[]>(`/agreements/${agreementId}/amendments`, { token });
+}
+
+export async function createAmendment(
+  token: string,
+  agreementId: string,
+  data: { title: string; description?: string; reason?: string; changes: AmendmentChange[] }
+) {
+  return apiRequest<Amendment>(`/agreements/${agreementId}/amendments`, {
+    method: "POST",
+    body: data,
+    token,
+  });
+}
+
+export async function activateAmendment(
+  token: string,
+  agreementId: string,
+  amendmentId: string,
+  effectiveDate?: string
+) {
+  return apiRequest<Amendment>(`/agreements/${agreementId}/amendments/${amendmentId}/activate`, {
+    method: "POST",
+    body: { effective_date: effectiveDate || null },
+    token,
+  });
+}
+
+// ─── Terminations (spec §66 ACTIVE → TERMINATED) ─────────────────────────────
+
+export interface Termination {
+  id: string;
+  agreement_id: string;
+  initiated_at: string;
+  reason_code: string;
+  reason_detail: string | null;
+  notice_date: string | null;
+  notice_period_days: number | null;
+  notice_served: boolean;
+  cure_required: boolean;
+  cure_period_days: number | null;
+  cure_deadline: string | null;
+  cured: boolean | null;
+  status: string;
+  effective_date?: string | null;
+}
+
+export async function listTerminations(token: string, agreementId: string) {
+  return apiRequest<Termination[]>(`/agreements/${agreementId}/terminations`, { token });
+}
+
+export async function initiateTermination(
+  token: string,
+  agreementId: string,
+  data: {
+    reason_code: string;
+    reason_detail?: string;
+    notice_period_days?: number;
+    cure_required?: boolean;
+    cure_period_days?: number;
+  }
+) {
+  return apiRequest<Termination>(`/agreements/${agreementId}/terminations`, {
+    method: "POST",
+    body: data,
+    token,
+  });
+}
+
+export async function issueTerminationNotice(token: string, agreementId: string, terminationId: string) {
+  return apiRequest<Termination>(`/agreements/${agreementId}/terminations/${terminationId}/notice`, {
+    method: "POST",
+    body: {},
+    token,
+  });
+}
+
+export async function completeTermination(
+  token: string,
+  agreementId: string,
+  terminationId: string,
+  effectiveDate?: string
+) {
+  return apiRequest<Termination>(`/agreements/${agreementId}/terminations/${terminationId}/complete`, {
+    method: "POST",
+    body: { effective_date: effectiveDate || null },
+    token,
+  });
+}
+
+export async function cancelTermination(token: string, agreementId: string, terminationId: string) {
+  return apiRequest<Termination>(`/agreements/${agreementId}/terminations/${terminationId}/cancel`, {
+    method: "POST",
+    body: {},
+    token,
+  });
+}
+
+// ─── RBAC (spec §51) ─────────────────────────────────────────────────────────
+
+export interface RbacPermission {
+  key: string;
+  description: string | null;
+}
+
+export interface RbacRole {
+  id: string;
+  name: string;
+  description: string | null;
+  organization_id: string;
+  permissions: RbacPermission[];
+}
+
+export async function listRbacPermissions(token: string) {
+  return apiRequest<RbacPermission[]>("/rbac/permissions", { token });
+}
+
+export async function listRbacRoles(token: string) {
+  return apiRequest<RbacRole[]>("/rbac/roles", { token });
+}
+
+export async function createRbacRole(
+  token: string,
+  data: { name: string; description?: string; permission_keys: string[] }
+) {
+  return apiRequest<RbacRole>("/rbac/roles", { method: "POST", body: data, token });
+}
+
+export async function updateRbacRolePermissions(token: string, roleId: string, permissionKeys: string[]) {
+  return apiRequest<{ updated: boolean }>(`/rbac/roles/${roleId}/permissions`, {
+    method: "PUT",
+    body: { permission_keys: permissionKeys },
+    token,
+  });
+}
+
+export async function deleteRbacRole(token: string, roleId: string) {
+  return apiRequest<{ deleted: boolean }>(`/rbac/roles/${roleId}`, { method: "DELETE", token });
+}
+
+export async function addRbacMember(token: string, data: { user_id: string; role_id: string }) {
+  return apiRequest<{ id: string; user_id: string; role_id: string; status: string }>("/rbac/members", {
+    method: "POST",
+    body: data,
+    token,
+  });
+}
+
+// ─── SSO / SCIM (spec §54) ───────────────────────────────────────────────────
+
+export interface SsoConnection {
+  id: string;
+  protocol: "saml" | "oidc";
+  name: string;
+  issuer: string | null;
+  client_id: string | null;
+  domains: string[];
+  default_role: string | null;
+  enforce_sso: boolean;
+  enabled: boolean;
+}
+
+export async function listSsoConnections(token: string) {
+  return apiRequest<SsoConnection[]>("/sso/connections", { token });
+}
+
+export async function createSsoConnection(
+  token: string,
+  data: {
+    protocol: "saml" | "oidc";
+    name: string;
+    issuer?: string;
+    client_id?: string;
+    client_secret_ref?: string;
+    idp_metadata_url?: string;
+    domains: string[];
+    default_role?: string;
+    enforce_sso?: boolean;
+  }
+) {
+  return apiRequest<SsoConnection>("/sso/connections", { method: "POST", body: data, token });
+}
+
+export async function testSsoConnection(token: string, connectionId: string) {
+  return apiRequest<{ ok?: boolean; status?: string; detail?: string; [k: string]: unknown }>(
+    `/sso/connections/${connectionId}/test`,
+    { method: "POST", body: {}, token }
+  );
+}
+
+export async function createScimToken(token: string, connectionId?: string) {
+  return apiRequest<{ token: string; id?: string; [k: string]: unknown }>("/sso/scim-tokens", {
+    method: "POST",
+    body: connectionId ? { connection_id: connectionId } : {},
+    token,
+  });
+}
+
+// ─── Documents repository (spec §24 / 2.07.24) ───────────────────────────────
+
+export interface RepositoryDocument {
+  id: string;
+  title: string;
+  filename: string | null;
+  media_type: string | null;
+  sha256: string | null;
+  size_bytes: number | null;
+  classification: string | null;
+  status: string;
+  immutable: boolean;
+  document_type: string | null;
+  created_at: string | null;
+}
+
+export async function listAgreementDocuments(token: string, agreementId: string) {
+  return apiRequest<{ documents: RepositoryDocument[] }>(`/agreements/${agreementId}/documents`, { token });
+}
+
+// ─── Analytics (spec §84-85) ──────────────────────────────────────────────
+
+export interface ExecutiveAnalytics {
+  volume: {
+    total: number;
+    by_status: Record<string, number>;
+    by_type: Record<string, number>;
+    monthly_trend: { month: string; count: number }[];
+  };
+  cycle_time: { average_days: number; median_days: number; sample_size: number };
+  approval_time: { average_days: number; sample_size: number };
+  rates: {
+    renewal_rate: number;
+    termination_rate: number;
+    obligation_compliance_rate: number;
+    execution_rate: number;
+  };
+  obligations: { total: number; completed: number; overdue: number };
+  risk: { low: number; medium: number; high: number; critical: number };
+}
+
+export interface FinancialAnalytics {
+  total_contract_value: number;
+  committed_spend: number;
+  outstanding_obligations: number;
+  overdue_obligations: number;
+  average_value_by_type: Record<string, { average_value: number; count: number }>;
+  value_by_status: Record<string, { total_value: number; count: number }>;
+}
+
+export async function getExecutiveAnalytics(token: string): Promise<ExecutiveAnalytics> {
+  return apiRequest<ExecutiveAnalytics>('/analytics/executive', { token });
+}
+
+export async function getFinancialAnalytics(token: string): Promise<FinancialAnalytics> {
+  return apiRequest<FinancialAnalytics>('/analytics/financial', { token });
+}
+
+// ─── Compliance summary (spec §89) ────────────────────────────────────────
+
+export interface ComplianceSummary {
+  contracts_requiring_review: number;
+  missing_dpa: number;
+  unsigned_amendments: number;
+  upcoming_renewals: number;
+  pending_approvals: number;
+  overdue_obligations: number;
+}
+
+export async function getComplianceSummary(token: string): Promise<ComplianceSummary> {
+  return apiRequest<ComplianceSummary>('/compliance/summary', { token });
+}
+
+// ─── Supplier intelligence (spec §86) ─────────────────────────────────────
+
+export interface SupplierIntelligence {
+  suppliers: {
+    company_name: string;
+    contract_count: number;
+    total_value: number;
+    active_contracts: number;
+    pending_contracts: number;
+    obligations: { total: number; completed: number; overdue: number };
+    renewals: number;
+  }[];
+  total_suppliers: number;
+}
+
+export async function getSupplierIntelligence(token: string): Promise<SupplierIntelligence> {
+  return apiRequest<SupplierIntelligence>('/phase4/supplier-risk/aggregate', { token });
 }

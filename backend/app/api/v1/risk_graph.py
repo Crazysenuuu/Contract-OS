@@ -19,6 +19,7 @@ from app.services.risk_graph_service import (
     graph_stats,
     high_risk_agreements,
     impact_traversal,
+    supplier_risk_analysis,
 )
 
 router = APIRouter(prefix="/risk-graph", tags=["Contract Risk Graph"])
@@ -147,3 +148,13 @@ async def impact(
     )
 
 
+
+@router.get("/supplier-risk/{party_name}")
+async def supplier_risk(
+    party_name: str,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Evaluate supplier risk using the risk graph and AI copilot style analysis."""
+    return await supplier_risk_analysis(db, organization_id=org_id, party_name=party_name)

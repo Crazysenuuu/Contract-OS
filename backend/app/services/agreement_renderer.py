@@ -52,7 +52,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Party A Country",
         "type": "text",
         "required": True,
-        "default": "Sri Lanka",
         "section": "parties",
     },
     {
@@ -81,7 +80,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Party B Country",
         "type": "text",
         "required": True,
-        "default": "Sri Lanka",
         "section": "parties",
     },
     {
@@ -268,7 +266,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Governing Law",
         "type": "text",
         "required": True,
-        "default": "Sri Lanka",
         "section": "legal",
     },
     {
@@ -289,7 +286,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Arbitration Seat",
         "type": "text",
         "required": False,
-        "default": "Colombo, Sri Lanka",
         "section": "legal",
     },
     {
@@ -297,7 +293,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Arbitration Body",
         "type": "text",
         "required": False,
-        "default": "Sri Lanka Arbitration Centre",
         "section": "legal",
     },
     {
@@ -313,7 +308,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Mediation Seat",
         "type": "text",
         "required": False,
-        "default": "Colombo, Sri Lanka",
         "section": "legal",
     },
     {
@@ -321,7 +315,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Mediation Body",
         "type": "text",
         "required": False,
-        "default": "Sri Lanka Mediation Centre",
         "section": "legal",
     },
     {
@@ -337,7 +330,6 @@ MUTUAL_NDA_QUESTIONS = [
         "label": "Jurisdiction Court",
         "type": "text",
         "required": False,
-        "default": "Sri Lanka",
         "section": "legal",
     },
 ]
@@ -352,12 +344,50 @@ def get_template_questions(template_key: str) -> list[dict]:
     return _builtin_questions().get(template_key, [])
 
 
+# Question keys whose defaults are jurisdiction data (spec §71: never
+# hardcoded — resolved from the organisation's jurisdiction record).
+_JURISDICTION_DEFAULT_FIELDS: dict[str, str] = {
+    "governing_law": "name",
+    "jurisdiction_court": "name",
+    "party_a_country": "name",
+    "party_b_country": "name",
+    "arbitration_body": "arbitration_institution",
+    "dispute_resolution_method": "default_dispute_resolution",
+}
+
+
+def apply_jurisdiction_defaults(questions: list[dict], jurisdiction) -> list[dict]:
+    """Fill jurisdiction-derived defaults from a ``Jurisdiction`` row.
+
+    The wizard pre-fills these; because they equal the question default the
+    answers are classified SYSTEM_DEFAULT (spec §70) until the user confirms
+    them. When no jurisdiction is known the fields stay blank and the
+    quality gate reports them as REVIEW_REQUIRED instead of inventing one.
+    """
+    if jurisdiction is None:
+        return questions
+    out: list[dict] = []
+    for q in questions:
+        key = q.get("id") or q.get("key")
+        attr = _JURISDICTION_DEFAULT_FIELDS.get(key)
+        if attr and q.get("default") in (None, ""):
+            value = getattr(jurisdiction, attr, None)
+            if value:
+                q = {**q, "default": value}
+        out.append(q)
+    return out
+
+
 def normalize_questions_for_ui(questions: list[dict]) -> list[dict]:
     """Shape questions for the agreement wizard.
 
     The seeded schemas store questions keyed by ``key`` with ``options`` as
     plain strings; the wizard expects ``id`` and ``options`` as
     ``[{value, label}]`` objects with a ``section`` for grouping.
+
+    Declarative ``condition`` rules (spec §4.2) are preserved verbatim so the
+    wizard can do dynamic branch rendering and the backend can re-validate the
+    same rules at save time.
     """
     normalized = []
     for q in questions:
@@ -371,20 +401,54 @@ def normalize_questions_for_ui(questions: list[dict]) -> list[dict]:
             norm_options = []
             for opt in options:
                 if isinstance(opt, dict):
-                    norm_options.append({
-                        "value": opt.get("value") or opt.get("label"),
-                        "label": opt.get("label") or opt.get("value"),
-                    })
+                    value = opt.get("value")
+                    label = opt.get("label")
+                    if value is None and label is not None:
+                        value = label
+                    if label is None and value is not None:
+                        label = value
+                    norm_options.append({"value": value, "label": label})
                 else:
                     norm_options.append({"value": str(opt), "label": str(opt)})
 
-        item = {
+        item: dict = {
             "id": qid,
             "label": q.get("label") or qid,
             "type": q.get("type") or "text",
             "required": bool(q.get("required", False)),
             "section": q.get("section") or "general",
         }
+
+        # Dynamic questionnaire metadata (spec §4.2): declarative conditions
+        # driving branch visibility, plus UI affordances. Passed through but
+        # never executed server-side here — evaluation happens through
+        # app.services.condition_evaluator.
+        if q.get("condition") is not None:
+            item["condition"] = q["condition"]
+        if q.get("depends_on") is not None:
+            item["depends_on"] = q["depends_on"]
+        if q.get("group") is not None:
+            item["group"] = q["group"]
+        for aff_key in (
+            "placeholder",
+            "helper_text",
+            "hint",
+            "min",
+            "max",
+            "min_length",
+            "max_length",
+            "step",
+            "unit",
+            "prefix",
+            "suffix",
+            "rows",
+            "columns",
+            "multiple",
+            "options_exclusive",
+            "sortable",
+        ):
+            if q.get(aff_key) is not None:
+                item[aff_key] = q[aff_key]
         if q.get("default") is not None:
             item["default"] = q["default"]
         if norm_options is not None:
@@ -469,7 +533,12 @@ def validate_answers(
     if questions is None:
         questions = get_template_questions(template_key)
 
-    for q in questions:
+    # Dynamic questionnaire: only required fields the wizard actually showed
+    # (conditions satisfied) are mandatory (spec §4.2).
+    from app.services.condition_evaluator import filter_visible_questions
+
+    visible_questions = filter_visible_questions(questions, answers)
+    for q in visible_questions:
         if q.get("required") and q["id"] not in answers:
             errors.append(f"Missing required field: {q['label']}")
         elif q["id"] in answers:

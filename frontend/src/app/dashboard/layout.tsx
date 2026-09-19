@@ -73,6 +73,18 @@ export default function DashboardLayout({
                   Analytics
                 </Link>
                 <Link
+                  href="/contacts"
+                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-900"
+                >
+                  Contacts
+                </Link>
+                <Link
+                  href="/documents"
+                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-900"
+                >
+                  Documents
+                </Link>
+                <Link
                   href="/jurisdictions"
                   className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-900"
                 >
@@ -237,6 +249,22 @@ export default function DashboardLayout({
                 className="text-sm text-gray-500 hover:text-gray-700"
               >
                 <span aria-hidden="true">🔗</span>
+              </Link>
+              <Link
+                href="/settings/roles"
+                title="Roles and permissions"
+                aria-label="Roles and permissions"
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                <span aria-hidden="true">👥</span>
+              </Link>
+              <Link
+                href="/settings/sso"
+                title="Single sign-on"
+                aria-label="Single sign-on"
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                <span aria-hidden="true">🔑</span>
               </Link>
               <Link
                 href="/observability"

@@ -1,6 +1,6 @@
 # ContractOS
 
-AI-powered agreement lifecycle platform: generate, negotiate, approve, sign, and monitor agreements with a 56-type catalog, per-jurisdiction templates, SLA monitoring, and a multi-language translation pipeline.
+AI-powered agreement lifecycle platform: generate, negotiate, approve, sign, and monitor agreements with a 69-type catalog (12 MVP + 57 extended), per-jurisdiction templates, SLA monitoring, and a multi-language translation pipeline.
 
 **Stack**: FastAPI (Python 3.14) · Next.js 16 · Flutter · PostgreSQL · Redis · Celery
 
@@ -31,7 +31,7 @@ python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env               # then edit DATABASE_URL / JWT_SECRET_KEY
 alembic upgrade head               # create schema
-python seed_data.py                # seed jurisdictions, clauses, 56-type catalog
+python seed_data.py                # seed jurisdictions, clauses, agreement catalog
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -57,8 +57,8 @@ docker-compose up -d               # postgres, redis, backend, frontend, celery,
 
 ```bash
 make test              # backend → frontend (tsc + lint + build) → e2e
-make test-backend      # pytest (822 tests)
-make test-frontend     # npm ci + tsc --noEmit + eslint + next build
+make test-backend      # pytest
+make test-frontend     # npm ci + tsc --noEmit + eslint + vitest + next build
 make test-e2e          # boots backend on :8000, seeds e2e fixtures, runs Playwright
 ```
 
@@ -70,7 +70,7 @@ Useful E2E environment flags (see `scripts/test.sh`):
 | `BACKEND_LOG_FILE=path` | Write backend log to `path` (CI uses this for artifacts) |
 | `KEEP_BACKEND_LOG=1` | Keep the temp backend log after the run |
 
-E2E fixtures come from `backend/scripts/seed_e2e.py` (test user `test@example.com` / `password123`, idempotent, 56 catalog types).
+E2E fixtures come from `backend/scripts/seed_e2e.py` (test user `test@example.com` / `password123`, idempotent, full agreement catalog; refuses to run when ENVIRONMENT=production).
 
 ## Common Make targets
 
@@ -96,7 +96,11 @@ E2E fixtures come from `backend/scripts/seed_e2e.py` (test user `test@example.co
 
 ## Key backend concepts
 
-- **Agreement catalog** (`seed_data.py`): 56 types across corporate/governance, commercial, services, procurement, dispute, and employment categories — each with its own questionnaire schema and template binding (Board Resolution has a dedicated template).
+- **Agreement catalog** (`seed_data.py`): 69 types (12 MVP types with dedicated templates + 57 extended types across corporate/governance, commercial, services, procurement, dispute, employment, technology, financial, real-estate, marketing and supply-chain) — each with its own questionnaire schema; extended types render through per-kind domain templates (Board Resolution has a dedicated one).
+- **Canonical state machine** (`app/domain/agreement_states.py`): the single definition of agreement statuses and legal transitions (spec §66/§67); seeds, the lifecycle service and route guards all derive from it. EXECUTED is reached only once *all* required signers have signed (`services/signing_completion.py`).
+- **Answer provenance** (`app/domain/answer_provenance.py`): every questionnaire answer is tagged USER_PROVIDED / EXTRACTED / INFERRED / SYSTEM_DEFAULT / LEGAL_REQUIREMENT / REVIEW_REQUIRED (spec §70); missing required answers block sending instead of being defaulted.
+- **RBAC** (`app/dependencies/rbac.py`): `require_permission("…")` guards mutating routes; the permission catalogue lives in `seed_data.PERMISSION_CATALOG`; `owner`/`admin` roles hold everything.
+- **Configuration over hardcoding** (spec §71): base currency and FX table come from `DEFAULT_CURRENCY` / `FX_RATES_JSON` (`services/currency_service.py`); jurisdiction defaults come from the organisation's `Jurisdiction` record.
 - **NL creation**: describe an agreement in plain language; the service resolves type (incl. NDA mutual/unilateral direction detection) and prefills answers.
 - **SLA monitoring**: uptime / response-time metrics are extracted into obligations; an hourly sweep materialises review deadlines and flags breaches.
 - **Audit chain**: hash-linked audit trail with evidence attachments and export.
@@ -105,5 +109,4 @@ E2E fixtures come from `backend/scripts/seed_e2e.py` (test user `test@example.co
 ## License / status
 
 Private project — all rights reserved. Work in progress; see the repository issues for the current roadmap.
-# Contract-OS
 # Contract-OS

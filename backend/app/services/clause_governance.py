@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agreement_states import EDITABLE_STATES
 from app.models.agreement import Agreement
 from app.models.document_intelligence import ClauseLibrary
 from app.models.rbac import OrganizationMember, RolePermission, Permission, Role
@@ -215,7 +216,7 @@ async def find_inflight_drafts(
     drafts_result = await db.execute(
         select(Agreement).where(
             Agreement.organization_id == org_id,
-            Agreement.status.in_(["draft", "negotiating", "internal_review"]),
+            Agreement.status.in_(sorted(EDITABLE_STATES)),
         )
     )
     drafts: list[dict] = []

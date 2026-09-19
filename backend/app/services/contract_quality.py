@@ -483,4 +483,27 @@ def run_quality_checks(
             else []
         )
 
+    # --- 70 / 76: facts vs assumptions ---------------------------------
+    # A missing required answer is a blocker ("Cannot send until N critical
+    # issues are resolved"); an unconfirmed default is advisory.
+    questions = meta.get("questions") or []
+    if questions:
+        from app.domain.answer_provenance import review_findings
+        from app.services.condition_evaluator import filter_visible_questions
+
+        answers = meta.get("answers") or {}
+        # Spec §15: only questions whose branching condition is satisfied are
+        # mandatory — a hidden `arbitration_seat` must never block a send.
+        visible = filter_visible_questions(questions, answers)
+        for f in review_findings(answers, visible, meta.get("provenance") or {}):
+            report.findings.append(
+                QualityFinding(
+                    engine=f["engine"],
+                    severity=f["severity"],
+                    code=f["code"].upper(),
+                    message=f["message"],
+                    evidence=f"{f['field']} ← {f['source']}",
+                )
+            )
+
     return report.to_dict()

@@ -1,0 +1,112 @@
+{{ document_title | default("MARKETING / PARTNERSHIP AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ advertiser_name | default(party_a_name | default("_______________")) }} ("Advertiser/Brand"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ promoter_name | default(party_b_name | default("_______________")) }} ("Promoter/Partner"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Parties are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. CAMPAIGN AND SERVICES
+
+1.1 The Promoter/Partner agrees to provide the following marketing, advertising or promotional services on behalf of the Advertiser/Brand during the Term:
+
+{{ campaign_description | default("Set out the campaign, deliverables and content.") }}
+
+1.2 Platform / medium: {{ platform | default("As agreed by the Parties.") }}. Content schedule: {{ content_schedule | default("As agreed by the Parties.") }}.
+
+1.3 Where this is a sponsorship or event arrangement, the event / brand visibility to be delivered is described below:
+
+{{ event_description | default("Set out the event and brand visibility.") }} — {{ brand_visibility | default("As agreed.") }}
+
+1.4 The Party providing content rights retains ownership of its content, and grants a limited licence for the purposes of this Agreement only, for the term set out above. Content rights / usage rights are as follows:
+
+{{ content_rights | default("Non-exclusive, limited to campaign use.") }}
+
+
+2. FEES AND PAYMENT
+
+2.1 The Advertiser/Brand shall pay fees of {{ campaign_fee | default("_______________") }} ({{ currency | default("LKR") }}).
+
+2.2 Payment shall be made in accordance with the terms agreed in writing; late payments shall accrue interest at 1.5% per month.
+
+2.3 KPI and performance targets for this campaign are set out below:
+
+{{ kpis | default("The Parties shall agree KPIs in writing.") }}
+
+
+3. COMMISSION AND PERFORMANCE
+
+3.1 Where this is a commission, affiliate, referral or ambassador arrangement: the Promoter/Partner shall earn a commission of {{ commission_rate | default("_______________") }}%, calculated on the {{ commission_basis | default("gross sales") }} basis.
+
+3.2 The commission period is {{ commission_period | default("24") }} months, expiring at the end of the attribution window of {{ attribution_window | default("365") }} days.
+
+3.3 Commission is paid on the payment trigger described below:
+
+{{ payment_trigger | default("Qualifying transactions completed no later than the end of the attribution window.") }}
+
+3.4 The arrangement is {{ "exclusive" if exclusive == "Yes" else "non-exclusive" }}. Any exclusivity and its scope shall be defined in writing.
+
+
+4. INTELLECTUAL PROPERTY AND CONFIDENTIALITY
+
+4.1 Each Party grants the other a limited, non-transferable, non-exclusive licence to use its trademarks and marketing collateral solely for the purposes of this Agreement.
+
+4.2 Each Party shall maintain the confidentiality of the other Party's Confidential Information and shall not disclose it to any third party without prior written consent.
+
+4.3 This confidentiality obligation shall survive termination for {{ confidentiality_period | default("3") }} years.
+
+
+5. REPRESENTATIONS AND LIABILITY
+
+5.1 Each Party represents and warrants that it has the power and authority to enter into and perform this Agreement, and that its content does not infringe any third party intellectual property.
+
+5.2 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES.
+
+5.3 The aggregate liability of each Party under this Agreement shall not exceed the amounts paid or payable under this Agreement.
+
+
+6. TERM AND TERMINATION
+
+6.1 This Agreement shall commence on the Effective Date and continue for {{ campaign_period_months | default(term_months | default("6")) }} months (the "Term"). Auto-renew is {{ auto_renew | default("No") }}.
+
+6.2 Either Party may terminate this Agreement upon material breach that remains uncured for 14 days after written notice, or immediately upon the insolvency of the other Party.
+
+
+7. GOVERNING LAW AND DISPUTE RESOLUTION
+
+7.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+7.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+8. GENERAL PROVISIONS
+
+8.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings.
+
+8.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+8.3 Compliance with advertising, consumer protection and data protection law shall be the responsibility of the party that carries out the relevant activity.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For the Advertiser/Brand / Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For the Promoter/Partner / Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

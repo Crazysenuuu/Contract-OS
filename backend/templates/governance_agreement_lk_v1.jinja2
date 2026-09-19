@@ -1,0 +1,104 @@
+{{ document_title | default("GOVERNANCE / EQUITY AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ company_name | default(party_a_name | default("_______________")) }} ("Company"), incorporated and registered in {{ governing_law | default("Sri Lanka") }} under registration number {{ company_registration_number | default("_______________") }}, with its registered office at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ investor_name | default(party_b_name | default("_______________")) }} ("Investor/Shareholder"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Company and the Investor/Shareholder are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. SHARE CAPITAL AND SUBSCRIPTION
+
+1.1 The authorised/issued share capital of the Company is {{ share_capital | default("_______________") }} ({{ currency | default("LKR") }}).
+
+1.2 The Investor/Shareholder subscribes for, and the Company issues, shares in the class described below:
+
+Share class: {{ share_class | default("Ordinary shares") }}
+
+1.3 Purchase price / investment amount: {{ purchase_price | default(investment_amount | default("_______________")) }} ({{ currency | default("LKR") }}), at a valuation of {{ valuation | default("_______________") }} ({{ currency | default("LKR") }}).
+
+1.4 Completion: {{ completion_date | default("_______________") }}. Interest / conversion terms on any convertible note: interest rate {{ interest_rate | default("_______________") }}% — conversion trigger {{ conversion_trigger | default("the next priced round") }} — valuation cap {{ valuation_cap | default("Not applicable") }} — discount rate {{ discount_rate | default("Not applicable") }}%.
+
+1.5 SAFE instrument amount: {{ safe_amount | default("Not applicable") }} — which converts in accordance with the valuation cap and discount rate set out in this Clause 1.
+
+
+2. GOVERNANCE AND SUBSCRIPTION RIGHTS
+
+2.1 The Parties shall exercise their rights in accordance with the Company's articles of association and any shareholders' agreement (including the board composition and reserved matters agreed in writing).
+
+2.2 Board deadlocks shall be escalated or resolved in accordance with the deadlock resolution mechanism below:
+
+{{ deadlock_resolution | default("Deadlock shall be escalated to senior management, then to non-executive directors.") }}
+
+2.3 Dividend policy: {{ dividend_policy | default("Dividends shall be declared at the discretion of the board, subject to applicable law.") }}
+
+
+3. PROTECTIVE AND LIQUIDITY PROVISIONS
+
+3.1 Tag-along rights: {{ tag_along_rights | default("As set out in the articles of association.") }} — Drag-along rights: {{ drag_along_rights | default("As set out in the articles of association.") }}
+
+3.2 Liquidation preference: {{ liquidation_preference | default("None unless otherwise agreed in writing.") }} — Anti-dilution: {{ anti_dilution | default("As set out in the articles of association.") }}
+
+
+4. TRANSFERS AND PRE-EMPTION
+
+4.1 No Investor/Shareholder shall transfer its shares otherwise than in accordance with this Agreement and the Company's articles of association, including any pre-emption rights and lock-up provisions of the Company.
+
+4.2 Each Party shall cooperate in giving effect to permitted transfers and in maintaining the statutory registers.
+
+
+5. FOUNDER / VESTING PROVISIONS (WHERE APPLICABLE)
+
+5.1 Where this is a founder-related agreement, founder shares shall vest in accordance with the vesting schedule below:
+
+{{ vesting_schedule | default("4-year vesting with a 12-month cliff") }} — cliff period: {{ cliff_months | default("12") }} months.
+
+5.2 Leaver provisions: {{ leaver_provisions | default("As set out in the articles of association.") }} — and the Company shall have the right to repurchase unvested shares at cost on any leaver event.
+
+5.3 Where this is a board resolution, the shareholders/directors present have resolved the matters set out in the annexed resolution:
+
+Resolution subject: {{ resolution_subject | default("_______________") }}
+Resolution text: {{ resolution_text | default("As set out in the annexed schedule.") }}
+Directors/shareholders present: {{ directors_present | default("_______________") }}
+Meeting date: {{ meeting_date | default("_______________") }}
+
+
+6. GOVERNING LAW AND DISPUTE RESOLUTION
+
+6.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+6.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+7. GENERAL PROVISIONS
+
+7.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings.
+
+7.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+7.3 Share transfers and other transactions requiring approval under applicable law or the Company's constitutional documents shall take effect only upon such approval.
+
+7.4 Notices shall be given in writing to the addresses first written above.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For the Company / Party A:
+
+Signature: _______________________________
+Name: {{ signatory_name | default(party_a_signatory_name | default("_______________")) }}
+Title: {{ signatory_title | default(party_a_signatory_title | default("_______________")) }}
+Date: _______________________________
+
+For the Investor/Shareholder / Party B:
+
+Signature: _______________________________
+Name: {{ investor_name | default(party_b_name | default("_______________")) }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

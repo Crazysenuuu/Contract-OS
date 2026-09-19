@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getMetricsSummary, getMetricsAlerts, getQueueStats } from "@/lib/api";
+import {
+  getMetricsSummary,
+  getMetricsAlerts,
+  getQueueStats,
+  getPerformanceStats,
+  getLiveMetrics,
+} from "@/lib/api";
 
 interface Summary {
   uptime: number;
@@ -25,6 +31,17 @@ interface QueueStats {
   oldest_pending: string | null;
 }
 
+interface PerfStats {
+  cache: { size: number; max_size: number; hits: number; misses: number; hit_rate: number };
+  jobs: { total_jobs: number; by_status: Record<string, number> };
+}
+
+interface LiveMetrics {
+  queue_depth: Array<{ time: string; count: number }>;
+  active_workers: number;
+  current_processing: Array<{ id: string; target_language: string; source_type: string; started_at: string | null }>;
+}
+
 const severityStyle: Record<string, string> = {
   critical: "bg-red-100 text-red-800 border-red-300",
   warning: "bg-yellow-100 text-yellow-800 border-yellow-300",
@@ -45,6 +62,8 @@ export default function ObservabilityPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [queue, setQueue] = useState<QueueStats | null>(null);
+  const [perf, setPerf] = useState<PerfStats | null>(null);
+  const [live, setLive] = useState<LiveMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -53,14 +72,18 @@ export default function ObservabilityPage() {
   const load = useCallback(async () => {
     if (!token) return;
     try {
-      const [s, a, q] = await Promise.all([
+      const [s, a, q, p, l] = await Promise.all([
         getMetricsSummary(token).catch(() => null),
         getMetricsAlerts(token).catch(() => null),
         getQueueStats(token).catch(() => null),
+        getPerformanceStats(token).catch(() => null),
+        getLiveMetrics(token).catch(() => null),
       ]);
       if (s) setSummary(s);
       if (a) setAlerts(a.alerts);
       if (q) setQueue(q);
+      if (p) setPerf(p);
+      if (l) setLive(l);
       setLastRefresh(new Date());
       setError("");
     } catch (err) {
@@ -193,6 +216,59 @@ export default function ObservabilityPage() {
               </div>
             </div>
           )}
+
+          {/* Cache + workers */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {perf && (
+              <div className="bg-white shadow rounded-lg p-5">
+                <div className="text-xs text-gray-500 uppercase tracking-wide mb-3">
+                  Cache Performance
+                </div>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <div className="text-xl font-semibold text-gray-900">
+                      {(perf.cache.hit_rate * 100).toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-gray-400">hit rate</div>
+                  </div>
+                  <div>
+                    <div className="text-xl font-semibold text-gray-900">
+                      {perf.cache.hits.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-400">hits</div>
+                  </div>
+                  <div>
+                    <div className="text-xl font-semibold text-gray-900">
+                      {perf.cache.size}/{perf.cache.max_size}
+                    </div>
+                    <div className="text-xs text-gray-400">entries</div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {live && (
+              <div className="bg-white shadow rounded-lg p-5">
+                <div className="text-xs text-gray-500 uppercase tracking-wide mb-3">
+                  Translation Workers
+                </div>
+                <div className="text-2xl font-semibold text-gray-900">
+                  {live.active_workers} active
+                </div>
+                {live.current_processing.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {live.current_processing.map((task) => (
+                      <div key={task.id} className="text-xs text-gray-600 flex justify-between">
+                        <span>→ {task.target_language}</span>
+                        <span className="text-gray-400">{task.source_type}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400 mt-1">idle — no tasks processing</div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.rbac import require_permission
 from app.dependencies.tenant import get_current_organization_id
 from app.models.agreement import Agreement
 from app.models.retention import (
@@ -34,6 +35,8 @@ from app.services.retention_service import (
 )
 
 router = APIRouter(prefix="/retention", tags=["Retention & Legal Hold"])
+
+_perm_retention_manage = Depends(require_permission("retention.manage"))
 repository_router = APIRouter(prefix="/repository", tags=["Document Repository"])
 
 
@@ -71,7 +74,7 @@ async def list_policies(
     return result.scalars().all()
 
 
-@router.post("/policies", status_code=status.HTTP_201_CREATED)
+@router.post("/policies", status_code=status.HTTP_201_CREATED, dependencies=[_perm_retention_manage])
 async def create_policy(
     data: RetentionPolicyCreate,
     org_id: uuid.UUID = Depends(get_current_organization_id),
@@ -110,7 +113,7 @@ async def create_policy(
     return policy
 
 
-@router.patch("/policies/{policy_id}")
+@router.patch("/policies/{policy_id}", dependencies=[_perm_retention_manage])
 async def update_policy(
     policy_id: uuid.UUID,
     data: RetentionPolicyUpdate,
@@ -166,7 +169,7 @@ async def list_holds(
     return await list_active_holds(db, org_id=org_id, agreement_id=agreement_id)
 
 
-@router.post("/holds", status_code=status.HTTP_201_CREATED)
+@router.post("/holds", status_code=status.HTTP_201_CREATED, dependencies=[_perm_retention_manage])
 async def create_hold(
     data: LegalHoldCreate,
     org_id: uuid.UUID = Depends(get_current_organization_id),
@@ -195,7 +198,7 @@ async def create_hold(
     return hold
 
 
-@router.post("/holds/{hold_id}/release")
+@router.post("/holds/{hold_id}/release", dependencies=[_perm_retention_manage])
 async def release_hold(
     hold_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_current_organization_id),
@@ -343,7 +346,7 @@ async def download_document(
         content=data,
         media_type=record.mime_type if record else "application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="document.pdf"',
+            "Content-Disposition": 'attachment; filename="document.pdf"',
             "X-Content-Hash": record.content_hash if record else "",
         },
     )

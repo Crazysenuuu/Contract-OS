@@ -7,11 +7,14 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user, get_user_org_ids
+from app.dependencies.rbac import require_permission
 from app.models.user import User
 from app.models.agreement import Agreement
 from app.services.company_policy_engine import CompanyPolicyEngine
 
 router = APIRouter(prefix="/company-policies", tags=["Company Policies"])
+
+_perm_policy_manage = Depends(require_permission("policy.manage"))
 
 
 async def _get_org_agreement(
@@ -56,7 +59,7 @@ async def list_rules(
     return {"rules": engine.get_all_rules()}
 
 
-@router.post("/rules")
+@router.post("/rules", dependencies=[_perm_policy_manage])
 async def add_rule(
     request: AddRuleRequest,
     current_user: User = Depends(get_current_user)
@@ -75,7 +78,7 @@ async def add_rule(
     return {"status": "added", "rule_id": request.rule_id}
 
 
-@router.delete("/rules/{rule_id}")
+@router.delete("/rules/{rule_id}", dependencies=[_perm_policy_manage])
 async def delete_rule(
     rule_id: str,
     current_user: User = Depends(get_current_user)

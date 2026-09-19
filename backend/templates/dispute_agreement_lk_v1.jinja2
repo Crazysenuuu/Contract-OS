@@ -1,0 +1,93 @@
+{{ document_title | default("DISPUTE RESOLUTION / SETTLEMENT AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ claimant_name | default(party_a_name | default("_______________")) }} ("Party A"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ respondent_name | default(party_b_name | default("_______________")) }} ("Party B"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Parties are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. BACKGROUND AND SCOPE OF DISPUTE
+
+1.1 The Parties have a dispute arising out of or in connection with the matter described below:
+
+{{ dispute_subject | default("Set out the subject matter of the dispute.") }}
+
+1.2 The Parties wish to resolve this dispute amicably and to avoid further proceedings, and agree to do so on the terms set out in this Agreement.
+
+
+2. PLATFORM AND PROCESS
+
+2.1 The Parties agree to resolve the dispute by {{ dispute_resolution | default("negotiation") }}.
+
+2.2 Where mediation is agreed, the mediation process is: {{ mediation_process | default("A single mediator agreed by the Parties or appointed by the chosen institution.") }}
+
+2.3 Where arbitration is agreed, the arbitral body and rules are: {{ arbitral_body | default("The Sri Lanka National Arbitration Centre / chosen institution's rules.") }}
+
+2.4 Any decision rendered through the agreed process shall be final and binding on the Parties and enforceable in accordance with applicable law.
+
+
+3. SETTLEMENT AND PAYMENT
+
+3.1 Upon execution of this Agreement, Party B shall pay to Party A the settlement amount of {{ settlement_amount | default("_______________") }} ({{ currency | default("LKR") }}), in full and without set-off, in accordance with the payment schedule agreed in writing.
+
+3.2 Any late payment shall accrue interest at 1.5% per month until paid in full.
+
+3.3 The Parties agree to sign, during the process, any consent documents and release forms required to give effect to this Agreement.
+
+
+4. RELEASE AND WAIVER
+
+4.1 Upon full satisfaction of the payment obligations in Clause 3, each Party irrevocably releases and forever discharges the other Party from all claims, demands, actions and proceedings relating to the following:
+
+{{ release_scope | default("All matters the subject of the dispute described in Clause 1.") }}
+
+4.2 This Agreement is given for the purpose of compromising disputed claims and is made on a without-prejudice basis as part of the process. It is not an admission of liability: {{ non_admission | default("Each Party expressly denies all liability and nothing in this Agreement shall be construed as an admission.") }}
+
+4.3 Any claims that are expressly excluded from this release are: {{ claims_released | default("None.") }}
+
+
+5. CONFIDENTIALITY
+
+5.1 The existence and terms of this Agreement, and all discussions relating to the dispute and its settlement, shall be kept confidential.
+
+5.2 This obligation shall survive for {{ confidentiality_period | default("3") }} years and shall not prevent disclosure required by law or to professional advisers bound by confidentiality.
+
+
+6. GOVERNING LAW AND DISPUTE RESOLUTION
+
+6.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+6.2 Any dispute arising out of the interpretation or enforcement of this Agreement that is not resolved by the process in Clause 2 shall be resolved by {{ dispute_resolution | default("Arbitration") }}.
+
+
+7. GENERAL PROVISIONS
+
+7.1 This Agreement constitutes the entire agreement between the Parties regarding the resolution of the dispute and supersedes all prior discussions and settlement drafts.
+
+7.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+7.3 The Parties shall bear their own costs, unless otherwise agreed in writing.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

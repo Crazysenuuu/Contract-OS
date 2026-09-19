@@ -9,6 +9,9 @@ import {
   getVersionTranslations,
   bulkSyncTranslations,
   getTranslationDashboard,
+  processAgreementTranslations,
+  syncTranslations,
+  compareVersionTranslations,
 } from "@/lib/api";
 
 interface TranslationDashboard {
@@ -130,6 +133,59 @@ function TranslationsContent() {
       loadDashboard();
     } catch (err) {
       alert(`Bulk sync failed: ${err instanceof Error ? err.message : "unknown error"}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleProcessTranslations = async () => {
+    if (!token || !selectedAgreement) return;
+    setSyncing(true);
+    try {
+      await processAgreementTranslations(token, selectedAgreement);
+      alert("Translation processing queued");
+      loadDashboard();
+    } catch (err) {
+      alert(`Process failed: ${err instanceof Error ? err.message : "unknown error"}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleSyncToSelected = async (fromVersionId: string) => {
+    if (!token || !selectedAgreement || !selectedVersion || fromVersionId === selectedVersion) return;
+    setSyncing(true);
+    try {
+      const result = await syncTranslations(token, selectedAgreement, {
+        from_version_id: fromVersionId,
+        to_version_id: selectedVersion,
+      });
+      alert(
+        `Sync ${result.status}: ${result.synced_languages.length} synced, ${result.outdated_languages.length} outdated`
+      );
+      loadDashboard();
+    } catch (err) {
+      alert(`Sync failed: ${err instanceof Error ? err.message : "unknown error"}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleCompareWithSelected = async (otherVersionId: string) => {
+    if (!token || !selectedAgreement || !selectedVersion || otherVersionId === selectedVersion) return;
+    setSyncing(true);
+    try {
+      const result = await compareVersionTranslations(
+        token,
+        selectedAgreement,
+        otherVersionId,
+        selectedVersion
+      );
+      alert(
+        `Compare: ${result.summary.unchanged} unchanged, ${result.summary.updated} updated, ${result.summary.added} added, ${result.summary.removed} removed`
+      );
+    } catch (err) {
+      alert(`Compare failed: ${err instanceof Error ? err.message : "unknown error"}`);
     } finally {
       setSyncing(false);
     }
@@ -257,6 +313,31 @@ function TranslationsContent() {
                       </div>
                     </div>
 
+                    {selectedVersion && selectedVersion !== v.version_id && (
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSyncToSelected(v.version_id);
+                          }}
+                          disabled={syncing}
+                          className="text-xs text-blue-600 hover:underline disabled:opacity-50"
+                        >
+                          → sync into v{dashboard.versions.find((x) => x.version_id === selectedVersion)?.version_number ?? "?"}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCompareWithSelected(v.version_id);
+                          }}
+                          disabled={syncing}
+                          className="text-xs text-gray-500 hover:underline disabled:opacity-50"
+                        >
+                          ⇄ compare
+                        </button>
+                      </div>
+                    )}
+
                     {/* Translation sync info */}
                     {v.translation_sync && (
                       <div className="mt-2 text-xs text-gray-500">
@@ -290,13 +371,22 @@ function TranslationsContent() {
                   )}
                 </h2>
                 {selectedVersion && (
-                  <button
-                    onClick={() => handleBulkSync(selectedVersion)}
-                    disabled={syncing}
-                    className="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {syncing ? "Syncing..." : "🔄 Sync All"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleProcessTranslations}
+                      disabled={syncing}
+                      className="text-sm border border-gray-300 px-3 py-1 rounded hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      ⚙️ Process
+                    </button>
+                    <button
+                      onClick={() => handleBulkSync(selectedVersion)}
+                      disabled={syncing}
+                      className="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {syncing ? "Syncing..." : "🔄 Sync All"}
+                    </button>
+                  </div>
                 )}
               </div>
 

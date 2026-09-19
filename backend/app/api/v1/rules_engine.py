@@ -7,12 +7,15 @@ stored as JSON condition trees on ApprovalDefinition rows.
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.services.currency_service import default_currency
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
+from app.models.approval import ApprovalDefinition
 from app.models.user import User
 from app.services.rules_engine import (
     create_rule_definition,
@@ -40,7 +43,7 @@ class RuleDefinitionCreate(BaseModel):
 class EvaluateRequest(BaseModel):
     agreement_value: float
     agreement_type: str | None = None
-    currency: str = "LKR"
+    currency: str = Field(default_factory=default_currency)
     risk_score: float | None = None
     counterparty_country: str | None = None
     extra_context: dict | None = None

@@ -10,6 +10,15 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+path/
+*.whl
+
+# Runtime artefacts (uploaded documents, local backups, perf reports)
+backend/storage/
+backend/migration_performance_*.json
+
+# Large source documents / working notes
+Panels.txt
 
 # Environment files
 .env

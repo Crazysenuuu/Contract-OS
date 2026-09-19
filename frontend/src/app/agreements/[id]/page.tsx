@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import QualityCheckPanel from "@/components/QualityCheckPanel";
+import AgreementLifecyclePanel from "@/components/AgreementLifecyclePanel";
 import {
   getAgreement,
   getWorkflowState,
@@ -16,7 +17,10 @@ import {
   listExternalParties,
   addExternalParty,
   listParticipants,
+  addParticipant,
+  listParties,
   grantPermission,
+  listVersions,
 } from "@/lib/api";
 
 interface Agreement {
@@ -55,16 +59,33 @@ interface Participant {
   status: string;
 }
 
+interface AgreementParty {
+  id: string;
+  legal_entity_id: string;
+  party_role: string;
+  display_name: string | null;
+}
+
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
   internal_review: "bg-blue-100 text-blue-800",
+  pending_approval: "bg-blue-100 text-blue-800",
+  approved: "bg-green-100 text-green-800",
   sent: "bg-purple-100 text-purple-800",
   viewed: "bg-indigo-100 text-indigo-800",
   negotiation: "bg-yellow-100 text-yellow-800",
-  approved: "bg-green-100 text-green-800",
+  negotiating: "bg-yellow-100 text-yellow-800",
+  ready_for_signature: "bg-orange-100 text-orange-800",
   signing: "bg-orange-100 text-orange-800",
+  partially_signed: "bg-amber-100 text-amber-800",
   executed: "bg-green-100 text-green-800",
+  active: "bg-emerald-100 text-emerald-800",
+  expiring: "bg-amber-100 text-amber-800",
+  renewed: "bg-teal-100 text-teal-800",
+  expired: "bg-gray-200 text-gray-700",
   terminated: "bg-red-100 text-red-800",
+  superseded: "bg-slate-100 text-slate-700",
+  cancelled: "bg-red-100 text-red-800",
 };
 
 const permissionLabels: Record<string, string> = {
@@ -92,6 +113,8 @@ export default function AgreementDetailPage() {
   const [actions, setActions] = useState<WorkflowAction[]>([]);
   const [externalParties, setExternalParties] = useState<ExternalParty[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [parties, setParties] = useState<AgreementParty[]>([]);
+  const [versions, setVersions] = useState<{ id: string; version_number: number; status: string; created_at: string; content_hash: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
   const [rendering, setRendering] = useState(false);
@@ -111,6 +134,11 @@ export default function AgreementDetailPage() {
   const [showPermissionForm, setShowPermissionForm] = useState(false);
   const [selectedParticipant, setSelectedParticipant] = useState<string>("");
   const [selectedPermission, setSelectedPermission] = useState<string>("");
+  const [showAddParticipant, setShowAddParticipant] = useState(false);
+  const [newParticipant, setNewParticipant] = useState<{ userId: string; role: string }>({
+    userId: "",
+    role: "reviewer",
+  });
 
   useEffect(() => {
     if (token && id) {
@@ -120,13 +148,17 @@ export default function AgreementDetailPage() {
         getWorkflowActions(token, id as string).catch(() => []),
         listExternalParties(token, id as string).catch(() => []),
         listParticipants(token, id as string).catch(() => []),
+        listParties(token, id as string).catch(() => []),
+        listVersions(token, id as string).catch(() => []),
       ])
-        .then(([agr, state, acts, ext, parts]) => {
+        .then(([agr, state, acts, ext, parts, prts, vers]) => {
           setAgreement(agr);
           setWorkflowState(state);
           setActions(acts);
           setExternalParties(ext);
           setParticipants(parts);
+          setParties(prts);
+          setVersions(vers);
         })
         .catch(console.error)
         .finally(() => setLoading(false));
@@ -248,6 +280,22 @@ export default function AgreementDetailPage() {
     }
   };
 
+  const handleAddParticipant = async () => {
+    if (!token || !id || !newParticipant.userId) return;
+    try {
+      await addParticipant(token, id as string, {
+        user_id: newParticipant.userId,
+        agreement_party_id: parties[0]?.id ?? "",
+        participant_role: newParticipant.role,
+        can_view: true,
+      });
+      setParticipants(await listParticipants(token, id as string));
+      setNewParticipant({ userId: "", role: "reviewer" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add participant");
+    }
+  };
+
   const copyReviewLink = (accessToken: string) => {
     const url = `${window.location.origin}/review/${accessToken}`;
     navigator.clipboard.writeText(url);
@@ -323,6 +371,24 @@ export default function AgreementDetailPage() {
             className="px-4 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-300 rounded-md hover:bg-emerald-100"
           >
             Compliance
+          </Link>
+          <Link
+            href={`/clause-library?agreement=${id}`}
+            className="px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 border border-teal-300 rounded-md hover:bg-teal-100"
+          >
+            Clauses
+          </Link>
+          <Link
+            href={`/audit?agreement=${id}`}
+            className="px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-300 rounded-md hover:bg-indigo-100"
+          >
+            Audit
+          </Link>
+          <Link
+            href={`/documents?agreement=${id}`}
+            className="px-4 py-2 text-sm font-medium text-cyan-700 bg-cyan-50 border border-cyan-300 rounded-md hover:bg-cyan-100"
+          >
+            Documents
           </Link>
           <button
             onClick={handleRender}
@@ -403,8 +469,91 @@ export default function AgreementDetailPage() {
             )}
           </div>
 
+          {/* Versions history (spec §26 / §48) */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">
+              Versions
+            </h2>
+            {versions.length === 0 ? (
+              <p className="text-sm text-gray-500">No versions yet</p>
+            ) : (
+              <div className="space-y-2">
+                {versions.map((v) => (
+                  <div
+                    key={v.id}
+                    className="flex items-center justify-between p-3 border border-gray-200 rounded-lg"
+                  >
+                    <div>
+                      <div className="font-medium text-sm text-gray-900">
+                        Version {v.version_number}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {new Date(v.created_at).toLocaleString()} · {v.status}
+                        {v.content_hash && (
+                          <span className="ml-2 font-mono text-gray-400">
+                            {v.content_hash.slice(0, 8)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full ${
+                        v.status === "locked"
+                          ? "bg-green-100 text-green-800"
+                          : v.status === "current"
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
+                      {v.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Contract quality findings (spec 77-81) */}
           <QualityCheckPanel agreementId={id as string} />
+
+          {/* Signature progress, amendments, terminations (spec §36, §66, §67) */}
+          {token && agreement && (
+            <AgreementLifecyclePanel
+              token={token}
+              agreementId={id as string}
+              status={agreement.status}
+              onChanged={() =>
+                getAgreement(token, id as string)
+                  .then(setAgreement)
+                  .catch(console.error)
+              }
+            />
+          )}
+
+          {/* Parties (named contracting entities) */}
+          {parties.length > 0 && (
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">Parties</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {parties.map((party) => (
+                  <div
+                    key={party.id}
+                    className="flex items-center justify-between p-3 border border-gray-200 rounded-lg"
+                  >
+                    <div>
+                      <div className="font-medium text-sm text-gray-900">
+                        {party.display_name ?? party.legal_entity_id.slice(0, 8) + "…"}
+                      </div>
+                      <div className="text-xs text-gray-500 capitalize">{party.party_role.replace(/_/g, " ")}</div>
+                    </div>
+                    <span className="text-xs text-gray-400 font-mono">
+                      {party.legal_entity_id.slice(0, 8)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Participants */}
           <div className="bg-white shadow rounded-lg p-6">
@@ -413,12 +562,20 @@ export default function AgreementDetailPage() {
                 Participants
               </h2>
               {canManageParticipants && (
-                <button
-                  onClick={() => setShowPermissionForm(!showPermissionForm)}
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  + Grant Permission
-                </button>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setShowAddParticipant(!showAddParticipant)}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    + Add Participant
+                  </button>
+                  <button
+                    onClick={() => setShowPermissionForm(!showPermissionForm)}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    + Grant Permission
+                  </button>
+                </div>
               )}
             </div>
 
@@ -452,6 +609,48 @@ export default function AgreementDetailPage() {
                     </span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Add Participant Form */}
+            {showAddParticipant && canManageParticipants && (
+              <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-700 mb-3">Add Participant</h3>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="User ID (uuid)"
+                    value={newParticipant.userId}
+                    onChange={(e) => setNewParticipant({ ...newParticipant, userId: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                  <select
+                    value={newParticipant.role}
+                    onChange={(e) => setNewParticipant({ ...newParticipant, role: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="reviewer">Reviewer</option>
+                    <option value="approver">Approver</option>
+                    <option value="signer">Signer</option>
+                  </select>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={handleAddParticipant}
+                      disabled={!newParticipant.userId || parties.length === 0}
+                      title={parties.length === 0 ? "Agreement has no parties yet" : undefined}
+                      className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      Add
+                    </button>
+                    <button
+                      onClick={() => setShowAddParticipant(false)}
+                      className="px-4 py-2 border border-gray-300 text-sm rounded-md hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 

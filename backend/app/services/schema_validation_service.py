@@ -79,20 +79,27 @@ class ValidationResult:
 def _validate_type(value, qtype: str, key: str, issues: list[ValidationIssue]) -> None:
     if value is None:
         return
-    if qtype == "number":
+    if qtype in ("number", "money", "percentage", "duration"):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             issues.append(ValidationIssue(key, f"{key} must be a number"))
         return
-    if qtype == "date":
+    if qtype in ("date", "datetime"):
         if isinstance(value, (datetime, date)):
             return
         if isinstance(value, str):
             try:
-                date.fromisoformat(value)
+                if qtype == "datetime":
+                    datetime.fromisoformat(value.replace("Z", "+00:00"))
+                else:
+                    date.fromisoformat(value)
                 return
             except ValueError:
                 issues.append(
-                    ValidationIssue(key, f"{key} must be a valid ISO date (YYYY-MM-DD)")
+                    ValidationIssue(
+                        key,
+                        f"{key} must be a valid ISO date/time"
+                        + ("" if qtype == "date" else " (YYYY-MM-DDTHH:MM)"),
+                    )
                 )
                 return
         issues.append(ValidationIssue(key, f"{key} must be a date"))
@@ -101,7 +108,14 @@ def _validate_type(value, qtype: str, key: str, issues: list[ValidationIssue]) -
         if not isinstance(value, bool):
             issues.append(ValidationIssue(key, f"{key} must be true or false"))
         return
-    if qtype in ("text", "textarea", "email", "select", "url"):
+    if qtype == "multi_select":
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            issues.append(
+                ValidationIssue(key, f"{key} must be a list of selected options")
+            )
+        return
+    if qtype in ("text", "textarea", "email", "select", "url", "radio",
+                 "country", "currency", "phone", "clause_selection", "time"):
         if not isinstance(value, str):
             issues.append(ValidationIssue(key, f"{key} must be text"))
         return
@@ -146,7 +160,9 @@ def validate_field_level(answers: dict, questions: list[dict]) -> tuple[list[Val
                 )
 
         # min/max for numbers
-        if qtype == "number" and isinstance(value, (int, float)) and not isinstance(value, bool):
+        if qtype in ("number", "money", "percentage", "duration") and isinstance(
+            value, (int, float)
+        ) and not isinstance(value, bool):
             if q.get("min") is not None and value < q["min"]:
                 errors.append(
                     ValidationIssue(key, f"{q.get('label') or key} must be at least {q['min']}")
@@ -326,14 +342,21 @@ def validate_agreement_data(
     """Run the full validation pipeline against resolved questions."""
     result = ValidationResult(valid=True)
 
+    # Dynamic questionnaire (spec §4.2): only questions whose declarative
+    # condition is satisfied by the answers are validated. Branch-hidden
+    # fields can never trigger false "missing required" errors.
+    from app.services.condition_evaluator import filter_visible_questions
+
+    visible_questions = filter_visible_questions(questions, answers)
+
     # Stage 1
-    errs, warns = validate_field_level(answers, questions)
+    errs, warns = validate_field_level(answers, visible_questions)
     result.errors.extend(errs)
     result.warnings.extend(warns)
     result.stages_run.append("field")
 
     # Stage 2
-    result.errors.extend(validate_cross_field(answers, questions))
+    result.errors.extend(validate_cross_field(answers, visible_questions))
     result.stages_run.append("cross_field")
 
     # Stage 3

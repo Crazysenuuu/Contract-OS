@@ -1,10 +1,10 @@
 """Integration connector service (spec 24.6).
 
 Builds provider-specific payloads (Salesforce, HubSpot, NetSuite, SAP,
-Stripe) from domain events and dispatches them through the generic webhook
-infrastructure. Providers without real credentials are validated for
-payload shape and logged as dry-run deliveries, mirroring the mock-provider
-pattern used elsewhere in the app.
+Stripe, Workday, Azure AD) from domain events and dispatches them through
+the generic webhook infrastructure. Providers without real credentials are
+validated for payload shape and logged as dry-run deliveries, mirroring the
+mock-provider pattern used elsewhere in the app.
 """
 import hashlib
 import hmac
@@ -127,6 +127,49 @@ def build_payload(provider: str, event: str, agreement: Any) -> dict[str, Any]:
             },
             "amount": _stripe_amount(agreement),
             "currency": record["currency"],
+        }
+    if provider == "workday":
+        # Workday REST integration: contract lifecycle sync (spec 24.6 — HRIS
+        # integrations). Endpoints are header-injected by the webhook router;
+        # this layer produces the business payload Workday contract workers
+        # (e.g. /contracts) consume.
+        return {
+            "event": event,
+            "segment": "contracts",
+            "operation": event.split(".")[-1].upper(),
+            "data": {
+                "ExternalContractID": record["id"],
+                "ContractTitle": record["title"],
+                "ContractStatus": record["status"],
+                "ValidFrom": record["effective_date"],
+                "ValidTo": record["expiry_date"],
+                "GoverningLaw": record["governing_law"],
+                "ContractValue": record["value"],
+                "Currency": record["currency"],
+            },
+        }
+    if provider == "azure_ad":
+        # Azure AD / Entra ID integration: lifecycle + access sync. When a
+        # contract executes, the payload targets the group-membership
+        # endpoint (contract-based access) via Microsoft Graph v1.0.
+        operation = (
+            "PATCH"
+            if event != "agreement.created"
+            else "POST"
+        )
+        return {
+            "event": event,
+            "graphVersion": "v1.0",
+            "resource": "groups/{contract-access}",
+            "operation": operation,
+            "body": {
+                "contractId": record["id"],
+                "contractTitle": record["title"],
+                "contractStatus": record["status"],
+                "validFrom": record["effective_date"],
+                "validTo": record["expiry_date"],
+                "governingLaw": record["governing_law"],
+            },
         }
     return base
 

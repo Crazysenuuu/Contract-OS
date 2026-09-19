@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import '../../core/auth/auth_controller.dart';
 import '../../core/network/api_client.dart';
 import '../contracts/contracts_page.dart';
+import 'search_query_parser.dart';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -541,14 +542,31 @@ class _ContractSearchDelegate extends SearchDelegate<String?> {
   @override
   Widget buildSuggestions(BuildContext context) => _buildList();
 
+  static final _parser = SearchQueryParser();
+
+  @override
+  String get searchFieldLabel => 'e.g. contracts expiring this month';
+
   Widget _buildList() {
     if (query.length < 2) {
-      return const Center(child: Text('Type at least 2 characters to search'));
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Try “active NDAs with Acme”, “pending signature” or '
+            '“show all contracts expiring this month”.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
     }
+    // Spec §27: natural-language search is interpreted client-side into the
+    // structured filters of the repository search endpoint.
+    final parsed = _parser.parse(query);
     return FutureBuilder<Response>(
       future: _ref.read(apiClientProvider).dio.get(
-            '/api/v1/agreements',
-            queryParameters: {'search': query, 'limit': 20},
+            '/api/v1/search/agreements',
+            queryParameters: parsed.toQueryParameters(limit: 20),
           ),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
@@ -557,19 +575,25 @@ class _ContractSearchDelegate extends SearchDelegate<String?> {
         if (snap.hasError) {
           return Center(child: Text('Error: ${snap.error}'));
         }
-        final items =
-            ((snap.data?.data['items'] as List?) ?? [])
-                .cast<Map<String, dynamic>>()
-                .map(ContractSummary.fromJson)
-                .toList();
+        final items = ((snap.data?.data['items'] as List?) ?? [])
+            .cast<Map<String, dynamic>>()
+            .map(ContractSummary.fromJson)
+            .toList();
+        final chips = parsed.describe();
         if (items.isEmpty) {
-          return const Center(child: Text('No results'));
+          return Column(
+            children: [
+              _InterpretationBar(chips: chips),
+              const Expanded(child: Center(child: Text('No results'))),
+            ],
+          );
         }
         return ListView.separated(
-          itemCount: items.length,
+          itemCount: items.length + 1,
           separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (context, i) {
-            final c = items[i];
+            if (i == 0) return _InterpretationBar(chips: chips);
+            final c = items[i - 1];
             return ListTile(
               title: Text(c.title),
               subtitle: Text(c.counterparty),
@@ -586,6 +610,31 @@ class _ContractSearchDelegate extends SearchDelegate<String?> {
           },
         );
       },
+    );
+  }
+}
+/// Shows how the natural-language query was interpreted (spec §70: the
+/// user can always see which filters were inferred and which text remains).
+class _InterpretationBar extends StatelessWidget {
+  const _InterpretationBar({required this.chips});
+  final List<String> chips;
+
+  @override
+  Widget build(BuildContext context) {
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final c in chips)
+            Chip(
+              label: Text(c, style: const TextStyle(fontSize: 12)),
+              visualDensity: VisualDensity.compact,
+            ),
+        ],
+      ),
     );
   }
 }

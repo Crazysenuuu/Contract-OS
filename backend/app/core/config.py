@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     billing_webhook_secret: SecretStr | None = None
     billing_webhook_timestamp_skew_seconds: int = 300
 
+    # Currency (spec §71 — no hardcoded business data). Base currency for
+    # signing-authority / DOA / policy thresholds and the simplified FX table
+    # (currency -> units of base currency per 1 unit). Feed FX_RATES_JSON from
+    # a rates provider in production.
+    default_currency: str = "LKR"
+    fx_rates_json: str = '{"LKR": 1.0, "USD": 300.0, "EUR": 330.0, "GBP": 380.0, "SGD": 225.0, "INR": 3.6}'
+
     # Push notifications (spec 2.02 §24-26): Firebase service-account JSON
     # for the FCM admin SDK. When unset, push delivery degrades to a no-op
     # (WebSocket + email still deliver) — never an error path.

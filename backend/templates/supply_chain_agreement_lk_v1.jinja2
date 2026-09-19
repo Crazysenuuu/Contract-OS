@@ -1,0 +1,106 @@
+{{ document_title | default("SUPPLY CHAIN / COMMERCIAL AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ supplier_name | default(party_a_name | default("_______________")) }} ("Supplier"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ buyer_name | default(party_b_name | default("_______________")) }} ("Buyer"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Parties are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. GOODS / SERVICES AND SPECIFICATIONS
+
+1.1 The Supplier agrees to supply the goods or services described below:
+
+Goods / item: {{ goods_description | default("_______________") }}
+Quantity / volume: {{ quantity | default("As agreed by the Parties.") }}
+Unit price: {{ unit_price | default("_______________") }} ({{ currency | default("LKR") }})
+
+1.2 Specifications and quality standards: {{ specifications | default("As described in Schedule 1.") }} — {{ quality_standards | default("The goods/services shall conform to the agreed specifications and applicable standards.") }}
+
+1.3 Where this is a framework, manufacturing or warehousing arrangement, the following apply:
+
+{{ frame_terms | default(framework_volume | default("As agreed by the Parties.")) }} — capacity: {{ storage_capacity | default("As agreed.") }} — handling fees: {{ handling_fees | default("As agreed.") }}
+
+
+2. DELIVERY, RISK AND TITLE
+
+2.1 Delivery terms and Incoterms: {{ delivery_terms | default("As agreed by the Parties.") }} — {{ freight_terms | default("Freight as agreed.") }}
+
+2.2 Delivery schedule: {{ delivery_schedule | default("As agreed by the Parties.") }}
+
+2.3 Risk in the goods shall pass in accordance with the agreed delivery terms. Title shall pass to the Buyer on payment in full.
+
+2.4 Insurance: {{ "required" if insurance_required == "Yes" else "not required unless otherwise agreed" }}. Warranty and claims period shall be as agreed in writing.
+
+
+3. IMPORT / EXPORT AND COMPLIANCE
+
+3.1 HS codes and tariff classification: {{ hs_codes | default("As advised by the exporter.") }}
+
+3.2 The exporter/Supplier shall comply with applicable export control, sanctions and customs requirements, and the Parties shall cooperate on import documentation.
+
+3.3 Compliance: {{ compliance | default("Each Party shall comply with all applicable laws and regulations governing the supply.") }}
+
+
+4. PAYMENT AND COMMERCIAL TERMS
+
+4.1 The Buyer shall pay the applicable amounts in accordance with the payment terms agreed in writing. Late payments shall accrue interest at 1.5% per month.
+
+4.2 Where this is a reseller or distribution arrangement, the Buyer shall be permitted to resell within the territory of {{ territory | default("Sri Lanka") }} with {{ "exclusive" if exclusivity == "Yes" else "non-exclusive" }} rights. Minimum purchase commitments: {{ minimum_purchases | default("None unless agreed.") }} — reseller margin: {{ reseller_margin | default("As agreed.") }}
+
+
+5. LIABILITY AND WARRANTY
+
+5.1 The Supplier warrants that the goods/services conform to the agreed specifications and that the goods are free from title defects.
+
+5.2 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES.
+
+5.3 The aggregate liability of each Party under this Agreement shall not exceed the amounts paid or payable under this Agreement, except in respect of fraud, wilful misconduct or third party claims for personal injury or death.
+
+
+6. TERM AND TERMINATION
+
+6.1 This Agreement shall commence on the Effective Date and continue for {{ term_months | default("12") }} months (the "Term"). Auto-renew is {{ auto_renew | default("No") }}.
+
+6.2 Either Party may terminate this Agreement upon material breach that remains uncured for 14 days after written notice, or immediately upon the insolvency of the other Party.
+
+6.3 Where this is a manufacturing agreement, tooling and any tooling ownership are as follows: {{ tooling_ownership | default("Tooling provided by the Buyer remains the property of the Buyer.") }}
+
+
+7. GOVERNING LAW AND DISPUTE RESOLUTION
+
+7.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+7.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+8. GENERAL PROVISIONS
+
+8.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings.
+
+8.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+8.3 Notices shall be given in writing to the addresses first written above.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For the Supplier / Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For the Buyer / Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

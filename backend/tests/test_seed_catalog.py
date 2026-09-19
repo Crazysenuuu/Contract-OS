@@ -44,7 +44,7 @@ class TestCatalogSeed:
             select(AgreementType).where(AgreementType.key == "loan_agreement")
         )
         loan = result.scalar_one()
-        assert loan.template_key == "generic_agreement_lk_v1"
+        assert loan.template_key == "financial_agreement_lk_v1"
         assert any(
             q.get("key") == "principal_amount" for q in loan.schema["questions"]
         )
@@ -136,6 +136,53 @@ class TestCatalogSeed:
         )
         assert result.scalar_one() == catalog_type_id("offer_letter")
 
+    async def test_catalog_templates_render_for_all_kinds(self, db_session):
+        """Every catalog type must resolve to a real contract template on disk,
+        so the rendering pipeline never falls back to a missing template."""
+        import os
+        from pathlib import Path
+
+        template_dir = os.path.join(
+            os.path.dirname(__file__), "..", "templates"
+        )
+        await seed_catalog_agreement_types(db_session)
+        await db_session.commit()
+
+        result = await db_session.execute(select(AgreementType))
+        for at in result.scalars().all():
+            assert at.template_key, f"{at.key}: no template_key"
+            template_file = Path(template_dir) / f"{at.template_key}.jinja2"
+            assert template_file.exists(), (
+                f"{at.key}: mapped to missing template {at.template_key}"
+            )
+
+    async def test_backfill_repoints_generic_template(self, db_session):
+        """Legacy rows that used the generic fallback get repointed to their
+        kind template on the next seed run."""
+        from app.models.agreement_type import AgreementType
+
+        legacy = AgreementType(
+            id=catalog_type_id("loan_agreement"),
+            key="loan_agreement",
+            name="Legacy Loan",
+            category="Finance",
+            status="active",
+            version=1,
+            schema={"questions": [], "clauses": []},
+            template_key="generic_agreement_lk_v1",
+        )
+        db_session.add(legacy)
+        await db_session.commit()
+
+        await seed_catalog_agreement_types(db_session)
+        await db_session.commit()
+        row = (
+            await db_session.execute(
+                select(AgreementType).where(AgreementType.key == "loan_agreement")
+            )
+        ).scalar_one()
+        assert row.template_key == "financial_agreement_lk_v1"
+
     async def test_seed_idempotent(self, db_session):
         await seed_catalog_agreement_types(db_session)
         await db_session.commit()
@@ -157,7 +204,7 @@ class TestCatalogSeed:
         assert len(types) >= len(EXTENDED_AGREEMENT_TYPES)
         assert any(t["key"] == "logistics" for t in types)
         loan = next(t for t in types if t["key"] == "loan_agreement")
-        assert loan["template_key"] == "generic_agreement_lk_v1"
+        assert loan["template_key"] == "financial_agreement_lk_v1"
         assert loan["schema"]["questions"]
 
 

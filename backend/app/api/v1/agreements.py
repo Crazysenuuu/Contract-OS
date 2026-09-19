@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings_lazy
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
@@ -23,12 +24,19 @@ from app.schemas.agreement import (
 )
 from app.services.agreement_renderer import (
     get_template_questions,
+    get_template_questions_for_agreement,
     render_agreement,
     resolve_template_key,
     validate_answers,
 )
 from app.services.schema_validation_service import (
     validate_agreement_schema,
+)
+from app.domain.agreement_states import EDITABLE_STATES
+from app.domain.answer_provenance import (
+    AnswerSource,
+    classify_user_update,
+    tag_answers,
 )
 from app.services.lifecycle_service import agreement_is_immutable
 from app.services.template_engine import get_available_templates
@@ -40,6 +48,15 @@ def calculate_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+async def _questions_for(db: AsyncSession, agreement: Agreement) -> list[dict]:
+    """Questionnaire for an agreement: type schema first, template fallback."""
+    questions = await get_template_questions_for_agreement(db, agreement)
+    if questions:
+        return questions
+    template_key = await resolve_template_key(db, agreement)
+    return get_template_questions(template_key)
+
+
 class RenderRequest(BaseModel):
     generate_pdf: bool = True
     watermark: bool = True  # Overlay viewer identity on shared copies (1.22)
@@ -48,6 +65,12 @@ class RenderRequest(BaseModel):
 class UpdateAnswersRequest(BaseModel):
     answers: dict
     check_compliance: bool = True  # Auto-check compliance after update
+    # Spec §70: the client may declare where the answers came from; the
+    # default is USER_PROVIDED (typed in the wizard). Only EXTRACTED /
+    # INFERRED / USER_PROVIDED are accepted from clients — SYSTEM_DEFAULT is
+    # derived server-side and LEGAL_REQUIREMENT only from the jurisdiction
+    # engine.
+    source: Optional[str] = None
 
 
 class ComplianceResult(BaseModel):
@@ -64,6 +87,7 @@ class ComplianceResult(BaseModel):
 class UpdateAnswersResponse(BaseModel):
     status: str
     data: dict
+    provenance: dict = {}
     compliance: Optional[ComplianceResult] = None
     validation: Optional[dict] = None
 
@@ -200,6 +224,13 @@ async def create_agreement(
             )
         parent_id = data.parent_agreement_id
 
+    if data.is_test_data and get_settings_lazy().environment == "production":
+        # Spec §72: no synthetic contract data in production.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Synthetic / test agreements cannot be created in production",
+        )
+
     agreement = Agreement(
         organization_id=org_id,
         agreement_type_id=data.agreement_type_id,
@@ -210,6 +241,8 @@ async def create_agreement(
         parent_agreement_id=parent_id,
         created_by=current_user.id,
         data=intake,
+        answer_provenance=tag_answers({}, intake.keys(), AnswerSource.USER_PROVIDED),
+        is_test_data=bool(data.is_test_data),
     )
     db.add(agreement)
     await db.flush()
@@ -234,11 +267,11 @@ async def list_agreements(
     org_id: UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Agreement)
-        .where(Agreement.organization_id == org_id)
-        .order_by(Agreement.created_at.desc())
-    )
+    query = select(Agreement).where(Agreement.organization_id == org_id)
+    if get_settings_lazy().environment == "production":
+        # Spec §72: synthetic agreements are invisible to production users.
+        query = query.where(Agreement.is_test_data.is_(False))
+    result = await db.execute(query.order_by(Agreement.created_at.desc()))
     return result.scalars().all()
 
 
@@ -294,7 +327,7 @@ async def update_agreement(
             detail="Agreement not found",
         )
 
-    if agreement.status not in ("draft", "negotiating"):
+    if agreement.status not in EDITABLE_STATES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Agreement cannot be modified in current status",
@@ -380,6 +413,7 @@ async def list_agreement_types(
 )
 async def get_agreement_type_questions(
     type_id: UUID,
+    org_id: UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the questionnaire schema for a specific agreement type.
@@ -387,8 +421,25 @@ async def get_agreement_type_questions(
     Catalog types share a generic template_key, so questions must be
     resolved per type id, not per template (the template-key endpoint can
     only return one type's questions when many types share a template).
+
+    Jurisdiction-dependent defaults (governing law, seat, institution) come
+    from the organisation's jurisdiction record, never from code (spec §71).
     """
-    from app.services.agreement_renderer import normalize_questions_for_ui
+    from app.models.jurisdiction import Jurisdiction
+    from app.models.organization import Organization
+    from app.services.agreement_renderer import (
+        apply_jurisdiction_defaults,
+        normalize_questions_for_ui,
+    )
+
+    jurisdiction = (
+        await db.execute(
+            select(Jurisdiction)
+            .join(Organization, Organization.country == Jurisdiction.code)
+            .where(Organization.id == org_id, Jurisdiction.is_active.is_(True))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
     atype = (
         await db.execute(
@@ -404,7 +455,9 @@ async def get_agreement_type_questions(
             detail="Agreement type not found or not published",
         )
     if atype.schema and atype.schema.get("questions"):
-        return normalize_questions_for_ui(atype.schema["questions"])
+        return normalize_questions_for_ui(
+            apply_jurisdiction_defaults(atype.schema["questions"], jurisdiction)
+        )
 
     # Type without a stored schema falls back to its template questionnaire.
     questions = get_template_questions(atype.template_key or "")
@@ -413,7 +466,7 @@ async def get_agreement_type_questions(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No questionnaire defined for type '{atype.key}'",
         )
-    return normalize_questions_for_ui(questions)
+    return normalize_questions_for_ui(apply_jurisdiction_defaults(questions, jurisdiction))
 
 
 @router.get(
@@ -477,7 +530,7 @@ async def update_answers(
             detail="Agreement not found",
         )
 
-    if agreement.status not in ("draft", "negotiating"):
+    if agreement.status not in EDITABLE_STATES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Agreement cannot be modified in current status",
@@ -492,7 +545,20 @@ async def update_answers(
     agreement.data.update(data.answers)
     from sqlalchemy.orm.attributes import flag_modified
 
+    # Spec §70: record where each answer came from. Values equal to the
+    # template default stay SYSTEM_DEFAULT until the user confirms them.
+    questions = await _questions_for(db, agreement)
+    if data.source in (AnswerSource.EXTRACTED.value, AnswerSource.INFERRED.value):
+        agreement.answer_provenance = tag_answers(
+            agreement.answer_provenance, data.answers.keys(), AnswerSource(data.source)
+        )
+    else:
+        agreement.answer_provenance = classify_user_update(
+            agreement.answer_provenance, data.answers, questions
+        )
+
     flag_modified(agreement, "data")
+    flag_modified(agreement, "answer_provenance")
     await db.flush()
     await db.refresh(agreement)
 
@@ -533,6 +599,7 @@ async def update_answers(
     return UpdateAnswersResponse(
         status="updated",
         data=agreement.data,
+        provenance=agreement.answer_provenance or {},
         compliance=compliance_result,
         validation=validation.to_dict() if not validation.valid or validation.warnings else None,
     )
@@ -848,6 +915,7 @@ async def quality_check_agreement(
     signers = [row[0] for row in signer_result.all()]
 
     data = agreement.data or {}
+    questions = await _questions_for(db, agreement)
     report = run_quality_checks(
         latest_version.content if latest_version else None,
         agreement_meta={
@@ -858,6 +926,11 @@ async def quality_check_agreement(
             "doc_type": "agreement",
             "parties": parties,
             "signers": signers,
+            # Spec §70: missing/assumed answers surface as findings instead of
+            # being silently defaulted.
+            "answers": data,
+            "questions": questions,
+            "provenance": agreement.answer_provenance or {},
         },
     )
 

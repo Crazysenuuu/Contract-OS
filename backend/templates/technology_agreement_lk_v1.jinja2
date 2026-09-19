@@ -1,0 +1,128 @@
+{{ document_title | default("TECHNOLOGY / IP AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ party_a_name | default("_______________") }} ("Party A"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ party_b_name | default("_______________") }} ("Party B"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Parties are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. GRANT AND SCOPE OF USE
+
+1.1 Subject to the terms of this Agreement and payment of the applicable fees, the granting Party grants the receiving Party a {{ license_type | default("non-exclusive") }} {{ license_exclusivity | default("perpetual") }} right to use the subject matter described below during the Term:
+
+Scope of grant / permitted use: {{ scope_of_grant | default("As agreed by the Parties.") }}
+
+1.2 IP being licensed or transferred: {{ ip_description | default(technology_description | default("As described in Schedule 1.")) }}
+
+1.3 Territory: {{ license_territory | default("Worldwide") }}. Seat / instance count: {{ seat_count | default("Unlimited") }}.
+
+1.4 API / usage limits: {{ api_description | default("Not applicable") }} — {{ rate_limits | default("As documented by the provider") }}.
+
+1.5 This Clause 1 shall not be construed to transfer ownership of any intellectual property except as expressly set out in Clause 4.
+
+
+2. FEES AND PAYMENT
+
+2.1 The receiving Party shall pay fees of {{ fees | default(consideration | default("_______________")) }} ({{ currency | default("LKR") }}), payable in accordance with the payment terms agreed between the Parties.
+
+2.2 All amounts are exclusive of applicable taxes, which shall be borne as required by law.
+
+2.3 Late payments shall accrue interest at 1.5% per month on any amount outstanding after the due date.
+
+2.4 Support and maintenance, if applicable, shall be provided for {{ support_period_months | default("12") }} months from delivery.
+
+
+3. DATA PROTECTION AND PROCESSING (DPA PROVISIONS)
+
+{% if personal_data_processed == "Yes" %}3.1 Purpose of processing: {{ processing_purpose | default("To deliver the services under this Agreement.") }}
+
+3.2 Categories of personal data: {{ data_categories | default("As notified by the data controller.") }}
+
+3.3 Categories of data subjects: {{ data_subjects | default("Employees and customers of the data controller.") }}
+
+3.4 Cross-border transfers: {{ data_transfers_abroad | default("Subject to the parties' documented legal basis and the applicable data protection law.") }}
+
+3.5 Each Party shall process personal data only on documented instructions, shall implement appropriate technical and organisational measures, shall assist with data subject rights and regulatory requests, and shall notify the other Party of a personal data breach without undue delay (and in no case later than the time required by applicable law).
+
+3.6 On termination, the data processor shall delete or return all personal data at the controller's election, unless retention is required by law.
+
+3.7 Controller-to-processor terms in this Clause 3 prevail over any conflicting general terms to the extent permitted by applicable data protection law.
+{% else %}3.1 The Parties acknowledge that this is not a data processing agreement and that neither Party shall disclose the other's Confidential Information under this Agreement otherwise than in accordance with Clause 7. To the extent personal data is later processed, the Parties shall enter into a separate data processing agreement.
+{% endif %}
+
+
+4. INTELLECTUAL PROPERTY OWNERSHIP
+
+4.1 Pre-existing intellectual property: each Party retains all rights in its pre-existing intellectual property, including trademarks described at {{ mark_details | default("Schedule 1") }}.
+
+4.2 New intellectual property created under this Agreement shall be owned as follows: {{ ip_ownership | default("As expressly agreed in writing by the Parties.") }}
+
+4.3 Where this is a technology transfer, the transferor will deliver the technology, know-how and supporting documentation identified in {{ technology_description | default("Schedule 1") }}, together with {{ "training" if training_included == "Yes" else "no training" }} as agreed.
+
+4.4 Trademark licensees shall maintain the quality control standards set out at {{ quality_control | default("Schedule 1") }} and shall not challenge the licensor's ownership of the marks.
+
+
+5. REPRESENTATIONS, WARRANTIES AND WARRANTIES
+
+{% if warranties %}5.1 {{ warranties }}
+{% else %}5.1 Each Party represents and warrants that it has the power and authority to enter into and perform this Agreement.{% endif %}
+
+5.2 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, REVENUES, DATA, USE OR GOODWILL, WHETHER INCURRED DIRECTLY OR INDIRECTLY.
+
+5.3 The aggregate liability of each Party under this Agreement shall not exceed the amounts paid or payable under this Agreement in the twelve (12) months preceding the event giving rise to the claim.
+
+
+6. TERM AND TERMINATION
+
+6.1 This Agreement shall commence on the Effective Date and continue for {{ term_months | default("12") }} months (the "Term"). Auto-renew is {{ auto_renew | default("No") }}.
+
+6.2 Either Party may terminate this Agreement upon material breach that remains uncured for 14 days after written notice, or immediately upon the insolvency of the other Party.
+
+6.3 Obligations that by their nature survive termination, including confidentiality, intellectual property, data protection and limitation of liability, shall survive.
+
+
+7. CONFIDENTIALITY
+
+7.1 Each Party agrees to maintain the confidentiality of all Confidential Information disclosed by the other Party and shall not disclose it to any third party without the prior written consent of the disclosing Party.
+
+7.2 This obligation shall survive termination for {{ confidentiality_period | default("3") }} years or as otherwise required by law.
+
+
+8. GOVERNING LAW AND DISPUTE RESOLUTION
+
+8.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+8.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+9. GENERAL PROVISIONS
+
+9.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings, whether written or oral.
+
+9.2 No amendment or waiver of any provision shall be binding unless in writing and signed by both Parties.
+
+9.3 Force Majeure: neither Party shall be liable for failure to perform its obligations to the extent caused by events outside its reasonable control.
+
+
+MUTUAL SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

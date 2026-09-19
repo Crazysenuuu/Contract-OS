@@ -1,0 +1,101 @@
+{{ document_title | default("SERVICE LEVEL AGREEMENT") }}
+
+This Service Level Agreement ("SLA") is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ service_provider_name | default(party_a_name | default("_______________")) }} ("Service Provider"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ client_name | default(party_b_name | default("_______________")) }} ("Client"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Service Provider and the Client are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. SERVICES AND SCOPE
+
+1.1 The Service Provider agrees to provide the services described in the underlying agreement to the Client in accordance with the service levels set out in this SLA:
+
+{{ purpose | default("Set out the services covered by this SLA.") }}
+
+1.2 This SLA supplements, and does not replace, the underlying agreement between the Parties. In the event of inconsistency, this SLA prevails in respect of service levels and credits.
+
+
+2. SERVICE LEVEL TARGETS
+
+2.1 Availability uptime target: {{ uptime_target | default("99.9%") }}.
+
+2.2 Response time (severity-based, during support hours): {{ response_time_hours | default("4") }} hours.
+
+2.3 Resolution time: {{ resolution_time_hours | default("24") }} hours.
+
+2.4 Support hours and severity levels (critical, high, medium, low):
+
+Support hours: {{ support_hours | default("9am-5pm, Mon-Fri") }}
+Severity levels and escalation: {{ severity_levels | default("Critical: service down; High: major feature impaired; Medium: minor impairment; Low: cosmetic.") }}
+
+2.5 The service levels in this Clause 2 shall be reported and measured in accordance with the agreed measurement methodology in the underlying agreement.
+
+
+3. ESCALATION AND CONTACT
+
+3.1 Escalation contacts and notification channels: {{ escalation_contacts | default("As agreed by the Parties.") }}
+
+3.2 The Service Provider shall notify the Client of any planned maintenance, scheduled downtime and any service-impacting incident in accordance with the agreed process.
+
+
+4. SERVICE CREDITS AND REMEDIES
+
+4.1 If the Service Provider fails to meet a service level target, the Client shall be entitled to the service credits described below, credited against future invoices:
+
+{{ service_credits | default("As agreed by the Parties (e.g., a percentage of the monthly recurring fee per shortfall).") }}
+
+4.2 Service credits are the sole and exclusive remedy for a failure to meet service level targets, except for failures caused by the Client, force majeure, or matters outside the Service Provider's reasonable control.
+
+
+5. LIABILITY AND WARRANTY
+
+5.1 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES.
+
+5.2 Except as expressly provided, this SLA does not modify the liability cap and warranty provisions of the underlying agreement.
+
+
+6. TERM AND REVIEW
+
+6.1 This SLA shall commence on the Effective Date and continue in parallel with the underlying agreement. Auto-renew is {{ auto_renew | default("No") }}.
+
+6.2 The Parties shall review service levels at least annually and may amend this SLA by written agreement.
+
+
+7. GOVERNING LAW AND DISPUTE RESOLUTION
+
+7.1 This SLA shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+7.2 Any dispute arising out of or in connection with this SLA shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+8. GENERAL PROVISIONS
+
+8.1 This SLA constitutes the entire agreement between the Parties regarding service levels and supersedes all prior understandings on this subject.
+
+8.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+8.3 Notices shall be given in writing to the addresses first written above.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this SLA as of the Effective Date.
+
+For the Service Provider / Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For the Client / Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

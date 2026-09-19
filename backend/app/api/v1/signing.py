@@ -9,16 +9,15 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.dependencies.agreement_access import verify_agreement_access
 from app.dependencies.auth import get_current_user
+from app.dependencies.rbac import require_permission
 from app.dependencies.tenant import get_current_organization_id
-from app.models.agreement import Agreement, AgreementVersion
-from app.models.audit import AuditEvent
-from app.models.external_party import ExternalPartySignature
+from app.domain.agreement_states import SIGNABLE_STATES, AgreementStatus
+from app.models.agreement import Agreement
 from app.models.signature import InternalSignature
 from app.models.user import User
 from app.services.agreement_versioning import get_latest_version
@@ -30,6 +29,11 @@ from app.services.lifecycle_service import (
     apply_transition,
 )
 from app.services.signing_authority_service import evaluate_signing_authority
+from app.services.signing_completion import (
+    ExecutionBlocked,
+    check_and_execute,
+    signature_progress,
+)
 
 router = APIRouter(
     prefix="/agreements",
@@ -87,80 +91,18 @@ async def _check_and_execute(
     agreement: Agreement,
     org_id: uuid.UUID,
 ) -> bool:
-    """Check if all parties have signed and auto-transition to EXECUTED.
+    """Advance SIGNING → PARTIALLY_SIGNED / EXECUTED (spec §67).
 
-    Returns True if execution was triggered.
+    Delegates to the shared signing-completion engine so internal and
+    external signatures are judged by the same "all required signers" rule.
     """
-    # Check if there are signatures from all required parties
-    ext_result = await db.execute(
-        select(ExternalPartySignature).where(
-            ExternalPartySignature.agreement_id == agreement.id,
-        )
-    )
-    int_result = await db.execute(
-        select(InternalSignature).where(
-            InternalSignature.agreement_id == agreement.id,
-        )
-    )
-    ext_sigs = list(ext_result.scalars().all())
-    int_sigs = list(int_result.scalars().all())
-    signatures = ext_sigs + int_sigs
-
-    if len(signatures) < 1:
-        return False
-
-    # Check if agreement already executed
-    if agreement.status == "executed":
-        return False
-
-    # Auto-transition to executed
     try:
-        await apply_transition(
-            db,
-            agreement=agreement,
-            action_key="execute",
-            actor_id=None,
-            org_id=org_id,
-            actor_type="system",
-            metadata_json={"signature_count": len(signatures)},
-        )
-    except TransitionNotAllowed as e:
+        return await check_and_execute(db, agreement=agreement, org_id=org_id)
+    except ExecutionBlocked as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    agreement.execution_date = datetime.now(timezone.utc).date()
-
-    # Lock the latest version
-    version = await get_latest_version(db, agreement.id)
-    if version:
-        from app.services.agreement_versioning import lock_version
-        await lock_version(db, version)
-
-        # Generate final PDF hash
-        if version.content:
-            document_hash = hashlib.sha256(version.content.encode()).hexdigest()
-            version.content_hash = document_hash
-            await db.flush()
-
-            # Record execution audit event
-            await _record_audit_event(
-                db,
-                tenant_id=org_id,
-                agreement_id=agreement.id,
-                actor_id=None,
-                actor_type="system",
-                action="EXECUTED",
-                resource_type="agreement",
-                resource_id=agreement.id,
-                metadata={
-                    "document_hash": document_hash,
-                    "signature_count": len(signatures),
-                },
-            )
-
-    await db.flush()
-    return True
 
 
 def _send_esign_alert(
@@ -240,7 +182,7 @@ async def sign_agreement(
         db=db,
     )
 
-    if agreement.status not in ("approved", "signing", "negotiating", "negotiation", "sent"):
+    if agreement.status not in SIGNABLE_STATES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot sign agreement in status: {agreement.status}",
@@ -292,7 +234,7 @@ async def sign_agreement(
     db.add(signature)
 
     # Update agreement status
-    if agreement.status != "signing":
+    if agreement.status not in (AgreementStatus.SIGNING, AgreementStatus.PARTIALLY_SIGNED):
         try:
             await apply_transition(
                 db,
@@ -352,16 +294,18 @@ async def sign_agreement(
 @router.post(
     "/{agreement_id}/send",
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permission("agreement.send"))],
 )
 async def send_agreement(
     agreement_id: uuid.UUID,
+    request: Request,
     current_user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Send agreement to counterparty.
 
-    Transitions DRAFT/INTERNAL_REVIEW → SENT.
+    Transitions DRAFT/INTERNAL_REVIEW/APPROVED → SENT.
     """
     agreement = await verify_agreement_access(
         agreement_id=agreement_id,
@@ -370,7 +314,11 @@ async def send_agreement(
         db=db,
     )
 
-    if agreement.status not in ("draft", "internal_review"):
+    if agreement.status not in (
+        AgreementStatus.DRAFT,
+        AgreementStatus.INTERNAL_REVIEW,
+        AgreementStatus.APPROVED,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot send agreement in status: {agreement.status}",
@@ -417,3 +365,21 @@ async def send_agreement(
     )
 
     return {"status": "sent", "message": "Agreement sent to counterparty"}
+
+
+@router.get("/{agreement_id}/signature-progress")
+async def get_signature_progress(
+    agreement_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Who has signed and who is still outstanding (spec §67)."""
+    agreement = await verify_agreement_access(
+        agreement_id=agreement_id,
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+    progress = await signature_progress(db, agreement.id)
+    return {"agreement_id": str(agreement.id), "status": agreement.status, **progress.to_dict()}

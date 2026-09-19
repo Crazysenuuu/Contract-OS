@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, select
 
 from app.models.legal_entity import LegalEntity, AuthorizedSignatory
+from app.services.currency_service import resolve_currency
 
 
 class SignatureAuthorityEngine:
@@ -18,10 +19,11 @@ class SignatureAuthorityEngine:
         self,
         user_id: str,
         agreement_value: float,
-        currency: str = "LKR",
+        currency: str | None = None,
         legal_entity_id: str = None
     ) -> Dict[str, Any]:
         """Check if a user has authority to sign an agreement."""
+        currency = resolve_currency(currency)
         # Get signatory record
         signatory = await self._get_active_signatory(user_id)
 
@@ -60,7 +62,7 @@ class SignatureAuthorityEngine:
         # Check maximum value
         if signatory.maximum_value is not None:
             # Convert to common currency for comparison
-            converted_value = self._convert_currency(agreement_value, currency, signatory.currency or "LKR")  # type: ignore[arg-type]
+            converted_value = self._convert_currency(agreement_value, currency, resolve_currency(signatory.currency))  # type: ignore[arg-type]
 
             if converted_value > signatory.maximum_value:
                 # Need higher approval
@@ -86,10 +88,11 @@ class SignatureAuthorityEngine:
     async def get_signatory_for_agreement(
         self,
         agreement_value: float,
-        currency: str = "LKR",
+        currency: str | None = None,
         legal_entity_id: str = None
     ) -> Optional[AuthorizedSignatory]:
         """Find appropriate signatory for an agreement value."""
+        currency = resolve_currency(currency)
         stmt = select(AuthorizedSignatory).where(
             AuthorizedSignatory.is_active == True,  # noqa: E712
         )
@@ -113,7 +116,7 @@ class SignatureAuthorityEngine:
                 return signatory
 
             if signatory.maximum_value is not None:
-                converted_value = self._convert_currency(agreement_value, currency, signatory.currency or "LKR")  # type: ignore[arg-type]
+                converted_value = self._convert_currency(agreement_value, currency, resolve_currency(signatory.currency))  # type: ignore[arg-type]
                 if converted_value <= signatory.maximum_value:
                     return signatory
 
@@ -122,9 +125,10 @@ class SignatureAuthorityEngine:
     def get_required_approvals(
         self,
         agreement_value: float,
-        currency: str = "LKR"
+        currency: str | None = None
     ) -> List[Dict[str, Any]]:
         """Get required approvals based on agreement value."""
+        currency = resolve_currency(currency)
         approvals = []
 
         # Convert to LKR for comparison
@@ -241,27 +245,16 @@ class SignatureAuthorityEngine:
         from_currency: str,
         to_currency: str
     ) -> float:
-        """Convert amount between currencies (simplified)."""
-        # Exchange rates (simplified - in production use real API)
-        rates = {
-            "LKR": 1.0,
-            "USD": 300.0,
-            "EUR": 330.0,
-            "GBP": 380.0,
-            "SGD": 225.0,
-            "INR": 3.6,
-        }
+        """Convert amount between currencies via the configured FX table (spec §71)."""
+        from app.services.currency_service import convert
 
-        from_rate = rates.get(from_currency, 1.0)
-        to_rate = rates.get(to_currency, 1.0)
-
-        # Convert to LKR first, then to target
-        lkr_amount = amount * from_rate
-        return lkr_amount / to_rate
+        return convert(amount, from_currency, to_currency)
 
     def _convert_to_lkr(self, amount: float, currency: str) -> float:
-        """Convert amount to LKR."""
-        return self._convert_currency(amount, currency, "LKR")
+        """Convert amount to the platform base currency."""
+        from app.services.currency_service import convert_to_base
+
+        return convert_to_base(amount, currency)
 
     def _get_required_approvals(
         self,

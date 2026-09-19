@@ -18,6 +18,7 @@ from app.dependencies.tenant import get_current_organization_id
 from app.models.agreement import Agreement
 from app.models.amendment import AgreementAmendment
 from app.models.user import User
+from app.dependencies.rbac import require_permission
 from app.schemas.amendment import AmendmentResponse
 from app.services.amendment_service import (
     AmendmentError,
@@ -30,6 +31,8 @@ router = APIRouter(
     prefix="/agreements/{agreement_id}/amendments",
     tags=["amendments"],
 )
+
+_perm_agreement_amend = Depends(require_permission("agreement.amend"))
 
 
 class AmendmentChangeRequest(BaseModel):
@@ -139,7 +142,7 @@ async def get_amendment(
     return amendment
 
 
-@router.post("/{amendment_id}/activate", response_model=AmendmentResponse)
+@router.post("/{amendment_id}/activate", response_model=AmendmentResponse, dependencies=[_perm_agreement_amend])
 async def activate_amendment_endpoint(
     agreement_id: uuid.UUID,
     amendment_id: uuid.UUID,

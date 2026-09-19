@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getDashboard,
+  getComplianceSummary,
   createMyTask,
   updateMyTask,
   deleteMyTask,
   markAllNotificationsRead,
   DashboardPayload,
   DashboardTask,
+  ComplianceSummary,
 } from "@/lib/api";
 
 const statusColors: Record<string, string> = {
@@ -32,6 +34,7 @@ export default function DashboardPage() {
   const { token, user } = useAuth();
   const router = useRouter();
   const [data, setData] = useState<DashboardPayload | null>(null);
+  const [compliance, setCompliance] = useState<ComplianceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -46,6 +49,9 @@ export default function DashboardPage() {
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
+    getComplianceSummary(token)
+      .then(setCompliance)
+      .catch(() => {}); // non-blocking
   };
 
   useEffect(load, [token]);
@@ -146,6 +152,30 @@ export default function DashboardPage() {
           </button>
         </form>
       </div>
+
+      {/* Compliance summary (spec §89) */}
+      {compliance && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">Compliance Overview</h2>
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
+            {(
+              [
+                { label: "Requiring Review", value: compliance.contracts_requiring_review, color: "text-amber-600", href: "/agreements/compliance" },
+                { label: "Missing DPA", value: compliance.missing_dpa, color: "text-red-600", href: "/agreements/compliance" },
+                { label: "Unsigned Amendments", value: compliance.unsigned_amendments, color: "text-orange-600", href: "/amendments" },
+                { label: "Upcoming Renewals", value: compliance.upcoming_renewals, color: "text-blue-600", href: "/renewals" },
+                { label: "Pending Approvals", value: compliance.pending_approvals, color: "text-purple-600", href: "/approvals" },
+                { label: "Overdue Obligations", value: compliance.overdue_obligations, color: "text-red-600", href: "/agreements/obligations" },
+              ] as const
+            ).map((item) => (
+              <Link key={item.label} href={item.href} className="text-center hover:opacity-80">
+                <div className={`text-xl font-bold ${item.color}`}>{item.value}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{item.label}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">

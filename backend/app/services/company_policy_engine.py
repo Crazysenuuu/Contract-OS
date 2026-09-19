@@ -6,6 +6,7 @@ import json
 
 from app.models.agreement import Agreement
 from app.models.legal_entity import LegalEntity
+from app.services.currency_service import resolve_currency
 
 
 def _cond_value_above(ctx: Dict[str, Any], threshold: float = 0.0) -> bool:
@@ -224,7 +225,7 @@ class CompanyPolicyEngine:
         if "total_value" in data:
             try:
                 value = float(data["total_value"])
-                currency = data.get("currency", "LKR")
+                currency = resolve_currency(data.get("currency"))
                 context["value_lkr"] = self._convert_to_lkr(value, currency)
             except (ValueError, TypeError):
                 pass
@@ -266,16 +267,10 @@ class CompanyPolicyEngine:
         return context
 
     def _convert_to_lkr(self, amount: float, currency: str) -> float:
-        """Convert amount to LKR."""
-        rates = {
-            "LKR": 1.0,
-            "USD": 300.0,
-            "EUR": 330.0,
-            "GBP": 380.0,
-            "SGD": 225.0,
-            "INR": 3.6,
-        }
-        return amount * rates.get(currency, 1.0)
+        """Convert amount to the platform base currency (configured, spec §71)."""
+        from app.services.currency_service import convert_to_base
+
+        return convert_to_base(amount, currency)
 
     def get_all_rules(self) -> List[Dict]:
         """Get all policy rules."""

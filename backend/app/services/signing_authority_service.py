@@ -43,21 +43,11 @@ VALUE_KEYS = (
     "loan_amount",
 )
 
-# Simplified FX rates (mirrors SignatureAuthorityEngine / doa_service).
-_FX_RATES = {
-    "LKR": 1.0,
-    "USD": 300.0,
-    "EUR": 330.0,
-    "GBP": 380.0,
-    "SGD": 225.0,
-    "INR": 3.6,
-}
-
-
 def convert_amount(amount: float, from_currency: str, to_currency: str) -> float:
-    """Convert between the supported currencies (simplified rates)."""
-    base = amount * _FX_RATES.get(from_currency or "LKR", 1.0)
-    return base / _FX_RATES.get(to_currency or "LKR", 1.0)
+    """Convert between currencies using the configured FX table (spec §71)."""
+    from app.services.currency_service import convert
+
+    return convert(amount, from_currency, to_currency)
 
 
 def resolve_agreement_financials(agreement: Agreement) -> tuple[float | None, str | None]:

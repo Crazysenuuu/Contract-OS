@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.services.currency_service import resolve_currency
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
 from app.models.user import User
@@ -44,7 +45,7 @@ class DoaMatrixCreateRequest(BaseModel):
 @router.get("/resolve")
 async def resolve(
     agreement_value: float = Query(..., gt=0),
-    currency: str = Query(default="LKR"),
+    currency: str | None = Query(default=None),
     org_id: UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -53,7 +54,7 @@ async def resolve(
         db,
         organization_id=org_id,
         agreement_value=agreement_value,
-        currency=currency,
+        currency=resolve_currency(currency),
     )
     return result
 

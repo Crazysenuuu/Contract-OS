@@ -22,6 +22,7 @@ from app.models.approval import (
     ApprovalStage,
     ApprovalStep,
 )
+from app.services.currency_service import resolve_currency
 
 
 async def get_approval_definitions(
@@ -208,7 +209,7 @@ async def resolve_and_start_approval(
         organization_id=organization_id,
         agreement_value=float(value),
         agreement_type=type_row.key if type_row else None,
-        currency=agreement.currency or "LKR",
+        currency=resolve_currency(agreement.currency),
         extra_context={
             "counterparty_country": agreement.governing_law,
             "title": agreement.title,

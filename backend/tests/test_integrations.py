@@ -55,6 +55,30 @@ def test_stripe_payload_minor_units():
     assert payload["amount"] == 2500000  # 25,000 USD * 100
 
 
+def test_workday_payload_shape():
+    """Spec 24.6 HRIS sync: Workday contract workers consume a business payload."""
+    agreement = _FakeAgreement()
+    payload = build_payload("workday", "agreement.executed", agreement)
+    assert payload["segment"] == "contracts"
+    assert payload["operation"] == "EXECUTED"
+    data = payload["data"]
+    assert data["ExternalContractID"] == str(agreement.id)
+    assert data["ContractValue"] == 25000.0
+    assert data["Currency"] == "USD"
+
+
+def test_azure_ad_payload_shape():
+    """Microsoft Graph v1.0 contract-access sync."""
+    payload = build_payload("azure_ad", "agreement.executed", _FakeAgreement())
+    assert payload["graphVersion"] == "v1.0"
+    assert payload["resource"].startswith("groups")
+    assert payload["operation"] == "PATCH"
+    assert payload["body"]["contractStatus"] == "executed"
+
+    created = build_payload("azure_ad", "agreement.created", _FakeAgreement())
+    assert created["operation"] == "POST"
+
+
 def test_signature_is_deterministic_hmac():
     payload = build_payload("salesforce", "agreement.signed", _FakeAgreement())
     sig1 = sign_payload(payload, "secret")

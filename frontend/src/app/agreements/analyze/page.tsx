@@ -12,12 +12,16 @@ import {
   updateRiskStatus,
   listVersions,
   compareVersions,
+  listClauses,
+  extractClauses,
+  addClauseToLibrary,
 } from "@/lib/api";
 
 interface Agreement {
   id: string;
   title: string;
   status: string;
+  data?: Record<string, unknown>;
 }
 
 interface AnalysisResult {
@@ -32,6 +36,18 @@ interface AnalysisResult {
     confidence: number;
   }>;
   confidence: number;
+}
+
+interface ExtractedClause {
+  id: string;
+  title: string;
+  category: string;
+  risk_level: string | null;
+  risk_score: number | null;
+  sentiment: string | null;
+  tags: string[];
+  text?: string;
+  text_preview?: string;
 }
 
 interface RiskFinding {
@@ -93,6 +109,7 @@ function AnalysisContent() {
   const [risks, setRisks] = useState<RiskFinding[]>([]);
   const [versions, setVersions] = useState<AgreementVersion[]>([]);
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
+  const [clauses, setClauses] = useState<ExtractedClause[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -103,6 +120,8 @@ function AnalysisContent() {
   // Comparison form
   const [baseVersion, setBaseVersion] = useState<number>(1);
   const [comparedVersion, setComparedVersion] = useState<number>(2);
+  const [savingClauseId, setSavingClauseId] = useState<string>("");
+  const [savedClauseIds, setSavedClauseIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (token && agreementId) {
@@ -110,11 +129,13 @@ function AnalysisContent() {
         getAgreement(token, agreementId),
         listRisks(token, agreementId).catch(() => []),
         listVersions(token, agreementId).catch(() => []),
+        listClauses(token, agreementId).catch(() => []),
       ])
-        .then(([agr, riskData, vers]) => {
+        .then(([agr, riskData, vers, clauseData]) => {
           setAgreement(agr);
           setRisks(riskData);
           setVersions(vers);
+          setClauses(clauseData);
           if (vers.length >= 2) {
             setBaseVersion(1);
             setComparedVersion(vers.length);
@@ -192,6 +213,40 @@ function AnalysisContent() {
     }
   };
 
+  const handleExtractClauses = async () => {
+    if (!token || !agreementId) return;
+    setAnalyzing(true);
+    setError("");
+    try {
+      const result = await extractClauses(token, {
+        agreement_id: agreementId,
+        text: agreement?.data ? JSON.stringify(agreement.data) : "",
+      });
+      setClauses(result.clauses);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Clause extraction failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleSaveToLibrary = async (clause: ExtractedClause) => {
+    if (!token) return;
+    setSavingClauseId(clause.id);
+    try {
+      await addClauseToLibrary(token, {
+        clause_id: clause.id,
+        title: clause.title,
+        description: clause.text_preview ?? clause.text?.slice(0, 200),
+      });
+      setSavedClauseIds((prev) => new Set(prev).add(clause.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save to library failed");
+    } finally {
+      setSavingClauseId("");
+    }
+  };
+
   if (loading) {
     return <div className="text-center py-12 text-gray-500">Loading...</div>;
   }
@@ -234,6 +289,13 @@ function AnalysisContent() {
             className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-md hover:bg-orange-700 disabled:opacity-50"
           >
             {detecting ? "Detecting..." : "Detect Risks"}
+          </button>
+          <button
+            onClick={handleExtractClauses}
+            disabled={analyzing}
+            className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-md hover:bg-teal-700 disabled:opacity-50"
+          >
+            {analyzing ? "Extracting..." : "Extract Clauses"}
           </button>
         </div>
       </div>
@@ -351,6 +413,63 @@ function AnalysisContent() {
           )}
         </div>
       </div>
+
+      {/* Extracted Clauses */}
+      {clauses.length > 0 && (
+        <div className="mt-6 bg-white shadow rounded-lg p-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">
+            Extracted Clauses ({clauses.length})
+          </h2>
+          <div className="space-y-3">
+            {clauses.map((clause) => (
+              <div
+                key={clause.id}
+                className="border border-gray-200 rounded-lg p-4 flex items-start justify-between gap-4"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium text-gray-900">{clause.title}</span>
+                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                      {clause.category}
+                    </span>
+                    {clause.risk_level && (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${
+                          clause.risk_level === "high"
+                            ? "bg-red-100 text-red-700"
+                            : clause.risk_level === "medium"
+                            ? "bg-yellow-100 text-yellow-700"
+                            : "bg-green-100 text-green-700"
+                        }`}
+                      >
+                        {clause.risk_level} risk
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 line-clamp-2">
+                    {clause.text_preview ?? clause.text?.slice(0, 200)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleSaveToLibrary(clause)}
+                  disabled={savingClauseId === clause.id || savedClauseIds.has(clause.id)}
+                  className={`text-xs px-3 py-1.5 rounded whitespace-nowrap ${
+                    savedClauseIds.has(clause.id)
+                      ? "bg-green-100 text-green-700 cursor-default"
+                      : "border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  } disabled:opacity-50`}
+                >
+                  {savedClauseIds.has(clause.id)
+                    ? "✓ In library"
+                    : savingClauseId === clause.id
+                    ? "Saving..."
+                    : "Save to library"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Detailed Risks */}
       {risks.length > 0 && (

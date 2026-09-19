@@ -8,7 +8,8 @@ import {
   createFeatureFlag,
   updateFeatureFlag,
   deleteFeatureFlag,
-  evaluateFeatureFlag,
+  evaluateAllFeatureFlags,
+  getEnabledFeatureFlags,
   getFeatureFlagStats,
   exportFeatureFlags,
 } from "@/lib/api";
@@ -36,6 +37,7 @@ export default function FeatureFlagsAdminPage() {
   const [evalResult, setEvalResult] = useState<Record<string, boolean> | null>(
     null
   );
+  const [myFlags, setMyFlags] = useState<string[]>([]);
 
   const reload = useCallback(() => {
     if (!token) return;
@@ -50,9 +52,23 @@ export default function FeatureFlagsAdminPage() {
       );
   }, [token]);
 
+  const loadMyFlags = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await getEnabledFeatureFlags(token, user?.id);
+      setMyFlags(data.enabled_flags);
+    } catch {
+      setMyFlags([]);
+    }
+  }, [token, user]);
+
   useEffect(() => {
     if (isAdmin) void Promise.resolve().then(reload);
   }, [reload, isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin) void Promise.resolve().then(loadMyFlags);
+  }, [isAdmin, loadMyFlags]);
 
   const handleCreate = async () => {
     if (!token || !name) return;
@@ -112,16 +128,9 @@ export default function FeatureFlagsAdminPage() {
     setBusy(true);
     setError(null);
     try {
-      const results: Record<string, boolean> = {};
-      await Promise.all(
-        flags.map(async (f) => {
-          const r = await evaluateFeatureFlag(
-            token,
-            f.name,
-            evalUser || undefined
-          );
-          results[f.name] = r.enabled;
-        })
+      const results: Record<string, boolean> = await evaluateAllFeatureFlags(
+        token,
+        evalUser || undefined
       );
       setEvalResult(results);
     } catch (e) {
@@ -316,6 +325,35 @@ export default function FeatureFlagsAdminPage() {
               ))}
             </div>
           )}
+
+          {/* Flags enabled for me (session user) */}
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Enabled for you
+              </span>
+              <button
+                onClick={loadMyFlags}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Refresh
+              </button>
+            </div>
+            {myFlags.length === 0 ? (
+              <p className="text-xs text-gray-400">No flags enabled for your user.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {myFlags.map((flag) => (
+                  <span
+                    key={flag}
+                    className="px-2 py-1 text-xs rounded-full font-medium bg-emerald-50 text-emerald-700"
+                  >
+                    {flag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Flag list */}

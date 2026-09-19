@@ -16,6 +16,7 @@ import {
 
 import { DynamicFormBuilder } from "./DynamicFormBuilder";
 import { IntentWizard } from "./IntentWizard";
+import { filterVisibleQuestions } from "@/lib/conditions";
 
 interface Question {
   id: string;
@@ -25,6 +26,15 @@ interface Question {
   default?: unknown;
   options?: Array<{ value: string; label: string }>;
   section: string;
+  // Declarative branch rule (spec §4.2): only render the question when the
+  // condition holds against the current answers.
+  condition?: { field?: string; operator?: string; value?: unknown };
+  placeholder?: string;
+  helper_text?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  rows?: number;
 }
 
 
@@ -80,7 +90,7 @@ export default function NewAgreementPage() {
     // template_key, so the type's own schema is the authoritative source.
     // All updates happen in async promise callbacks — no synchronous setState
     // in the effect body.
-    getAgreementTypeQuestions(selectedType.id)
+    getAgreementTypeQuestions(selectedType.id, token)
       .then((qs) => {
         setQuestions(qs);
         const defaults: Record<string, unknown> = {};
@@ -97,7 +107,13 @@ export default function NewAgreementPage() {
 
   const sections = Array.from(new Set(questions.map((q) => q.section)));
   const currentSection = sections[currentStep];
-  const sectionQuestions = questions.filter((q) => q.section === currentSection);
+  // Dynamic questionnaire (spec §4.2): conditions are evaluated against the
+  // live answers so branching questions appear/disappear in real time as the
+  // user answers the branch trigger.
+  const sectionQuestions = filterVisibleQuestions(
+    questions.filter((q) => q.section === currentSection),
+    answers
+  );
 
   // Debounced compliance check
   const checkCompliance = useCallback(

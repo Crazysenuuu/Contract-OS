@@ -10,7 +10,7 @@ from uuid import UUID
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.core.database import get_db
 from app.dependencies.auth import get_current_user, get_user_org_ids
 from app.models.legal_entity import AuthorizedSignatory, LegalEntity
 from app.models.user import User
+from app.services.currency_service import default_currency, resolve_currency
 from app.services.doa_service import resolve_doa_matrix
 from app.services.signing_authority_service import convert_amount
 
@@ -35,7 +36,7 @@ def _aware(dt):
 class CheckAuthorityRequest(BaseModel):
     user_id: str
     agreement_value: float
-    currency: str = "LKR"
+    currency: str = Field(default_factory=default_currency)
     legal_entity_id: Optional[str] = None
 
 
@@ -47,7 +48,7 @@ class AddSignatoryRequest(BaseModel):
     authority_type: str
     authority_scope: str = "limited"
     maximum_value: Optional[float] = None
-    currency: str = "LKR"
+    currency: str = Field(default_factory=default_currency)
 
 
 async def _user_org_ids(
@@ -182,8 +183,8 @@ async def check_signing_authority(
 
     converted = convert_amount(
         request.agreement_value,
-        request.currency or "LKR",
-        signatory.currency or "LKR",
+        resolve_currency(request.currency),
+        resolve_currency(signatory.currency),
     )
     if converted <= float(signatory.maximum_value):
         return {"allowed": True, "message": "Within signing authority limit", **base}
@@ -192,7 +193,7 @@ async def check_signing_authority(
         db,
         organization_id=org_id,
         agreement_value=request.agreement_value,
-        currency=request.currency or "LKR",
+        currency=resolve_currency(request.currency),
     )
     return {
         "allowed": False,
@@ -209,7 +210,7 @@ async def check_signing_authority(
 @router.get("/approvals-required")
 async def get_required_approvals(
     agreement_value: float,
-    currency: str = "LKR",
+    currency: str | None = Query(default=None),
     org_id: Optional[str] = Query(default=None, alias="organization_id"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -231,7 +232,7 @@ async def get_required_approvals(
                 db,
                 organization_id=UUID(str(target_org)),
                 agreement_value=agreement_value,
-                currency=currency,
+                currency=resolve_currency(currency),
             )
             return {
                 "approvals": matrix["required_approvals"],
@@ -246,7 +247,7 @@ async def get_required_approvals(
     # Builtin fallback path — the engine's DB session is unused by this
     # pure-computation method.
     engine = SignatureAuthorityEngine(db)
-    approvals = await engine.get_required_approvals(agreement_value, currency)
+    approvals = await engine.get_required_approvals(agreement_value, resolve_currency(currency))
     return {"approvals": approvals, "matrix_source": "builtin"}
 
 

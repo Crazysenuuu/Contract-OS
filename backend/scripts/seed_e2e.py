@@ -3,6 +3,7 @@
 
 Creates (idempotently):
     - login user  test@example.com / password123  (used by every e2e test)
+    - admin user  admin@example.com / password123 (for /admin pages)
     - agreement types / jurisdictions / lifecycle states (via seed_data)
 
 Usage (backend must have a reachable DATABASE_URL):
@@ -22,9 +23,21 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 E2E_EMAIL = "test@example.com"
 E2E_PASSWORD = "password123"
+E2E_ADMIN_EMAIL = "admin@example.com"
+E2E_ADMIN_PASSWORD = "password123"
 
 
 async def seed_login_user() -> None:
+    await _seed_user(E2E_EMAIL, E2E_PASSWORD, "E2E Test User", is_admin=False)
+
+
+async def seed_admin_user() -> None:
+    await _seed_user(E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, "E2E Admin User", is_admin=True)
+
+
+async def _seed_user(
+    email: str, password: str, name: str, *, is_admin: bool
+) -> None:
     from sqlalchemy import select
 
     from app.core.database import AsyncSessionLocal
@@ -34,26 +47,28 @@ async def seed_login_user() -> None:
     from app.models.user import User
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(User).where(User.email == E2E_EMAIL))
+        result = await db.execute(select(User).where(User.email == email))
         user = result.scalar_one_or_none()
 
         if user is None:
             user = User(
-                email=E2E_EMAIL,
-                name="E2E Test User",
-                password_hash=hash_password(E2E_PASSWORD),
+                email=email,
+                name=name,
+                password_hash=hash_password(password),
                 status="active",
+                is_admin=is_admin,
             )
             db.add(user)
             await db.flush()
-            print(f"  created user {E2E_EMAIL}")
+            print(f"  created user {email} (is_admin={is_admin})")
         else:
             # Keep credentials deterministic across runs (e.g. after a
             # re-seed changed the hashing parameters).
-            user.password_hash = hash_password(E2E_PASSWORD)
+            user.password_hash = hash_password(password)
+            user.is_admin = is_admin
             if user.status != "active":
                 user.status = "active"
-            print(f"  user {E2E_EMAIL} already exists (credentials refreshed)")
+            print(f"  user {email} already exists (credentials refreshed)")
 
         membership = (
             await db.execute(
@@ -63,17 +78,35 @@ async def seed_login_user() -> None:
             )
         ).scalar_one_or_none()
         if membership is None:
-            org = Organization(
-                name="E2E Test Org",
-                slug="e2e-test-org",
-                country="US",
-                timezone="America/New_York",
-            )
-            db.add(org)
-            await db.flush()
-            role = Role(organization_id=org.id, name="owner")
-            db.add(role)
-            await db.flush()
+            # Reuse the shared e2e org if it exists (unique on slug), else
+            # create it — otherwise a second seeded user crashes on the
+            # organizations_slug unique constraint.
+            org = (
+                await db.execute(
+                    select(Organization).where(Organization.slug == "e2e-test-org")
+                )
+            ).scalar_one_or_none()
+            if org is None:
+                org = Organization(
+                    name="E2E Test Org",
+                    slug="e2e-test-org",
+                    country="US",
+                    timezone="America/New_York",
+                )
+                db.add(org)
+                await db.flush()
+                print(f"  created org e2e-test-org")
+            role = (
+                await db.execute(
+                    select(Role).where(
+                        Role.organization_id == org.id, Role.name == "owner"
+                    )
+                )
+            ).scalar_one_or_none()
+            if role is None:
+                role = Role(organization_id=org.id, name="owner")
+                db.add(role)
+                await db.flush()
             db.add(
                 OrganizationMember(
                     organization_id=org.id,
@@ -82,14 +115,22 @@ async def seed_login_user() -> None:
                     status="active",
                 )
             )
-            print(f"  created org e2e-test-org for {E2E_EMAIL}")
+            print(f"  joined {email} to org e2e-test-org")
 
         await db.commit()
 
 
 async def main() -> int:
+    # Spec §72: fixture users / demo data must never land in production.
+    from app.core.config import get_settings_lazy
+
+    if get_settings_lazy().environment == "production":
+        print("❌ Refusing to seed e2e fixtures: ENVIRONMENT=production (spec §72)")
+        return 2
+
     print("Seeding e2e fixtures...")
     await seed_login_user()
+    await seed_admin_user()
 
     # Reference data the UI flows browse: agreement types, jurisdictions,
     # lifecycle states and transition rules.

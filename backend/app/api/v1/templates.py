@@ -1,11 +1,20 @@
+"""Template library API.
+
+Tenant boundary: every handler resolves the caller's organisation through
+``get_current_organization_id`` (which also sets the RLS tenant context), and
+mutations require the ``template.manage`` permission (spec §51).
+"""
+
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_current_user, get_user_org_ids
 from app.core.database import get_db
+from app.dependencies.auth import get_current_user
+from app.dependencies.rbac import require_permission
+from app.dependencies.tenant import get_current_organization_id
 from app.models.user import User
 from app.schemas.template import (
     TemplateCreate,
@@ -18,6 +27,8 @@ from app.services import template_service_v2 as template_service
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
+_manage = Depends(require_permission("template.manage"))
+
 
 @router.get("", response_model=list[TemplateOut])
 async def list_templates(
@@ -25,10 +36,8 @@ async def list_templates(
     agreement_type_id: uuid.UUID | None = None,
     include_system: bool = True,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
 ) -> Any:
-    org_ids = await get_user_org_ids(db, current_user.id)
-    org_id = next(iter(org_ids)) if org_ids else None
     return await template_service.get_templates(
         db=db,
         org_id=org_id,
@@ -38,20 +47,22 @@ async def list_templates(
     )
 
 
-@router.post("", response_model=TemplateOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=TemplateOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_manage],
+)
 async def create_template(
     template_in: TemplateCreate,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    org_ids = await get_user_org_ids(db, current_user.id)
-    org_id = next(iter(org_ids)) if org_ids else None
-    
-    # Only superadmins should create is_system templates, but omitting that check for simplicity MVP
+    # Only platform administrators may publish system (cross-tenant) templates.
     if template_in.is_system and not current_user.is_admin:
-        # Force non-system for regular users
         template_in.is_system = False
-        
+
     return await template_service.create_template(
         db=db,
         template_in=template_in,
@@ -64,25 +75,21 @@ async def create_template(
 async def get_template(
     template_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
 ) -> Any:
-    org_ids = await get_user_org_ids(db, current_user.id)
-    org_id = next(iter(org_ids)) if org_ids else None
     try:
         return await template_service.get_template(db, template_id, org_id)
     except template_service.TemplateNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.patch("/{template_id}", response_model=TemplateOut)
+@router.patch("/{template_id}", response_model=TemplateOut, dependencies=[_manage])
 async def update_template(
     template_id: uuid.UUID,
     template_in: TemplateUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
 ) -> Any:
-    org_ids = await get_user_org_ids(db, current_user.id)
-    org_id = next(iter(org_ids)) if org_ids else None
     try:
         return await template_service.update_template(
             db=db,
@@ -94,14 +101,16 @@ async def update_template(
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{template_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_manage],
+)
 async def delete_template(
     template_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
 ) -> None:
-    org_ids = await get_user_org_ids(db, current_user.id)
-    org_id = next(iter(org_ids)) if org_ids else None
     try:
         await template_service.delete_template(db, template_id, org_id)
     except template_service.TemplateNotFoundError as e:
@@ -112,25 +121,27 @@ async def delete_template(
 async def list_template_versions(
     template_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
 ) -> Any:
-    org_ids = await get_user_org_ids(db, current_user.id)
-    org_id = next(iter(org_ids)) if org_ids else None
     try:
         return await template_service.get_template_versions(db, template_id, org_id)
     except template_service.TemplateNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.post("/{template_id}/versions", response_model=TemplateVersionOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{template_id}/versions",
+    response_model=TemplateVersionOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[_manage],
+)
 async def create_template_version(
     template_id: uuid.UUID,
     version_in: TemplateVersionCreate,
     db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    org_ids = await get_user_org_ids(db, current_user.id)
-    org_id = next(iter(org_ids)) if org_ids else None
     try:
         return await template_service.create_template_version(
             db=db,

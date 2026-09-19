@@ -15,6 +15,7 @@ from app.dependencies.tenant import get_current_organization_id
 from app.models.agreement import Agreement
 from app.models.termination import AgreementTermination, PostTerminationObligation
 from app.models.user import User
+from app.dependencies.rbac import require_permission
 from app.services.termination_service import (
     TerminationError,
     cancel_termination,
@@ -28,6 +29,8 @@ router = APIRouter(
     prefix="/agreements/{agreement_id}/terminations",
     tags=["terminations"],
 )
+
+_perm_agreement_terminate = Depends(require_permission("agreement.terminate"))
 
 
 class InitiateRequest(BaseModel):
@@ -74,7 +77,7 @@ def _termination_out(term: AgreementTermination) -> dict:
     }
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[_perm_agreement_terminate])
 async def create_termination(
     agreement_id: uuid.UUID,
     data: InitiateRequest,
@@ -244,7 +247,7 @@ async def record_termination_cure(
     return _termination_out(term)
 
 
-@router.post("/{termination_id}/complete")
+@router.post("/{termination_id}/complete", dependencies=[_perm_agreement_terminate])
 async def complete_termination_endpoint(
     agreement_id: uuid.UUID,
     termination_id: uuid.UUID,

@@ -13,11 +13,16 @@ amendments.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agreement_states import (
+    IMMUTABLE_STATES,
+    STATE_REGISTRY,
+    AgreementStatus,
+)
 from app.models.agreement import Agreement
 from app.models.amendment import AgreementAmendment
 from app.models.audit import AuditEvent
@@ -25,24 +30,11 @@ from app.models.lifecycle import AgreementState, StatusTransitionRule
 from app.services.audit_service import record_event
 
 
-# Core lifecycle states. These drive the state registry; everything else
-# is data. Kept in sync with the seeded agreement_states rows.
+# Core lifecycle states, derived from the canonical domain enum so there is
+# exactly one list of status names in the codebase (spec §66).
 CORE_STATES = [
-    ("draft", "Draft", False),
-    ("negotiating", "Negotiating", False),
-    ("internal_review", "Internal Review", False),
-    ("approved", "Approved", False),
-    ("signing", "In Signing", False),
-    ("sent", "Sent to Counterparty", False),
-    ("viewed", "Viewed by Counterparty", False),
-    ("executed", "Executed", False),
-    ("active", "Active", False),
-    ("expiring", "Expiring", False),
-    ("renewed", "Renewed", False),
-    ("expired", "Expired", True),
-    ("terminated", "Terminated", True),
-    ("superseded", "Superseded", True),
-    ("cancelled", "Cancelled", True),
+    (status.value, label, is_terminal)
+    for status, label, is_terminal, _ in STATE_REGISTRY
 ]
 
 
@@ -56,9 +48,6 @@ class TransitionNotAllowed(Exception):
 
 def now_utc():
     return datetime.now(timezone.utc)
-
-
-IMMUTABLE_STATES = {"executed", "active", "expired", "terminated", "superseded"}
 
 
 def agreement_is_immutable(agreement: Agreement) -> bool:
@@ -138,10 +127,10 @@ def _conditions_met(
         return True
 
     if conditions.get("status_must_be_executed"):
-        if agreement.status not in ("executed", "active"):
+        if agreement.status not in (AgreementStatus.EXECUTED, AgreementStatus.ACTIVE):
             return False
     if conditions.get("status_must_be_active"):
-        if agreement.status != "active":
+        if agreement.status != AgreementStatus.ACTIVE:
             return False
     if conditions.get("no_parent") and agreement.parent_agreement_id is not None:
         return False
@@ -235,6 +224,44 @@ async def get_available_actions(
     return actions
 
 
+async def _quality_gate_report(db: AsyncSession, agreement: Agreement) -> dict:
+    """Spec §76 pre-send quality gate over the latest rendered text plus the
+    §70 facts-vs-assumptions review of the questionnaire answers."""
+    from app.models.agreement import AgreementVersion
+    from app.services.agreement_renderer import (
+        get_template_questions,
+        get_template_questions_for_agreement,
+        resolve_template_key,
+    )
+    from app.services.contract_quality import run_quality_checks
+
+    version_result = await db.execute(
+        select(AgreementVersion.content)
+        .where(AgreementVersion.agreement_id == agreement.id)
+        .order_by(AgreementVersion.version_number.desc())
+        .limit(1)
+    )
+    doc_text = version_result.scalar_one_or_none() or None
+
+    questions = await get_template_questions_for_agreement(db, agreement)
+    if not questions:
+        questions = get_template_questions(await resolve_template_key(db, agreement))
+
+    data = agreement.data or {}
+    return run_quality_checks(
+        document_text=doc_text,
+        agreement_meta={
+            "effective_date": agreement.effective_date or data.get("effective_date"),
+            "expiry_date": agreement.expiry_date or data.get("expiry_date"),
+            "execution_date": agreement.execution_date,
+            "renewal_notice_date": data.get("renewal_notice_date"),
+            "answers": data,
+            "questions": questions,
+            "provenance": agreement.answer_provenance or {},
+        },
+    )
+
+
 async def apply_transition(
     db: AsyncSession,
     *,
@@ -265,34 +292,34 @@ async def apply_transition(
             f"Transition '{action_key}' requires conditions that are not met"
         )
 
+    # Spec §67: EXECUTED is only reachable once every required signer has
+    # signed. This is enforced here — not just in signing_completion — so the
+    # generic /workflow/transition endpoint and provider webhooks cannot force
+    # execution with zero signatures.
+    if (rule.allowed_conditions or {}).get("all_signed"):
+        from app.services.signing_completion import signature_progress  # circular
+
+        progress = await signature_progress(db, agreement.id)
+        if not progress.all_signed:
+            missing = ", ".join(progress.missing_external) or "internal signatory"
+            raise TransitionNotAllowed(
+                f"Transition '{action_key}' requires all required signatures; "
+                f"still waiting on: {missing}"
+            )
+
     # ------------------------------------------------------------------ #
     # QUALITY GATE (MVP gap fix)
     # ------------------------------------------------------------------ #
-    QUALITY_GATED_ACTIONS = {"send", "submit_for_review", "submit_for_approval"}
+    QUALITY_GATED_ACTIONS = {"send", "submit", "submit_for_review", "submit_for_approval"}
     if rule.action_key in QUALITY_GATED_ACTIONS:
-        from app.services.contract_quality import run_quality_checks
-        
-        # We need the full document text. For MVP, we'll try to extract it from the latest version or data.
-        # Ideally, we should use the rendered text. We'll stringify the data dictionary for now if needed.
-        # However, the best source is `agreement.versions[-1].content` if loaded.
-        import json
-        doc_text = json.dumps(agreement.data)
-        
-        meta = {
-            "effective_date": agreement.effective_date,
-            "expiry_date": agreement.expiry_date,
-            "execution_date": agreement.execution_date,
-            # We would extract parties here if they were eagerly loaded
-            # "parties": [{"name": p.party_name} for p in agreement.parties] 
-        }
-        
-        report = run_quality_checks(
-            document_text=doc_text,
-            agreement_meta=meta,
-        )
+        report = await _quality_gate_report(db, agreement)
         if report.get("has_blockers"):
-            blocker_count = sum(1 for f in report.get("findings", []) if f.get("severity") == "high")
-            raise TransitionNotAllowed(f"Quality check blocked: {blocker_count} issue(s).")
+            blockers = [f for f in report.get("findings", []) if f.get("severity") == "high"]
+            summary = "; ".join(f["message"] for f in blockers[:3])
+            raise TransitionNotAllowed(
+                f"Cannot {rule.action_key.replace('_', ' ')} until {len(blockers)} critical "
+                f"issue(s) are resolved: {summary}"
+            )
 
     previous_status = agreement.status
     agreement.status = rule.to_status

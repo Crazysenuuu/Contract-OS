@@ -552,6 +552,14 @@ AGREEMENT_TYPES = [
                 {"key": "source_code_escrow", "type": "boolean", "label": "Source Code Escrow", "required": False},
                 {"key": "support_period_months", "type": "number", "label": "Post-Delivery Support (months)", "required": True},
                 {"key": "governing_law", "type": "text", "label": "Governing Law Jurisdiction", "required": True},
+                # Dynamic questionnaire (spec §4.2 / §15): personal-data branch
+                # reveals the DPA fieldset and, at render time, Section 10A.
+                {"key": "personal_data_processed", "type": "select", "label": "Will personal data be processed under this Agreement?", "options": ["Yes", "No"], "required": False},
+                {"key": "processing_purpose", "type": "textarea", "label": "Purpose of Processing", "required": False, "condition": {"field": "personal_data_processed", "operator": "equals", "value": "Yes"}},
+                {"key": "data_categories", "type": "textarea", "label": "Categories of Personal Data", "required": False, "condition": {"field": "personal_data_processed", "operator": "equals", "value": "Yes"}},
+                {"key": "data_subjects", "type": "textarea", "label": "Categories of Data Subjects", "required": False, "condition": {"field": "personal_data_processed", "operator": "equals", "value": "Yes"}},
+                {"key": "cross_border_transfers", "type": "select", "label": "Will personal data be transferred outside the jurisdiction?", "options": ["Yes", "No"], "required": False, "condition": {"field": "personal_data_processed", "operator": "equals", "value": "Yes"}},
+                {"key": "data_retention_months", "type": "number", "label": "Data Retention Period (months)", "required": False, "condition": {"field": "personal_data_processed", "operator": "equals", "value": "Yes"}},
             ],
             "clauses": [
                 "project_scope",
@@ -867,60 +875,14 @@ LANGUAGES = [
 # LIFECYCLE STATES & TRANSITION RULES
 # ============================================================
 
-AGREEMENT_STATES = [
-    {"status": "draft", "label": "Draft", "is_terminal": False, "description": "Agreement is being drafted and edited"},
-    {"status": "negotiating", "label": "Negotiating", "is_terminal": False, "description": "Terms are being negotiated with the counterparty"},
-    {"status": "internal_review", "label": "Internal Review", "is_terminal": False, "description": "Under internal legal/business review"},
-    {"status": "approved", "label": "Approved", "is_terminal": False, "description": "Approved internally and ready to sign"},
-    {"status": "signing", "label": "In Signing", "is_terminal": False, "description": "Signature collection in progress"},
-    {"status": "sent", "label": "Sent to Counterparty", "is_terminal": False, "description": "Sent to counterparty for signature"},
-    {"status": "executed", "label": "Executed", "is_terminal": False, "description": "All required signatures collected"},
-    {"status": "active", "label": "Active", "is_terminal": False, "description": "In force and being performed"},
-    {"status": "viewed", "label": "Viewed by Counterparty", "is_terminal": False, "description": "Counterparty has opened the shared document"},
-    {"status": "expiring", "label": "Expiring", "is_terminal": False, "description": "Within the renewal notice window"},
-    {"status": "renewed", "label": "Renewed", "is_terminal": False, "description": "Term renewed for a further period"},
-    {"status": "expired", "label": "Expired", "is_terminal": True, "description": "Term came to an end without renewal"},
-    {"status": "terminated", "label": "Terminated", "is_terminal": True, "description": "Ended before its natural term"},
-    {"status": "superseded", "label": "Superseded", "is_terminal": True, "description": "Replaced by a successor agreement"},
-    {"status": "cancelled", "label": "Cancelled", "is_terminal": True, "description": "Abandoned before execution"},
-]
+# Both lists are derived from the canonical domain state machine so the DB
+# registry can never drift from the enum route code compares against.
+from app.domain.agreement_states import (  # noqa: E402
+    DEFAULT_TRANSITION_RULES as TRANSITION_RULES,
+    state_registry_rows as _state_registry_rows,
+)
 
-# action_key / from / to with the permission and any preconditions.
-# Global rules (no org, no type) apply to every agreement unless a more
-# specific rule overrides the same transition.
-TRANSITION_RULES = [
-    {"action_key": "submit", "from_status": "draft", "to_status": "internal_review", "description": "Submit for internal review", "required_permission": None, "conditions": None},
-    {"action_key": "approve", "from_status": "internal_review", "to_status": "approved", "description": "Approve for signing", "required_permission": "agreement.approve", "conditions": None},
-    {"action_key": "send", "from_status": "draft", "to_status": "sent", "description": "Send to counterparty", "required_permission": None, "conditions": None},
-    {"action_key": "send", "from_status": "internal_review", "to_status": "sent", "description": "Send to counterparty", "required_permission": None, "conditions": None},
-    {"action_key": "send", "from_status": "approved", "to_status": "sent", "description": "Send to counterparty", "required_permission": None, "conditions": None},
-    {"action_key": "cancel", "from_status": "draft", "to_status": "cancelled", "description": "Abandon the agreement", "required_permission": None, "conditions": None},
-    {"action_key": "cancel", "from_status": "negotiating", "to_status": "cancelled", "description": "Abandon the agreement", "required_permission": None, "conditions": None},
-    {"action_key": "cancel", "from_status": "internal_review", "to_status": "cancelled", "description": "Abandon the agreement", "required_permission": None, "conditions": None},
-    {"action_key": "reopen", "from_status": "internal_review", "to_status": "draft", "description": "Return to drafting", "required_permission": None, "conditions": None},
-    {"action_key": "sign", "from_status": "approved", "to_status": "signing", "description": "Begin signature collection", "required_permission": "agreement.sign", "conditions": None},
-    {"action_key": "sign", "from_status": "sent", "to_status": "signing", "description": "Record signature", "required_permission": "agreement.sign", "conditions": None},
-    {"action_key": "sign", "from_status": "signing", "to_status": "signing", "description": "Record additional signature", "required_permission": "agreement.sign", "conditions": None},
-    {"action_key": "sign", "from_status": "negotiating", "to_status": "signing", "description": "Sign out of negotiation", "required_permission": "agreement.sign", "conditions": None},
-    {"action_key": "execute", "from_status": "signing", "to_status": "executed", "description": "All signatures collected", "required_permission": "agreement.sign", "conditions": {"all_signed": True}},
-    {"action_key": "activate", "from_status": "executed", "to_status": "active", "description": "Move into force", "required_permission": None, "conditions": None},
-    {"action_key": "view", "from_status": "sent", "to_status": "viewed", "description": "Counterparty opened the document", "required_permission": None, "conditions": None},
-    {"action_key": "view", "from_status": "viewed", "to_status": "viewed", "description": "Counterparty opened the document again", "required_permission": None, "conditions": None},
-    {"action_key": "view", "from_status": "negotiating", "to_status": "viewed", "description": "Counterparty opened the document", "required_permission": None, "conditions": None},
-    {"action_key": "sign", "from_status": "viewed", "to_status": "signing", "description": "Record signature", "required_permission": "agreement.sign", "conditions": None},
-    {"action_key": "terminate", "from_status": "active", "to_status": "terminated", "description": "Terminate with effect", "required_permission": "agreement.terminate", "conditions": None},
-    {"action_key": "terminate", "from_status": "executed", "to_status": "terminated", "description": "Terminate with effect", "required_permission": "agreement.terminate", "conditions": None},
-    {"action_key": "terminate", "from_status": "expiring", "to_status": "terminated", "description": "Terminate with effect", "required_permission": "agreement.terminate", "conditions": None},
-    {"action_key": "expire", "from_status": "active", "to_status": "expired", "description": "Term ended without renewal", "required_permission": None, "conditions": None},
-    {"action_key": "expire", "from_status": "executed", "to_status": "expired", "description": "Term ended without renewal", "required_permission": None, "conditions": None},
-    {"action_key": "expire", "from_status": "expiring", "to_status": "expired", "description": "Term ended without renewal", "required_permission": None, "conditions": None},
-    {"action_key": "expiring", "from_status": "active", "to_status": "expiring", "description": "Within the renewal notice window", "required_permission": None, "conditions": None},
-    {"action_key": "renew", "from_status": "active", "to_status": "active", "description": "Extend term via renewal", "required_permission": None, "conditions": None},
-    {"action_key": "renew", "from_status": "expiring", "to_status": "renewed", "description": "Extend term via renewal", "required_permission": None, "conditions": None},
-    {"action_key": "activate", "from_status": "renewed", "to_status": "active", "description": "Renewal in force", "required_permission": None, "conditions": None},
-    {"action_key": "to_negotiating", "from_status": "draft", "to_status": "negotiating", "description": "Open negotiation", "required_permission": None, "conditions": None},
-    {"action_key": "to_negotiating", "from_status": "internal_review", "to_status": "negotiating", "description": "Open negotiation", "required_permission": None, "conditions": None},
-]
+AGREEMENT_STATES = _state_registry_rows()
 
 
 # ============================================================
@@ -1031,6 +993,52 @@ _KIND_SCHEMAS = {
             _q("fees", "Fees / Royalties", "textarea"),
             _q("support_period_months", "Support & Maintenance (months)", "number", required=False),
             _q("warranties", "Representations & Warranties", "textarea", required=False),
+            # Dynamic questionnaire (spec §4.2 / §15): personal-data branch.
+            # When personal data is processed, the wizard reveals the DPA
+            # fieldset so the rendered document always carries the right
+            # data-processing clauses.
+            _q(
+                "personal_data_processed",
+                "Will personal data be processed under this Agreement?",
+                "select",
+                options=["Yes", "No"],
+            ),
+            _q(
+                "processing_purpose",
+                "Purpose of Processing",
+                "textarea",
+                required=False,
+                condition={"field": "personal_data_processed", "operator": "equals", "value": "Yes"},
+            ),
+            _q(
+                "data_categories",
+                "Categories of Personal Data",
+                "textarea",
+                required=False,
+                condition={"field": "personal_data_processed", "operator": "equals", "value": "Yes"},
+            ),
+            _q(
+                "data_subjects",
+                "Categories of Data Subjects",
+                "textarea",
+                required=False,
+                condition={"field": "personal_data_processed", "operator": "equals", "value": "Yes"},
+            ),
+            _q(
+                "cross_border_transfers",
+                "Will personal data be transferred outside the jurisdiction?",
+                "select",
+                options=["Yes", "No"],
+                required=False,
+                condition={"field": "personal_data_processed", "operator": "equals", "value": "Yes"},
+            ),
+            _q(
+                "data_retention_months",
+                "Data Retention Period (months)",
+                "number",
+                required=False,
+                condition={"field": "personal_data_processed", "operator": "equals", "value": "Yes"},
+            ),
         ],
         "clauses": [
             "license_grant", "ip_ownership", "confidentiality", "warranties",
@@ -1342,6 +1350,16 @@ EXTENDED_AGREEMENT_TYPES = [
      "Co-operation framework falling short of a formal joint venture", [
         _q("alliance_scope", "Alliance Scope", "textarea"),
     ]),
+    ("strategic_partnership", "Strategic Partnership Agreement", "commercial", "corporate",
+     "Longer-term commercial co-operation between two businesses (spec §3 #18)", [
+        _q("partnership_objectives", "Partnership Objectives", "textarea"),
+        _q("contributions", "Contributions of Each Party", "textarea"),
+        _q("governance_committee", "Governance / Steering Committee", "textarea", required=False),
+        _q("revenue_sharing", "Revenue / Cost Sharing", "textarea", required=False),
+        _q("exclusivity", "Exclusivity", "select",
+           options=["Exclusive", "Semi-exclusive", "Non-exclusive"]),
+        _q("term_years", "Initial Term (years)", "number"),
+    ]),
     ("settlement", "Settlement Agreement", "dispute", "dispute",
      "Mutual settlement of a dispute with mutual release", []),
     ("mediation", "Mediation Agreement", "dispute", "dispute",
@@ -1461,9 +1479,47 @@ async def seed_catalog_agreement_types(db):
         "board_resolution": "board_resolution_lk_v1",
     }
 
+    # Every catalog kind has a purpose-built contract template (spec §3.A):
+    # all 57 catalog agreement types resolve to a domain template instead of
+    # the generic fallback. Kinds whose agreements are corporate records
+    # (governance) still get the governance template except where the
+    # dedicated per-type override above applies.
+    _KIND_TEMPLATE_KEYS = {
+        "talent": "talent_agreement_lk_v1",
+        "technology": "technology_agreement_lk_v1",
+        "financial": "financial_agreement_lk_v1",
+        "realestate": "realestate_agreement_lk_v1",
+        "marketing": "marketing_agreement_lk_v1",
+        "supply_chain": "supply_chain_agreement_lk_v1",
+        "corporate": "corporate_agreement_lk_v1",
+        "governance": "governance_agreement_lk_v1",
+        "dispute": "dispute_agreement_lk_v1",
+        "sla": "sla_agreement_lk_v1",
+    }
+
+    def _template_key_for(key: str, kind: str) -> str:
+        return _TYPE_TEMPLATE_OVERRIDES.get(
+            key,
+            _KIND_TEMPLATE_KEYS.get(kind, "generic_agreement_lk_v1"),
+        )
+
     added = 0
+    backfilled = 0
     for key, name, category, kind, description, extras in EXTENDED_AGREEMENT_TYPES:
+        template_key = _template_key_for(key, kind)
+        existing_row = None
         if key in keys:
+            existing_row = (
+                await db.execute(select(AgreementType).where(AgreementType.key == key))
+            ).scalars().first()
+            # Backfill legacy rows still using the generic fallback so every
+            # catalog type renders its dedicated kind template.
+            if (
+                existing_row is not None
+                and existing_row.template_key == "generic_agreement_lk_v1"
+            ):
+                existing_row.template_key = template_key
+                backfilled += 1
             continue
         db.add(AgreementType(
             id=catalog_type_id(key),
@@ -1474,13 +1530,14 @@ async def seed_catalog_agreement_types(db):
             status="active",
             version=1,
             schema=compose_catalog_schema(kind, extras),
-            template_key=_TYPE_TEMPLATE_OVERRIDES.get(
-                key, "generic_agreement_lk_v1"
-            ),
+            template_key=template_key,
         ))
         added += 1
     await db.flush()
-    print(f"    ✅ {added} catalog agreement types created ({len(EXTENDED_AGREEMENT_TYPES)} in catalog)")
+    print(
+        f"    ✅ {added} catalog agreement types created "
+        f"({len(EXTENDED_AGREEMENT_TYPES)} in catalog), {backfilled} template backfilled"
+    )
 
 
 # ------------------------------------------------------------------
@@ -1833,32 +1890,41 @@ async def seed_lifecycle(db):
         print("    ⏭️  Transition rules already present")
 
 
+# Canonical RBAC permission catalogue (spec §51). Route handlers enforce these
+# via app.dependencies.rbac.require_permission; owner/admin roles hold all.
+PERMISSION_CATALOG = [
+    {"key": "agreement.view", "description": "View agreements in the organisation"},
+    {"key": "agreement.send", "description": "Send agreements to counterparties"},
+    {"key": "agreement.submit_approval", "description": "Route agreements into the approval chain"},
+    {"key": "agreement.approve", "description": "Approve agreements at an approval stage"},
+    {"key": "agreement.sign", "description": "Sign agreements on behalf of the organisation"},
+    {"key": "agreement.request_signature", "description": "Start signature collection"},
+    {"key": "agreement.terminate", "description": "Initiate and complete terminations"},
+    {"key": "agreement.amend", "description": "Create and activate amendments"},
+    {"key": "agreement.export", "description": "Export agreement data and evidence"},
+    {"key": "agreement.manage_participants", "description": "Manage internal participants and external parties"},
+    {"key": "agreement.propose_change", "description": "Propose negotiation changes"},
+    {"key": "agreement.comment", "description": "Comment on agreements"},
+    {"key": "template.manage", "description": "Create, edit, version and delete templates"},
+    {"key": "clause.create", "description": "Create clause library entries"},
+    {"key": "policy.manage", "description": "Manage company policy rules"},
+    {"key": "retention.manage", "description": "Manage retention policies and legal holds"},
+    {"key": "org.manage_roles", "description": "Create roles and assign permissions"},
+    {"key": "org.manage_members", "description": "Add, remove and re-role organisation members"},
+    {"key": "org.manage_sso", "description": "Configure SSO / SCIM connections"},
+    {"key": "integration.manage", "description": "Configure enterprise integrations"},
+    {"key": "webhook.manage", "description": "Manage outbound webhooks"},
+    {"key": "legal_entity.manage", "description": "Manage legal entities and authorised signatories"},
+]
+
+
 async def seed_permissions(db):
-    """Seed governance permissions used by RBAC (spec 24.8)."""
+    """Seed the RBAC permission catalogue (spec §51 / 24.8)."""
     from app.models.rbac import Permission
     from sqlalchemy import select
 
-    PERMISSIONS = [
-        {
-            "key": "clause.publish",
-            "description": "Publish/deprecate/archive clause library versions (Legal Administrator)",
-        },
-        {
-            "key": "clause.create",
-            "description": "Create clause library entries",
-        },
-        {
-            "key": "retention.manage",
-            "description": "Manage retention policies and legal holds",
-        },
-        {
-            "key": "agreement.export",
-            "description": "Export agreement data and evidence",
-        },
-    ]
-
     created = 0
-    for perm in PERMISSIONS:
+    for perm in PERMISSION_CATALOG:
         existing = await db.execute(
             select(Permission).where(Permission.key == perm["key"])
         )

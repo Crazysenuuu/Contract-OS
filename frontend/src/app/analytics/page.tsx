@@ -3,256 +3,261 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
-import { listAgreements } from "@/lib/api";
+import {
+  getExecutiveAnalytics,
+  getFinancialAnalytics,
+  getComplianceSummary,
+  type ExecutiveAnalytics,
+  type FinancialAnalytics,
+  type ComplianceSummary,
+} from "@/lib/api";
 
-interface Agreement {
-  id: string;
-  title: string;
-  status: string;
-  created_at: string;
+const statusColorMap: Record<string, string> = {
+  draft: "bg-gray-500",
+  internal_review: "bg-blue-500",
+  pending_approval: "bg-blue-500",
+  approved: "bg-green-500",
+  sent: "bg-purple-500",
+  viewed: "bg-indigo-500",
+  negotiation: "bg-yellow-500",
+  negotiating: "bg-yellow-500",
+  ready_for_signature: "bg-orange-500",
+  signing: "bg-orange-500",
+  partially_signed: "bg-amber-500",
+  executed: "bg-green-600",
+  active: "bg-emerald-500",
+  expiring: "bg-amber-500",
+  expired: "bg-gray-400",
+  terminated: "bg-red-500",
+  renewed: "bg-teal-500",
+  superseded: "bg-slate-500",
+  cancelled: "bg-red-500",
+};
+
+function StatCard({
+  label,
+  value,
+  sub,
+  color = "text-gray-900",
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  color?: string;
+}) {
+  return (
+    <div className="bg-white shadow rounded-lg p-6">
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className={`text-3xl font-bold mt-1 ${color}`}>{value}</div>
+      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
+    </div>
+  );
 }
 
-interface StatusCount {
-  status: string;
-  count: number;
-}
-
-interface MonthlyCount {
-  month: string;
-  count: number;
+function BarChart({
+  data,
+  maxVal,
+}: {
+  data: { label: string; value: number }[];
+  maxVal: number;
+}) {
+  return (
+    <div className="flex items-end space-x-2 h-40">
+      {data.map((item) => (
+        <div key={item.label} className="flex-1 flex flex-col items-center">
+          <div className="text-xs text-gray-500 mb-1">{item.value}</div>
+          <div
+            className="w-full bg-blue-500 rounded-t"
+            style={{
+              height: `${maxVal > 0 ? (item.value / maxVal) * 100 : 0}%`,
+              minHeight: item.value > 0 ? "4px" : "0",
+            }}
+          />
+          <div className="text-xs text-gray-500 mt-2 text-center truncate w-full">
+            {item.label}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function AnalyticsPage() {
   const { token } = useAuth();
-  const [agreements, setAgreements] = useState<Agreement[]>([]);
+  const [executive, setExecutive] = useState<ExecutiveAnalytics | null>(null);
+  const [financial, setFinancial] = useState<FinancialAnalytics | null>(null);
+  const [compliance, setCompliance] = useState<ComplianceSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (token) {
-      listAgreements(token)
-        .then(setAgreements)
-        .catch(console.error)
-        .finally(() => setLoading(false));
-    }
+    if (!token) return;
+    setLoading(true);
+    Promise.all([
+      getExecutiveAnalytics(token).catch(() => null),
+      getFinancialAnalytics(token).catch(() => null),
+      getComplianceSummary(token).catch(() => null),
+    ])
+      .then(([e, f, c]) => {
+        setExecutive(e);
+        setFinancial(f);
+        setCompliance(c);
+      })
+      .catch((err) => setError(String(err)))
+      .finally(() => setLoading(false));
   }, [token]);
 
-  // Calculate metrics
-  const statusCounts: StatusCount[] = Object.entries(
-    agreements.reduce(
-      (acc, a) => {
-        acc[a.status] = (acc[a.status] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    )
-  ).map(([status, count]) => ({ status, count }));
-
-  const totalAgreements = agreements.length;
-
-  const executedCount = agreements.filter(
-    (a) => a.status === "executed"
-  ).length;
-
-  const pendingCount = agreements.filter(
-    (a) => a.status === "draft" || a.status === "internal_review" || a.status === "sent"
-  ).length;
-
-  const executionRate =
-    totalAgreements > 0
-      ? Math.round((executedCount / totalAgreements) * 100)
-      : 0;
-
-  // Monthly breakdown (last 6 months)
-  const monthlyData: MonthlyCount[] = [];
-  const now = new Date();
-  for (let i = 5; i >= 0; i--) {
-    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const monthStr = date.toLocaleString("default", {
-      month: "short",
-      year: "2-digit",
-    });
-    const count = agreements.filter((a) => {
-      const created = new Date(a.created_at);
-      return (
-        created.getMonth() === date.getMonth() &&
-        created.getFullYear() === date.getFullYear()
-      );
-    }).length;
-    monthlyData.push({ month: monthStr, count });
-  }
-
-  const maxMonthly = Math.max(...monthlyData.map((m) => m.count), 1);
-
-  // Status colors
-  const statusColorMap: Record<string, string> = {
-    draft: "bg-gray-500",
-    internal_review: "bg-blue-500",
-    sent: "bg-purple-500",
-    viewed: "bg-indigo-500",
-    negotiation: "bg-yellow-500",
-    approved: "bg-green-500",
-    signing: "bg-orange-500",
-    executed: "bg-green-600",
-    terminated: "bg-red-500",
-  };
-
-  const handleExport = (type: string, format: string = "csv") => {
-    if (!token) return;
-
-    const API_BASE = "/api/v1";
-    let url = `${API_BASE}/analytics/export/${type}`;
-    let filename = `${type}_export.csv`;
-
-    if (format === "pdf") {
-      url = `${API_BASE}/analytics/export/${type}-pdf`;
-      filename = `${type}_report.pdf`;
-    }
-
-    fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error("Export failed");
-        return response.blob();
-      })
-      .then((blob) => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-      })
-      .catch(console.error);
-  };
-
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Loading...</div>;
+    return <div className="text-center py-12 text-gray-500">Loading analytics…</div>;
   }
+
+  if (error) {
+    return (
+      <div className="text-center py-12 text-red-500">
+        Failed to load analytics: {error}
+      </div>
+    );
+  }
+
+  const vol = executive?.volume;
+  const monthlyTrend = vol?.monthly_trend ?? [];
+  const maxMonthly = Math.max(...monthlyTrend.map((m) => m.count), 1);
+
+  const statusEntries = vol
+    ? Object.entries(vol.by_status).sort((a, b) => b[1] - a[1])
+    : [];
 
   return (
     <div>
       <div className="mb-6">
-        <Link
-          href="/dashboard"
-          className="text-sm text-gray-500 hover:text-gray-700"
-        >
+        <Link href="/dashboard" className="text-sm text-gray-500 hover:text-gray-700">
           ← Back to Dashboard
         </Link>
       </div>
 
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Contract Analytics
-        </h1>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => handleExport("analytics", "pdf")}
-            className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700"
-          >
-            📄 PDF Report
-          </button>
-          <button
-            onClick={() => handleExport("compliance", "pdf")}
-            className="px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-md hover:bg-red-600"
-          >
-            📄 Compliance PDF
-          </button>
-          <button
-            onClick={() => handleExport("agreements")}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-          >
-            📥 Agreements CSV
-          </button>
-          <button
-            onClick={() => handleExport("compliance")}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-          >
-            📥 Compliance CSV
-          </button>
-          <button
-            onClick={() => handleExport("violations")}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-          >
-            📥 Violations CSV
-          </button>
-          <button
-            onClick={() => handleExport("obligations")}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-          >
-            📥 Obligations CSV
-          </button>
-        </div>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">
+        Contract Analytics
+      </h1>
+
+      {/* ─── Executive KPI Cards ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+        <StatCard label="Total Contracts" value={vol?.total ?? 0} />
+        <StatCard
+          label="Execution Rate"
+          value={`${executive?.rates.execution_rate ?? 0}%`}
+          color="text-green-600"
+        />
+        <StatCard
+          label="Avg Cycle Time"
+          value={`${executive?.cycle_time.average_days ?? 0}d`}
+          sub={`Median ${executive?.cycle_time.median_days ?? 0}d · n=${executive?.cycle_time.sample_size ?? 0}`}
+        />
+        <StatCard
+          label="Avg Approval Time"
+          value={`${executive?.approval_time.average_days ?? 0}d`}
+          sub={`n=${executive?.approval_time.sample_size ?? 0}`}
+        />
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="text-sm text-gray-500">Total Agreements</div>
-          <div className="text-3xl font-bold text-gray-900 mt-1">
-            {totalAgreements}
-          </div>
-        </div>
-
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="text-sm text-gray-500">Executed</div>
-          <div className="text-3xl font-bold text-green-600 mt-1">
-            {executedCount}
-          </div>
-        </div>
-
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="text-sm text-gray-500">In Progress</div>
-          <div className="text-3xl font-bold text-blue-600 mt-1">
-            {pendingCount}
-          </div>
-        </div>
-
-        <div className="bg-white shadow rounded-lg p-6">
-          <div className="text-sm text-gray-500">Execution Rate</div>
-          <div className="text-3xl font-bold text-purple-600 mt-1">
-            {executionRate}%
-          </div>
-        </div>
+      {/* ─── Rates ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+        <StatCard
+          label="Renewal Rate"
+          value={`${executive?.rates.renewal_rate ?? 0}%`}
+          color="text-blue-600"
+        />
+        <StatCard
+          label="Termination Rate"
+          value={`${executive?.rates.termination_rate ?? 0}%`}
+          color="text-red-600"
+        />
+        <StatCard
+          label="Obligation Compliance"
+          value={`${executive?.rates.obligation_compliance_rate ?? 0}%`}
+          color="text-emerald-600"
+        />
+        <StatCard
+          label="Overdue Obligations"
+          value={executive?.obligations.overdue ?? 0}
+          sub={`${executive?.obligations.completed ?? 0} completed of ${executive?.obligations.total ?? 0}`}
+          color="text-amber-600"
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Status Breakdown */}
+      {/* ─── Financial ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+        <StatCard
+          label="Total Contract Value"
+          value={`$${(financial?.total_contract_value ?? 0).toLocaleString()}`}
+          color="text-indigo-600"
+        />
+        <StatCard
+          label="Committed Spend"
+          value={`$${(financial?.committed_spend ?? 0).toLocaleString()}`}
+          color="text-violet-600"
+        />
+        <StatCard
+          label="Outstanding Obligations"
+          value={`$${(financial?.outstanding_obligations ?? 0).toLocaleString()}`}
+        />
+        <StatCard
+          label="Overdue Obligations"
+          value={`$${(financial?.overdue_obligations ?? 0).toLocaleString()}`}
+          color="text-red-600"
+        />
+      </div>
+
+      {/* ─── Compliance Summary (spec §89) ─── */}
+      {compliance && (
+        <div className="mb-8 bg-white shadow rounded-lg p-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">
+            Compliance Overview
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            {[
+              { label: "Requiring Review", value: compliance.contracts_requiring_review, color: "text-amber-600" },
+              { label: "Missing DPA", value: compliance.missing_dpa, color: "text-red-600" },
+              { label: "Unsigned Amendments", value: compliance.unsigned_amendments, color: "text-orange-600" },
+              { label: "Upcoming Renewals", value: compliance.upcoming_renewals, color: "text-blue-600" },
+              { label: "Pending Approvals", value: compliance.pending_approvals, color: "text-purple-600" },
+              { label: "Overdue Obligations", value: compliance.overdue_obligations, color: "text-red-600" },
+            ].map((item) => (
+              <div key={item.label} className="text-center">
+                <div className={`text-2xl font-bold ${item.color}`}>{item.value}</div>
+                <div className="text-xs text-gray-500 mt-1">{item.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* ─── Status Breakdown ─── */}
         <div className="bg-white shadow rounded-lg p-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">
             Status Breakdown
           </h2>
-
-          {statusCounts.length === 0 ? (
+          {statusEntries.length === 0 ? (
             <p className="text-sm text-gray-500">No data available</p>
           ) : (
             <div className="space-y-3">
-              {statusCounts.map((item) => (
-                <div key={item.status} className="flex items-center">
-                  <div className="w-24 text-sm text-gray-700 capitalize">
-                    {item.status.replace("_", " ")}
+              {statusEntries.map(([status, count]) => (
+                <div key={status} className="flex items-center">
+                  <div className="w-32 text-sm text-gray-700 capitalize">
+                    {status.replace(/_/g, " ")}
                   </div>
                   <div className="flex-1 mx-4">
                     <div className="h-6 bg-gray-100 rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${
-                          statusColorMap[item.status] || "bg-gray-400"
-                        }`}
+                        className={`h-full rounded-full ${statusColorMap[status] || "bg-gray-400"}`}
                         style={{
-                          width: `${
-                            totalAgreements > 0
-                              ? (item.count / totalAgreements) * 100
-                              : 0
-                          }%`,
+                          width: `${vol && vol.total > 0 ? (count / vol.total) * 100 : 0}%`,
                         }}
                       />
                     </div>
                   </div>
                   <div className="w-12 text-right text-sm font-medium text-gray-900">
-                    {item.count}
+                    {count}
                   </div>
                 </div>
               ))}
@@ -260,95 +265,88 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        {/* Monthly Trend */}
+        {/* ─── Monthly Trend ─── */}
         <div className="bg-white shadow rounded-lg p-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">
-            Monthly Trend
+            Monthly Creation Trend
           </h2>
-
-          <div className="flex items-end space-x-2 h-40">
-            {monthlyData.map((item) => (
-              <div
-                key={item.month}
-                className="flex-1 flex flex-col items-center"
-              >
-                <div className="text-xs text-gray-500 mb-1">{item.count}</div>
-                <div
-                  className="w-full bg-blue-500 rounded-t"
-                  style={{
-                    height: `${(item.count / maxMonthly) * 100}%`,
-                    minHeight: item.count > 0 ? "4px" : "0",
-                  }}
-                />
-                <div className="text-xs text-gray-500 mt-2">{item.month}</div>
-              </div>
-            ))}
-          </div>
+          {monthlyTrend.length === 0 ? (
+            <p className="text-sm text-gray-500">No data available</p>
+          ) : (
+            <BarChart
+              data={monthlyTrend.map((m) => ({
+                label: new Date(m.month).toLocaleString("default", { month: "short", year: "2-digit" }),
+                value: m.count,
+              }))}
+              maxVal={maxMonthly}
+            />
+          )}
         </div>
       </div>
 
-      {/* Recent Agreements */}
-      <div className="mt-6 bg-white shadow rounded-lg p-6">
-        <h2 className="text-lg font-medium text-gray-900 mb-4">
-          Recent Agreements
-        </h2>
-
-        {agreements.length === 0 ? (
-          <p className="text-sm text-gray-500">No agreements yet</p>
-        ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Title
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Created
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {agreements.slice(0, 10).map((agreement) => (
-                <tr key={agreement.id}>
-                  <td className="px-6 py-4 text-sm text-gray-900">
-                    {agreement.title}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        agreement.status === "executed"
-                          ? "bg-green-100 text-green-800"
-                          : agreement.status === "draft"
-                          ? "bg-gray-100 text-gray-800"
-                          : "bg-blue-100 text-blue-800"
-                      }`}
-                    >
-                      {agreement.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500">
-                    {new Date(agreement.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4">
-                    <Link
-                      href={`/agreements/${agreement.id}`}
-                      className="text-blue-600 hover:text-blue-800 text-sm"
-                    >
-                      View
-                    </Link>
-                  </td>
-                </tr>
+      {/* ─── Risk Distribution ─── */}
+      {executive?.risk && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">
+              Risk Distribution
+            </h2>
+            <div className="grid grid-cols-4 gap-4">
+              {[
+                { label: "Low", value: executive.risk.low, color: "text-green-600" },
+                { label: "Medium", value: executive.risk.medium, color: "text-amber-600" },
+                { label: "High", value: executive.risk.high, color: "text-orange-600" },
+                { label: "Critical", value: executive.risk.critical, color: "text-red-600" },
+              ].map((r) => (
+                <div key={r.label} className="text-center p-4 bg-gray-50 rounded-lg">
+                  <div className={`text-3xl font-bold ${r.color}`}>{r.value}</div>
+                  <div className="text-sm text-gray-500 mt-1">{r.label}</div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+            </div>
+          </div>
+
+          {/* ─── Value by Status ─── */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">
+              Contract Value by Status
+            </h2>
+            {financial?.value_by_status &&
+              Object.entries(financial.value_by_status).length > 0 ? (
+              <div className="space-y-3">
+                {Object.entries(financial.value_by_status)
+                  .sort((a, b) => b[1].total_value - a[1].total_value)
+                  .map(([status, data]) => (
+                    <div key={status} className="flex items-center">
+                      <div className="w-32 text-sm text-gray-700 capitalize">
+                        {status.replace(/_/g, " ")}
+                      </div>
+                      <div className="flex-1 mx-4">
+                        <div className="h-6 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${statusColorMap[status] || "bg-gray-400"}`}
+                            style={{
+                              width: `${
+                                financial.total_contract_value > 0
+                                  ? (data.total_value / financial.total_contract_value) * 100
+                                  : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="w-24 text-right text-sm font-medium text-gray-900">
+                        ${data.total_value.toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">No value data available</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

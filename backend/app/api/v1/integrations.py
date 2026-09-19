@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
+from app.dependencies.rbac import require_permission
 from app.models.integration import (
     PROVIDER_LABELS,
     SUPPORTED_EVENTS,
@@ -25,6 +26,8 @@ from app.services.integration_service import (
 )
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
+
+_perm_integration_manage = Depends(require_permission("integration.manage"))
 
 
 class ConnectorCreateRequest(BaseModel):
@@ -87,7 +90,7 @@ async def list_connectors(
     ]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[_perm_integration_manage])
 async def create_connector(
     data: ConnectorCreateRequest,
     org_id: UUID = Depends(get_current_organization_id),
@@ -120,7 +123,7 @@ async def create_connector(
     }
 
 
-@router.patch("/{connector_id}")
+@router.patch("/{connector_id}", dependencies=[_perm_integration_manage])
 async def update_connector(
     connector_id: UUID,
     data: ConnectorUpdateRequest,

@@ -635,7 +635,7 @@ async def get_contract_health(
     try:
         from app.services.contract_health_service import compute_contract_health
 
-        return await compute_contract_health(db, uuid.UUID(agreement_id))
+        return await compute_contract_health(db, UUID(agreement_id))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -713,6 +713,30 @@ async def list_smart_tags(
         "usage_count": t.usage_count,
         "is_system": t.is_system,
     } for t in tags]
+
+
+# ===== SUPPLIER RISK / FINANCIAL OBLIGATIONS =====
+
+@router.get("/supplier-risk/{agreement_id}")
+async def get_agreement_supplier_risk(
+    agreement_id: str,
+    current_user: User = Depends(get_current_user),
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run the supplier / financial-obligation risk analysis for an agreement.
+
+    Evaluates late-fee aggression, interest-rate / usury exposure, secured vs
+    unsecured obligations, third-party guarantees, currency/FX exposure,
+    exclusive-supply dependence between the parties, price escalation and
+    single-source suppliers. Returns an explainable RiskProfile.
+    """
+    from app.services.supplier_risk_service import get_supplier_risk
+
+    try:
+        return (await get_supplier_risk(db, UUID(agreement_id))).to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/tags")

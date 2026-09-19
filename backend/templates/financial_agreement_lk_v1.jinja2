@@ -1,0 +1,108 @@
+{{ document_title | default("FINANCIAL AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ lender_name | default(party_a_name | default("_______________")) }} ("Lender"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ borrower_name | default(party_b_name | default("_______________")) }} ("Borrower"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Lender and the Borrower are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. AMOUNT AND PURPOSE
+
+1.1 The Lender agrees to make available, and the Borrower agrees to repay, the principal amount of {{ principal_amount | default("_______________") }} ({{ currency | default("LKR") }}).
+
+1.2 The purpose of this facility/agreement is: {{ purpose | default("As agreed by the Parties.") }}
+
+1.3 Where this is a credit facility: the credit limit is {{ credit_limit | default("_______________") }} ({{ currency | default("LKR") }}), and drawdown shall occur in accordance with {{ drawdown_terms | default("the terms set out in Schedule 1.") }}.
+
+
+2. INTEREST AND REPAYMENT
+
+2.1 The principal shall bear interest at the rate of {{ interest_rate | default("_______________") }}% per annum.
+
+2.2 The repayment term shall be {{ repayment_term_months | default("_______________") }} months, with repayment in accordance with the schedule set out below:
+
+{{ repayment_schedule | default("As agreed by the Parties.") }}
+
+2.3 Where this is a promissory note payable on demand ({{ payment_on_demand | default("No") }}), the full principal and accrued interest shall be due on demand or on the maturity date of {{ maturity_date | default("_______________") }}.
+
+2.4 All amounts are payable in {{ currency | default("LKR") }}. Payments received after the due date shall accrue default interest at the rate of 1.5% per month on the overdue amount.
+
+
+3. SECURITY AND GUARANTEES
+
+3.1 This facility is {{ loan_secured | default("unsecured") }}.
+
+3.2 Collateral / security: {{ collateral | default("None unless otherwise agreed in writing.") }}
+
+3.3 Where a guarantor is identified, the guarantor {{ guarantor_name | default("_______________") }} irrevocably and unconditionally guarantees the Borrower's payment obligations under this Agreement in respect of the underlying obligation described below:
+
+{{ underlying_obligation | default("All obligations of the Borrower under this Agreement.") }}
+
+
+4. COVENANTS AND DEFAULT
+
+4.1 The Borrower shall comply with any financial and operational covenants set out in writing between the Parties and shall notify the Lender promptly of any event of default.
+
+4.2 An event of default includes, without limitation: non-payment when due; insolvency of the Borrower; material breach of this Agreement; or the provision of materially false information.
+
+4.3 Upon an event of default, the Lender may declare the outstanding amount immediately due and payable and exercise any remedies available under this Agreement or applicable law.
+
+4.4 Where this is a settlement of an existing debt: the Parties agree that the debt of {{ original_debt | default("_______________") }} ({{ currency | default("LKR") }}) shall be satisfied and discharged upon payment of the settlement amount of {{ settlement_amount | default("_______________") }} ({{ currency | default("LKR") }}) in accordance with the payment schedule agreed in writing.
+
+
+5. REPRESENTATIONS AND INDEMNITIES
+
+5.1 Each Party represents and warrants that it has the power and authority to enter into and perform this Agreement.
+
+5.2 The Borrower shall indemnify the Lender against all losses, costs and expenses properly incurred by the Lender as a result of any default under this Agreement or any misrepresentation by the Borrower.
+
+5.3 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES.
+
+
+6. TERM AND TERMINATION
+
+6.1 This Agreement shall remain in force until all amounts owing under it are repaid in full.
+
+6.2 Prepayment and early settlement shall be permitted in accordance with the terms agreed in writing between the Parties.
+
+
+7. GOVERNING LAW AND DISPUTE RESOLUTION
+
+7.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+7.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+8. GENERAL PROVISIONS
+
+8.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings.
+
+8.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+8.3 Nothing in this Agreement shall create a partnership or joint venture between the Parties.
+
+8.4 Notices shall be given in writing to the addresses first written above.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For the Lender / Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For the Borrower / Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

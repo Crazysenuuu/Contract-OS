@@ -11,6 +11,8 @@ class AgreementCreate(BaseModel):
     effective_date: date | None = None
     parent_agreement_id: UUID | None = None
     data: dict | None = None
+    # Spec §72: fixtures / demos must self-identify; refused in production.
+    is_test_data: bool = False
 
 
 class AgreementUpdate(BaseModel):
@@ -34,6 +36,9 @@ class AgreementResponse(BaseModel):
     expiry_date: date | None
     created_by: UUID
     data: dict
+    # Spec §70: answer_key -> AnswerSource
+    answer_provenance: dict | None = None
+    is_test_data: bool = False
     created_at: datetime
     updated_at: datetime
 

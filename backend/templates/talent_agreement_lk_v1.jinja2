@@ -1,0 +1,95 @@
+{{ document_title | default("EMPLOYMENT / HR AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ employer_name | default(party_a_name | default("_______________")) }} ("Employer"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ employee_name | default(party_b_name | default("_______________")) }} ("Employee"), with its principal place of business / residence at {{ party_b_address | default("_______________") }}.
+
+The Employer and the Employee are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. ENGAGEMENT
+
+1.1 The Employee agrees to render services in the capacity of {{ job_title | default(intern_name | default("_______________")) }} and to perform the duties described below and any lawful duties assigned by the Employer:
+
+{{ purpose | default(intern_name | default("Set out the role and responsibilities.")) }}
+
+1.2 The engagement shall commence on {{ start_date | default(effective_date | default("_______________")) }} and shall continue without limit of time until terminated in accordance with Clause 5, unless a fixed term of {{ term_months | default("12") }} months applies.
+
+1.3 Where this is an internship arrangement, the intern is enrolled at {{ university | default("_______________") }} and the engagement is for an internship period in accordance with applicable law.
+
+
+2. COMPENSATION AND BENEFITS
+
+2.1 The Employer shall pay the Employee compensation of {{ compensation | default("_______________") }} ({{ currency | default("LKR") }}) per annum or as otherwise agreed, payable {{ salary_payment_frequency | default("monthly") }} in arrears.
+
+2.2 A monthly stipend of {{ stipend | default("Not applicable") }} ({{ currency | default("LKR") }}) shall apply where this is an internship arrangement.
+
+2.3 The Employer shall deduct and remit all taxes and statutory contributions required by law, and shall provide the benefits required by applicable law and any benefits agreed in writing.
+
+2.4 Reimbursement of expenses: the Employer shall reimburse documented, pre-authorised expenses reasonably incurred in the performance of duties.
+
+
+3. CONFIDENTIALITY AND INTELLECTUAL PROPERTY
+
+3.1 The Employee shall maintain the confidentiality of all Confidential Information of the Employer and shall not disclose it to any third party without prior written consent. This obligation shall survive termination for {{ confidentiality_period | default("3") }} years or as required by law.
+
+3.2 All intellectual property created by the Employee in the course of engagement shall belong to the Employer, provided that the scope of assignment in {{ ip_scope | default("Schedule 1") }} and the Employee's pre-existing IP remain subject to the explicit terms set out in writing between the Parties.
+
+3.3 The Employee shall execute all documents reasonably required to perfect, protect and record the Employer's ownership of such intellectual property.
+
+
+4. RESTRICTIVE COVENANTS
+
+4.1 During the engagement and for {{ restricted_period_months | default("12") }} months after its termination, the Employee shall not, directly or indirectly, solicit or attempt to solicit the clients, customers or employees of the Employer in respect of the restricted scope described below:
+
+{{ restricted_scope | default("The scope of restriction is the business of the Employer as defined in the offer/agreement.") }}
+
+4.2 The Parties acknowledge that restrictive covenants are enforceable only to the extent reasonable and permitted by applicable law, and agree that the covenants shall be read down to the minimum extent necessary for enforceability.
+
+
+5. TERM AND TERMINATION
+
+5.1 Either Party may terminate this Agreement upon {{ notice_period_days | default("30") }} days' prior written notice, or immediately for material breach or as required by applicable employment law.
+
+5.2 This Agreement automatically terminates upon the expiry of any fixed term and may be renewed by mutual written agreement. Auto-renew is {{ auto_renew | default("No") }}.
+
+5.3 Upon termination, the Employee shall return all property and Confidential Information of the Employer.
+
+
+6. INDEPENDENT STATUS / GENERAL
+
+6.1 Where this Agreement is entered into on an independent-contractor or consultant basis, nothing in this Agreement shall create an employment relationship, and the Employee shall be responsible for their own taxes and statutory contributions unless expressly stated otherwise.
+
+6.2 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings.
+
+6.3 No amendment shall be binding unless in writing and signed by both Parties.
+
+
+7. GOVERNING LAW AND DISPUTE RESOLUTION
+
+7.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+7.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the rules of the chosen institution, and the decision shall be final and binding on the Parties.
+
+
+MUTUAL SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For the Employer:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For the Employee:
+
+Signature: _______________________________
+Name: {{ employee_name | default(party_b_name | default("_______________")) }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

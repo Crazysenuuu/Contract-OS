@@ -346,6 +346,11 @@ class NLCreationService:
                 f"Agreement type '{intent['template_key']}' is not active"
             )
 
+        # Spec §70: everything pulled out of the prompt is EXTRACTED, not a
+        # confirmed fact; the wizard asks the user to confirm before sending.
+        from app.domain.answer_provenance import AnswerSource, tag_answers
+
+        answers = intent["answers"] or {}
         agreement = Agreement(
             organization_id=org_id,
             agreement_type_id=atype.id,
@@ -353,7 +358,8 @@ class NLCreationService:
             title=intent["title"],
             governing_law=intent["governing_law"],
             created_by=current_user.id,
-            data=intent["answers"] or {},
+            data=answers,
+            answer_provenance=tag_answers({}, answers.keys(), AnswerSource.EXTRACTED),
         )
         self.db.add(agreement)
         await self.db.flush()

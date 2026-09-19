@@ -2,6 +2,7 @@ import uuid
 from datetime import date
 
 from sqlalchemy import (
+    Boolean,
     Date,
     ForeignKey,
     Integer,
@@ -118,6 +119,24 @@ class Agreement(
         JSON,
         nullable=False,
         default=dict,
+    )
+
+    # Spec §70: per-answer source tag (USER_PROVIDED / EXTRACTED / INFERRED /
+    # SYSTEM_DEFAULT / LEGAL_REQUIREMENT / REVIEW_REQUIRED) keyed by answer key.
+    answer_provenance: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=dict,
+    )
+
+    # Spec §72: synthetic / fixture agreements are flagged so production
+    # reporting, obligations and AI never treat them as real contracts.
+    is_test_data: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        index=True,
     )
 
     organization = relationship(

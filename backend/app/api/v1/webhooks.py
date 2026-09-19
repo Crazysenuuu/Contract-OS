@@ -14,10 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
+from app.dependencies.rbac import require_permission
+from app.domain.agreement_states import PRE_EXECUTION_STATES
 from app.models.user import User
 from app.services.webhook_service import WebhookService, WEBHOOK_EVENTS
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+
+_perm_webhook_manage = Depends(require_permission("webhook.manage"))
 cron_router = APIRouter(prefix="/cron", tags=["Cron Jobs"])
 
 
@@ -96,7 +100,7 @@ async def list_webhooks(
     ]
 
 
-@router.post("", response_model=WebhookResponse, status_code=201)
+@router.post("", response_model=WebhookResponse, status_code=201, dependencies=[_perm_webhook_manage])
 async def create_webhook(
     data: WebhookCreate,
     current_user: User = Depends(get_current_user),
@@ -164,7 +168,7 @@ async def get_webhook(
     )
 
 
-@router.patch("/{endpoint_id}", response_model=WebhookResponse)
+@router.patch("/{endpoint_id}", response_model=WebhookResponse, dependencies=[_perm_webhook_manage])
 async def update_webhook(
     endpoint_id: uuid.UUID,
     data: WebhookUpdate,
@@ -198,7 +202,7 @@ async def update_webhook(
     )
 
 
-@router.delete("/{endpoint_id}")
+@router.delete("/{endpoint_id}", dependencies=[_perm_webhook_manage])
 async def delete_webhook(
     endpoint_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -425,10 +429,7 @@ async def run_compliance_check_cron(
     # Candidate agreements (any lifecycle stage with renderable content).
     agreements_result = await db.execute(
         select(Agreement.id).where(
-            Agreement.status.in_([
-                "draft", "pending_review", "submitted", "review_in_progress",
-                "negotiating", "awaiting_signatures", "sent", "viewed",
-            ])
+            Agreement.status.in_(sorted(PRE_EXECUTION_STATES))
         )
     )
     agreement_ids = [row[0] for row in agreements_result.all()]

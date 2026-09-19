@@ -184,14 +184,47 @@ async def compare_clauses(
 async def create_envelope(
     data: ESignatureRequest,
     current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create an e-signature envelope for an agreement."""
+    """Create an e-signature envelope for an agreement.
+
+    The envelope carries the *rendered agreement PDF* (tenant-scoped), never
+    a placeholder — a real DocuSign / Adobe Sign envelope must contain the
+    document the parties actually agreed to (spec §21, §65).
+    """
+    from app.models.agreement import Agreement
+    from app.services.agreement_renderer import render_agreement
+
     provider = resolve_esignature_provider()  # config-driven (spec 24.5)
 
-    # Get agreement content (would fetch PDF in production)
-    document_bytes = b"Mock document content"
-    document_name = "Agreement.pdf"
+    result = await db.execute(
+        select(Agreement).where(
+            Agreement.id == data.agreement_id,
+            Agreement.organization_id == org_id,
+        )
+    )
+    agreement = result.scalar_one_or_none()
+    if agreement is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agreement not found",
+        )
+
+    try:
+        rendered = await render_agreement(db, agreement_id=agreement.id, generate_pdf=True)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if not rendered.pdf:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF renderer unavailable; cannot create a signing envelope without the document",
+        )
+
+    document_bytes = rendered.pdf
+    safe_title = "".join(c if c.isalnum() or c in "-_ " else "_" for c in agreement.title)[:80].strip() or "Agreement"
+    document_name = f"{safe_title}.pdf"
 
     signers = [
         SignerInfo(
@@ -217,6 +250,8 @@ async def create_envelope(
         "status": result.status,
         "signing_url": result.signing_url,
         "created_at": result.created_at.isoformat() if result.created_at else None,
+        "document_name": document_name,
+        "content_hash": rendered.content_hash,
     }
 
 

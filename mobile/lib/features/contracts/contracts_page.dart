@@ -75,15 +75,34 @@ class ContractSummary {
   final double? value;
   final String? currency;
 
+  static String _counterpartyOf(Map<String, dynamic> j) {
+    final direct = j['counterparty'] as String?;
+    if (direct != null && direct.isNotEmpty) return direct;
+    final names = (j['party_names'] as List?)?.cast<String>() ?? const [];
+    return names.isEmpty ? 'Unknown Party' : names.join(', ');
+  }
+
   factory ContractSummary.fromJson(Map<String, dynamic> j) {
     ContractStatus parseStatus(String s) {
+      // Mirrors the unified backend state machine
+      // (app/domain/agreement_states.py).
       return switch (s.toLowerCase()) {
-        'pending_signature' || 'signing' => ContractStatus.pendingSignature,
-        'pending_approval' || 'approval' => ContractStatus.pendingApproval,
-        'negotiation' => ContractStatus.negotiation,
-        'active' => ContractStatus.active,
+        'pending_signature' ||
+        'ready_for_signature' ||
+        'signing' ||
+        'partially_signed' =>
+          ContractStatus.pendingSignature,
+        'pending_approval' ||
+        'internal_review' ||
+        'approval' ||
+        'approved' =>
+          ContractStatus.pendingApproval,
+        'negotiation' || 'negotiating' || 'sent' || 'viewed' =>
+          ContractStatus.negotiation,
+        'active' || 'renewed' => ContractStatus.active,
         'expiring' => ContractStatus.expiring,
-        'expired' => ContractStatus.expired,
+        'expired' || 'terminated' || 'superseded' || 'cancelled' =>
+          ContractStatus.expired,
         'executed' => ContractStatus.executed,
         _ => ContractStatus.draft,
       };
@@ -93,10 +112,13 @@ class ContractSummary {
       id: j['id'] as String,
       title: j['title'] as String? ?? 'Untitled',
       status: parseStatus(j['status'] as String? ?? 'draft'),
-      counterparty: (j['counterparty'] as String?) ?? 'Unknown Party',
+      // Accepts both the agreements list shape (`counterparty`,
+      // `expires_at`) and the repository search shape (`party_names`,
+      // `expiry_date`).
+      counterparty: _counterpartyOf(j),
       agreementType: (j['agreement_type_name'] as String?) ?? '',
-      expiresAt: j['expires_at'] != null
-          ? DateTime.tryParse(j['expires_at'] as String)
+      expiresAt: (j['expires_at'] ?? j['expiry_date']) != null
+          ? DateTime.tryParse((j['expires_at'] ?? j['expiry_date']) as String)
           : null,
       value: (j['contract_value'] as num?)?.toDouble(),
       currency: j['currency'] as String?,

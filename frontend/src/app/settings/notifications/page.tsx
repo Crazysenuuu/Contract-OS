@@ -9,6 +9,8 @@ import {
   resetNotificationPreferences,
   getDeliveryStats,
   listNotifications,
+  getNotificationStats,
+  retryNotification,
 } from "@/lib/api";
 
 interface Preferences {
@@ -32,6 +34,12 @@ interface DeliveryStats {
   total_pending: number;
   delivery_rate: number;
   by_type: Record<string, Record<string, number>>;
+}
+
+interface OrgStats {
+  total: number;
+  failed: number;
+  by_type: Record<string, number>;
 }
 
 interface NotificationRecord {
@@ -115,6 +123,7 @@ export default function NotificationSettingsPage() {
   const { token } = useAuth();
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [deliveryStats, setDeliveryStats] = useState<DeliveryStats | null>(null);
+  const [orgStats, setOrgStats] = useState<OrgStats | null>(null);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -126,11 +135,13 @@ export default function NotificationSettingsPage() {
       Promise.all([
         getNotificationPreferences(token).catch(() => null),
         getDeliveryStats(token).catch(() => null),
+        getNotificationStats(token).catch(() => null),
         listNotifications(token, { limit: 20 }).catch(() => []),
       ])
-        .then(([prefs, stats, notifs]) => {
+        .then(([prefs, stats, ostats, notifs]) => {
           setPreferences(prefs);
           setDeliveryStats(stats);
+          setOrgStats(ostats);
           setNotifications(notifs);
         })
         .finally(() => setLoading(false));
@@ -327,6 +338,18 @@ export default function NotificationSettingsPage() {
 
       {activeTab === "delivery" && (
         <>
+          {/* Org totals (all-time) */}
+          {orgStats && (
+            <div className="mb-4 flex items-center gap-6 text-sm text-gray-600 bg-white shadow rounded-lg p-4">
+              <span>
+                Lifetime notifications: <strong>{orgStats.total.toLocaleString()}</strong>
+              </span>
+              <span className={orgStats.failed > 0 ? "text-red-600" : ""}>
+                Failed: <strong>{orgStats.failed.toLocaleString()}</strong>
+              </span>
+            </div>
+          )}
+
           {/* Delivery Stats */}
           {deliveryStats && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -392,6 +415,24 @@ export default function NotificationSettingsPage() {
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[notif.status] || "bg-gray-100"}`}>
                         {notif.status}
                       </span>
+                      {notif.status === "failed" && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await retryNotification(token!, notif.id);
+                              const refreshed = await listNotifications(token!, { limit: 20 });
+                              setNotifications(refreshed);
+                              const stats = await getNotificationStats(token!).catch(() => null);
+                              setOrgStats(stats);
+                            } catch {
+                              /* keep row as-is on failure */
+                            }
+                          }}
+                          className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-50"
+                        >
+                          Retry
+                        </button>
+                      )}
                       <span className="text-xs text-gray-400">
                         {notif.sent_at ? new Date(notif.sent_at).toLocaleString() : "—"}
                       </span>

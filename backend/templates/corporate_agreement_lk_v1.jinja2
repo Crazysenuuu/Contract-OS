@@ -1,0 +1,111 @@
+{{ document_title | default("CORPORATE TRANSACTION AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ acquirer_name | default(party_a_name | default("_______________")) }} ("Party A"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ target_name | default(party_b_name | default("_______________")) }} ("Party B"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Parties are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. TRANSACTION AND CONSIDERATION
+
+1.1 The Parties agree to the transaction described below:
+
+{{ purpose | default("Set out the nature of the transaction.") }}
+
+1.2 Subject to satisfaction of the conditions precedent, the total consideration shall be {{ transaction_value | default("_______________") }} ({{ currency | default("LKR") }}).
+
+1.3 Merger / acquisition mechanism: {{ merger_mechanism | default("As agreed between the Parties.") }} — target entity: {{ target_entity | default("As identified in Schedule 1.") }}
+
+1.4 Scope of assets/liabilities: {{ assets_included | default("As described in Schedule 1.") }} and {{ liabilities_assumed | default("As described in Schedule 1.") }}
+
+
+2. CONDITIONS PRECEDENT AND CLOSING
+
+2.1 The obligations of the Parties are subject to the conditions precedent described below:
+
+{{ conditions_precedent | default("As agreed by the Parties, including required consents and regulatory approvals.") }}
+
+2.2 Closing shall occur on {{ closing_date | default("_______________") }} (the "Closing Date"), at which point consideration shall be paid and title shall transfer.
+
+2.3 Following Closing, each Party shall execute all documents reasonably required to perfect the transfer and record ownership.
+
+
+3. COVENANTS AND INTERIM OPERATIONS
+
+3.1 Between the Effective Date and the Closing Date, each Party shall carry on its business in the ordinary course and shall obtain no consents unless required for this transaction.
+
+3.2 Neither Party shall dispose of material assets outside the ordinary course of business prior to Closing without the consent of the other Party.
+
+
+4. REPRESENTATIONS, WARRANTIES AND INDEMNITIES
+
+4.1 Each Party represents and warrants that it has the power and authority to enter into and perform this Agreement and that execution does not breach its constitutional documents.
+
+4.2 Each Party represents that the information provided in connection with the transaction is true, accurate and complete in all material respects.
+
+4.3 The Parties shall indemnify each other in respect of inaccuracies in their representations, and in respect of liabilities not assumed under this transaction, subject to the agreed limitation periods.
+
+4.4 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES.
+
+
+5. CONFIDENTIALITY
+
+5.1 Each Party shall maintain the confidentiality of all Confidential Information of the other Party and shall not disclose it to any third party without prior written consent.
+
+5.2 This obligation shall survive termination or the completion of the transaction for {{ confidentiality_period | default("3") }} years.
+
+
+6. TERMINATION
+
+6.1 This Agreement may be terminated by either Party if the conditions precedent are not satisfied by the Closing Date, in which case no Party shall have further obligations except surviving provisions.
+
+6.2 Surviving provisions include confidentiality, indemnity, governing law and dispute resolution.
+
+
+7. CONTRIBUTION AND ALLIANCE PROVISIONS (JOINT VENTURE / STRATEGIC ALLIANCE)
+
+7.1 Where this is a joint venture or strategic alliance: the venture shall be named {{ venture_name | default("As agreed.") }}, and the contribution split shall be {{ contribution_split | default("As agreed.") }}.
+
+7.2 The scope of the alliance is: {{ alliance_scope | default("As agreed.") }}
+
+
+8. GOVERNING LAW AND DISPUTE RESOLUTION
+
+8.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+8.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+
+9. GENERAL PROVISIONS
+
+9.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings.
+
+9.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+9.3 The Parties shall bear their own legal and advisory costs in connection with the transaction.
+
+9.4 Notices shall be given in writing to the addresses first written above.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

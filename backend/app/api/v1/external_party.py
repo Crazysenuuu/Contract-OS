@@ -15,6 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.domain.agreement_states import (
+    COUNTERPARTY_ACTIVE_STATES,
+    EDITABLE_STATES,
+    AgreementStatus,
+)
 from app.dependencies.agreement_access import verify_agreement_access
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
@@ -26,13 +31,17 @@ from app.services.external_party_service import (
     accept_agreement,
     add_external_comment,
     capture_signature,
+    complete_id_verification,
     create_external_party,
     get_external_parties_for_agreement,
     get_external_party_comments,
     record_session,
     reject_agreement,
+    start_id_verification,
     validate_access_token,
 )
+from app.services.lifecycle_service import TransitionNotAllowed
+from app.services.signing_completion import ExecutionBlocked, check_and_execute
 
 router = APIRouter(tags=["external-party"])
 
@@ -159,7 +168,7 @@ async def add_external_party_endpoint(
         db=db,
     )
 
-    if agreement.status not in ("draft", "internal_review", "sent", "negotiating", "negotiation"):
+    if agreement.status not in EDITABLE_STATES | {AgreementStatus.SENT, AgreementStatus.VIEWED}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot add external parties in current agreement status",
@@ -222,7 +231,7 @@ async def review_agreement(
     # Drive the agreement lifecycle to VIEWED so the counterparty's open of
     # the shared document is reflected in the authoritative state machine.
     agreement = await db.get(Agreement, external_party.agreement_id)
-    if agreement is not None and agreement.status in ("sent", "negotiating", "negotiation"):
+    if agreement is not None and agreement.status in COUNTERPARTY_ACTIVE_STATES:
         try:
             from app.services.workflow_engine import WorkflowEngine
             from app.models.user import User
@@ -583,8 +592,24 @@ async def sign_external(
         user_agent=request.headers.get("user-agent"),
     )
 
+    # Spec §67: EXECUTED only once *all* required signers have completed.
+    # External signatures must drive the same completion engine as internal
+    # ones, otherwise a counterparty-last signing order never executes.
+    executed = False
+    agreement = await db.get(Agreement, external_party.agreement_id)
+    if agreement is not None:
+        try:
+            executed = await check_and_execute(
+                db, agreement=agreement, org_id=agreement.organization_id
+            )
+        except (ExecutionBlocked, TransitionNotAllowed):
+            # The signature itself is valid and recorded; a lifecycle
+            # refusal must not be surfaced to the guest signer. Anything
+            # else is a programming error and should propagate.
+            executed = False
+
     return SignResponse(
         signature_id=signature.id,
         signed_at=signature.signed_at.isoformat(),
-        message="Agreement signed successfully",
+        message="Agreement signed successfully" + (" and executed" if executed else ""),
     )

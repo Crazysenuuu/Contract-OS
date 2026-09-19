@@ -1,0 +1,101 @@
+{{ document_title | default("REAL ESTATE AGREEMENT") }}
+
+This Agreement is entered into on {{ effective_date | default("_______________") }} ("Effective Date") by and between:
+
+{{ landlord_name | default(party_a_name | default("_______________")) }} ("Landlord/Owner"), with its principal place of business at {{ party_a_address | default("_______________") }},
+
+AND
+
+{{ tenant_name | default(party_b_name | default("_______________")) }} ("Tenant/User"), with its principal place of business at {{ party_b_address | default("_______________") }}.
+
+The Parties are individually referred to as a "Party" and collectively as the "Parties."
+
+
+1. PREMISES AND PERMITTED USE
+
+1.1 The Landlord/Owner agrees to make available the premises described below:
+
+{{ premises_address | default("_______________") }}
+
+together with the permitted use described in {{ facility_description | default("the terms agreed by the Parties.") }}
+
+1.2 The Tenant/User shall use the premises only for the permitted purpose and shall not make structural alterations without the prior written consent of the Landlord/Owner.
+
+1.3 This is a lease/tenancy agreement; the Lease Term shall be {{ term_months | default(lease_term_months | default("12")) }} months (the "Term").
+
+
+2. RENT AND CHARGES
+
+2.1 The Tenant/User shall pay rent of {{ rent_amount | default("_______________") }} ({{ currency | default("LKR") }}) per {{ rent_frequency | default("month") }}.
+
+2.2 A security deposit of {{ security_deposit | default("_______________") }} ({{ currency | default("LKR") }}) shall be paid on execution and shall be refundable on expiry, subject to deduction for unpaid rent, damage or arrears.
+
+2.3 Where this is a property management arrangement, the management fee shall be {{ management_fee_pct | default("_______________") }}% of the relevant collections, and the manager shall only perform the authorised tasks described below:
+
+{{ authorized_tasks | default("As agreed by the Parties.") }}
+
+2.4 Utilities, common charges and applicable taxes shall be borne by the party responsible for them under applicable law or as otherwise agreed in writing.
+
+
+3. MAINTENANCE AND OBLIGATIONS
+
+3.1 Maintenance responsibility: {{ maintenance_responsibility | default("The Landlord/Owner is responsible for structural repairs; the Tenant/User is responsible for day-to-day repairs.") }}
+
+3.2 Where this is a facility use arrangement, the usage hours and facilities to be provided are:
+
+{{ usage_hours | default("As agreed by the Parties.") }}
+
+3.3 The Tenant/User shall permit reasonable access to the Landlord/Owner for inspection, repair and maintenance and shall comply with all applicable laws and fire and safety requirements.
+
+
+4. TERM AND TERMINATION
+
+4.1 This Agreement shall commence on the Effective Date and continue for the Term. Auto-renew is {{ auto_renew | default("No") }}.
+
+4.2 Either Party may terminate this Agreement upon material breach that remains uncured for 14 days after written notice, or immediately upon the insolvency of the other Party.
+
+4.3 The Tenant/User shall vacate the premises and deliver them in a clean and reasonable condition on expiry or termination, and shall return all keys and access devices.
+
+
+5. LIABILITY AND INSURANCE
+
+5.1 NEITHER PARTY SHALL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES.
+
+5.2 The Tenant/User shall maintain adequate insurance covering its obligations under this Agreement, and the Landlord/Owner shall maintain insurance appropriate to its ownership interest.
+
+
+6. GOVERNING LAW AND DISPUTE RESOLUTION
+
+6.1 This Agreement shall be governed by and construed in accordance with the laws of {{ governing_law | default("Sri Lanka") }}.
+
+6.2 Any dispute arising out of or in connection with this Agreement shall be resolved by {{ dispute_resolution | default("Arbitration") }} in accordance with the chosen institution's rules, and the decision shall be final and binding on the Parties.
+
+6.3 Where the Parties have agreed a registered tenancy, this Agreement is subject to the registration and any stamp duty or notarization requirements of the applicable jurisdiction.
+
+
+7. GENERAL PROVISIONS
+
+7.1 This Agreement constitutes the entire agreement between the Parties and supersedes all prior understandings.
+
+7.2 No amendment or waiver shall be binding unless in writing and signed by both Parties.
+
+7.3 Notices shall be given in writing to the addresses first written above.
+
+
+SIGNING
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.
+
+For the Landlord/Owner / Party A:
+
+Signature: _______________________________
+Name: {{ party_a_signatory_name | default("_______________") }}
+Title: {{ party_a_signatory_title | default("_______________") }}
+Date: _______________________________
+
+For the Tenant/User / Party B:
+
+Signature: _______________________________
+Name: {{ party_b_signatory_name | default("_______________") }}
+Title: {{ party_b_signatory_title | default("_______________") }}
+Date: _______________________________

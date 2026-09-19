@@ -38,6 +38,7 @@ run_frontend_tests() {
     npm ci
     npx tsc --noEmit
     npm run lint
+    npm test
     npm run build
     echo "✅ Frontend tests passed!"
 }

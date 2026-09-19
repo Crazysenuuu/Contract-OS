@@ -19,7 +19,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import WorkflowStateError
-from app.domain.agreement_states import validate_transition
+from app.domain.agreement_states import ACTION_TARGETS, validate_transition
 from app.models.agreement import Agreement
 
 
@@ -71,22 +71,8 @@ class AgreementStateService:
 
     @staticmethod
     def predict_target(action_key: str) -> str | None:
-        """Map common action keys to canonical target statuses for the
-        pre-check. Returns None when the action is type-specific and the
-        canonical machine has no opinion."""
-        mapping = {
-            "start_negotiation": "negotiation",
-            "complete_negotiation": "negotiation_complete",
-            "prepare_signing": "signing_pending",
-            "start_signing": "signing",
-            "execute": "executed",
-            "activate": "active",
-            "mark_expiring": "expiring",
-            "renew": "active",
-            "expire": "expired",
-            "request_termination": "termination_requested",
-            "start_termination": "terminating",
-            "complete_termination": "terminated",
-            "cancel": "cancelled",
-        }
-        return mapping.get(action_key)
+        """Map an action key to its canonical target status for the
+        pre-check. Returns None when the target depends on the from-status
+        (e.g. ``sign``) or the action is type-specific, in which case only
+        the data-driven rules decide."""
+        return ACTION_TARGETS.get(action_key)
