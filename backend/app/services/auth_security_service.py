@@ -236,6 +236,8 @@ async def record_login_attempt(
     ip_address: str | None,
     success: bool,
     reason: str | None = None,
+    tenant_id: uuid.UUID | None = None,
+    actor_id: uuid.UUID | None = None,
 ) -> LoginAttempt:
     attempt = LoginAttempt(
         email=email,
@@ -246,4 +248,23 @@ async def record_login_attempt(
     )
     db.add(attempt)
     await db.flush()
+
+    # Mirror the attempt into the tenant audit chain (spec §23/§95) so the
+    # security-monitoring detectors see login events. Login attempts occur
+    # before the org context is known, so tenant_id/actor_id may be None —
+    # they are attached only when the user was successfully identified.
+    if tenant_id is not None:
+        from app.services.audit_service import record_event
+
+        await record_event(
+            db,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            actor_type="user",
+            action="LOGIN" if success else "LOGIN_FAILED",
+            resource_type="session",
+            metadata_json={"email": email, "ip_address": ip_address, "reason": reason},
+            ip_address=ip_address,
+        )
+
     return attempt

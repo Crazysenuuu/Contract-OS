@@ -342,6 +342,22 @@ async def download_document(
     )
     record = result.scalar_one_or_none()
 
+    # Spec §23/§95: every download becomes an audit event so the
+    # bulk-export anomaly detector has real data to analyse.
+    from app.services.audit_service import record_event
+
+    await record_event(
+        db,
+        tenant_id=payload["org_id"],
+        actor_id=current_user.id,
+        actor_type="user",
+        action="DOCUMENT_DOWNLOAD",
+        resource_type="document",
+        resource_id=record.id if record else None,
+        metadata_json={"content_ref": payload["content_ref"]},
+    )
+    await db.commit()
+
     return Response(
         content=data,
         media_type=record.mime_type if record else "application/octet-stream",

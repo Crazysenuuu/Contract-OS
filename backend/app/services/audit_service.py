@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditChainRoot, AuditEvent, AuditEvidence
@@ -128,6 +129,14 @@ async def _get_chain_head(
     return result.scalar_one_or_none()
 
 
+# Concurrent appends (e.g. two users logging in at once) can read the same
+# chain head and race to the same sequence number; the unique constraint
+# "uq_audit_events_tenant_sequence" arbitrates the winner. The loser retries
+# from the *current* committed head — under READ COMMITTED the re-SELECT sees
+# the winner's row — so concurrent writers serialize instead of erroring.
+_SEQUENCE_CONFLICT_RETRIES = 5
+
+
 async def record_event(
     db: AsyncSession,
     *,
@@ -145,10 +154,50 @@ async def record_event(
     """Append an event to the tenant's hash chain.
 
     Sequence numbers are assigned from the persisted chain head inside the
-    caller's transaction (never from application memory), so concurrent
-    appends either serialize on the unique constraint or fail loudly.
+    caller's transaction (never from application memory). Concurrent appends
+    serialize on the unique constraint via a savepoint + retry; a genuine
+    constraint failure after exhausting retries still raises.
     """
     created_at = created_at or now_utc()
+    last_error: Exception | None = None
+    for _ in range(_SEQUENCE_CONFLICT_RETRIES):
+        try:
+            # Savepoint: roll back only the conflicted INSERT, keeping the
+            # caller's surrounding transaction alive for the retry.
+            async with db.begin_nested():
+                return await _append_event(
+                    db,
+                    tenant_id=tenant_id,
+                    agreement_id=agreement_id,
+                    actor_id=actor_id,
+                    actor_type=actor_type,
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    metadata_json=metadata_json,
+                    ip_address=ip_address,
+                    created_at=created_at,
+                )
+        except IntegrityError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+async def _append_event(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    agreement_id: uuid.UUID | None,
+    actor_id: uuid.UUID | None,
+    actor_type: str,
+    action: str,
+    resource_type: str | None,
+    resource_id: uuid.UUID | None,
+    metadata_json: dict | None,
+    ip_address: str | None,
+    created_at: datetime,
+) -> AuditEvent:
     head = await _get_chain_head(db, tenant_id)
     prev_hash = head.event_hash if head is not None else None
     sequence_number = ((head.sequence_number or 0) + 1) if head is not None else 1

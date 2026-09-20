@@ -58,7 +58,7 @@ async def get_compliance_summary(
             .join(ExtractedClause, ExtractedClause.agreement_id == Agreement.id)
             .where(
                 Agreement.organization_id == org_id,
-                ExtractedClause.category == "data_processing",
+                ExtractedClause.category == "data_protection",
             )
         )
     ) or 0

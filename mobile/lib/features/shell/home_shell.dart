@@ -6,6 +6,7 @@ import 'package:contractos_mobile/features/notifications/notifications_page.dart
 import 'package:contractos_mobile/features/profile/profile_page.dart';
 import 'package:contractos_mobile/features/repository/presentation/repository_page.dart';
 import 'package:contractos_mobile/features/shell/live_connection_indicator.dart';
+import 'package:contractos_mobile/features/task_hub/task_hub_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,7 +14,7 @@ import '../../core/deeplink/deep_link_service.dart';
 import '../../core/offline/connectivity.dart';
 
 /// The authenticated mobile shell (spec 2.02 focused app):
-/// Contracts / Agreements / Signing / Approvals / AI Assistant / Alerts / Profile.
+/// Tasks / Contracts / Agreements / Signing / Approvals / AI / Alerts / Profile.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -25,6 +26,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
 
   static final _pages = <Widget>[
+    const TaskHubPage(),
     const ContractsPage(),
     const AgreementsPage(),
     const RepositoryPage(),
@@ -70,6 +72,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.task_alt_outlined),
+            selectedIcon: Icon(Icons.task_alt),
+            label: 'Tasks',
+          ),
           NavigationDestination(
             icon: Icon(Icons.folder_outlined),
             selectedIcon: Icon(Icons.folder),

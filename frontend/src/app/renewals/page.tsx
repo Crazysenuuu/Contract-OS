@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 interface RenewalItem {
   id: string;
@@ -30,6 +31,7 @@ function urgencyBadge(days: number): string {
 
 export default function RenewalsPage() {
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [items, setItems] = useState<RenewalItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,9 +56,9 @@ export default function RenewalsPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) { router.push("/login"); return; }
+    if (!token) return;
     load();
-  }, [token, router, load]);
+  }, [token, load]);
 
   const handleInitiate = async (item: RenewalItem) => {
     if (!token) return;

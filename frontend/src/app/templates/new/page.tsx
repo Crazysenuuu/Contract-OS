@@ -3,11 +3,13 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 interface AgreementType { id: string; name: string; }
 
 export default function NewTemplatePage() {
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [agreementTypes, setAgreementTypes] = useState<AgreementType[]>([]);
   const [form, setForm] = useState({
@@ -22,7 +24,7 @@ export default function NewTemplatePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) { router.push("/login"); return; }
+    if (!token) return;
     fetch("/api/v1/agreement-types?page_size=200", {
       headers: { Authorization: `Bearer ${token}` },
     })

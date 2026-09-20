@@ -209,6 +209,32 @@ async def dispatch_event(
     else:
         push_result = None
 
+    # 2.6. SMS channel (spec §44: in-app, email, push, SMS, webhook).
+    # Best-effort and optional: disabled without gateway credentials,
+    # skipped for users without a registered phone, never breaks the
+    # outbox lifecycle. Bodies are the confidential-notification style
+    # (doc4 §14): subject + link pointer, no agreement terms.
+    if recipient_user_id:
+        from app.services import sms_sender_service
+
+        sms_body = str(payload.get("sms_body") or subject)
+        try:
+            sms_result = await sms_sender_service.send_sms_to_user(
+                db,
+                user_id=uuid.UUID(str(recipient_user_id)),
+                body=sms_body,
+            )
+            if sms_result.disabled:
+                _log.debug(
+                    "sms disabled (no gateway credentials); event %s skipped",
+                    event.id,
+                )
+        except Exception as exc:  # noqa: BLE001 — SMS must never break the outbox
+            sms_result = None
+            _log.warning("sms delivery failed for event %s: %s", event.id, exc)
+    else:
+        sms_result = None
+
     # 3. Cross-process channel (Redis) when available — non-blocking.
     publish_redis_channel(
         event.tenant_id,

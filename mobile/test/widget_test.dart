@@ -162,8 +162,20 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50)); // restore completes
     await tester.pumpAndSettle();
 
+    // The landing tab is the Task Hub (spec 2.02 unified task inbox). Its
+    // sources (tasks/approvals) are not stubbed here, so it shows its error
+    // state — the shell still renders, which is what this test asserts.
+    expect(find.text('My Tasks'), findsOneWidget);
+
+    // Contracts remain reachable via the bottom navigation.
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Contracts'),
+      ),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Pending Signature'), findsOneWidget);
-    expect(find.text('Contracts'), findsWidgets);
     expect(find.text('Profile'), findsWidgets);
   });
 }

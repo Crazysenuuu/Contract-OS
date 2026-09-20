@@ -4,6 +4,7 @@ import { Suspense, useCallback } from "react";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   listAgreements,
   getVersionTranslations,
@@ -56,6 +57,7 @@ function TranslationsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { token } = useAuth();
+  useRequireAuth();
   const [agreements, setAgreements] = useState<Array<{ id: string; title: string }>>([]);
   const [selectedAgreement, setSelectedAgreement] = useState<string>(searchParams.get("agreement") || "");
   const [dashboard, setDashboard] = useState<TranslationDashboard | null>(null);
@@ -103,12 +105,9 @@ function TranslationsContent() {
   }, [token, selectedAgreement, selectedVersion]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     queueMicrotask(() => loadAgreements());
-  }, [token, loadAgreements, router]);
+  }, [token, loadAgreements]);
 
   useEffect(() => {
     if (selectedAgreement && token) {

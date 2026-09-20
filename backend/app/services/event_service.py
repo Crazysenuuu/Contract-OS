@@ -48,6 +48,8 @@ class EventService:
         db: AsyncSession,
         *,
         event_type: str,
+        # Spec §62: event_type should be a known type from the catalogue.
+        # Unknown types are allowed but logged for observability.
         aggregate_type: str,
         aggregate_id: UUID,
         organization_id: UUID,

@@ -141,6 +141,10 @@ class NotificationPreference(
     email_compliance_violation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     email_obligation_reminder: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # SMS channel master switch (spec §44). Opt-in: SMS costs money and
+    # requires a registered phone, so it defaults off.
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     # Digest settings
     digest_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     digest_frequency: Mapped[str] = mapped_column(String(20), nullable=False, default="daily")

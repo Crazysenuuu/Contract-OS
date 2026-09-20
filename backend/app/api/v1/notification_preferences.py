@@ -31,6 +31,7 @@ class PreferenceUpdate(BaseModel):
     email_workflow_transition: Optional[bool] = None
     email_compliance_violation: Optional[bool] = None
     email_obligation_reminder: Optional[bool] = None
+    sms_enabled: Optional[bool] = None
     digest_enabled: Optional[bool] = None
     digest_frequency: Optional[str] = None
 
@@ -47,6 +48,7 @@ class PreferenceResponse(BaseModel):
     email_workflow_transition: bool
     email_compliance_violation: bool
     email_obligation_reminder: bool
+    sms_enabled: bool
     digest_enabled: bool
     digest_frequency: str
 

@@ -7,7 +7,15 @@ import {
   useEffect,
   ReactNode,
 } from "react";
-import { getMe, logout as apiLogout } from "@/lib/api";
+import {
+  getMe,
+  logout as apiLogout,
+  clearSessionTokens,
+  currentSessionTokens,
+  onTokensRotated,
+  persistSessionTokens,
+  setSessionExpiredHandler,
+} from "@/lib/api";
 
 interface User {
   id: string;
@@ -32,9 +40,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Keep React state in sync with background refresh rotations. Without
+  // this, the dashboard's `token` would go stale after the interceptor
+  // refreshes, and requests would replay with the old token until reload.
   useEffect(() => {
-    const savedToken = localStorage.getItem("token");
-    if (!savedToken) {
+    const unsubscribe = onTokensRotated((accessToken) => {
+      setToken(accessToken);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Fire the api-layer's session-expired handler into React state: when the
+  // refresh token is dead, clear user/token so guards redirect to /login.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setToken(null);
+      setUser(null);
+    });
+    return () => {
+      setSessionExpiredHandler(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    const session = currentSessionTokens();
+    if (!session?.accessToken) {
       // No stored session — release the loading gate asynchronously so the
       // effect body never triggers a synchronous cascading render.
       queueMicrotask(() => setIsLoading(false));
@@ -44,13 +74,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
-      setToken(savedToken);
-      getMe(savedToken)
+      setToken(session.accessToken);
+      getMe(session.accessToken)
         .then((me) => {
           if (active) setUser(me);
         })
         .catch(() => {
-          localStorage.removeItem("token");
+          clearSessionTokens();
           if (active) setToken(null);
         })
         .finally(() => {
@@ -63,7 +93,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (newToken: string) => {
-    localStorage.setItem("token", newToken);
+    // Callers (login page) hand us the access token from the auth response;
+    // the api layer already persisted the refresh token alongside it.
+    persistSessionTokens({
+      accessToken: newToken,
+      refreshToken: currentSessionTokens()?.refreshToken ?? "",
+    });
     setToken(newToken);
     // Hydrate the user BEFORE callers navigate away: guards on protected
     // pages (e.g. the dashboard layout) treat `user === null` as logged out
@@ -77,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Best-effort: close the backend session so online-time stops.
       apiLogout(current).catch(() => {});
     }
-    localStorage.removeItem("token");
+    clearSessionTokens();
     setToken(null);
     setUser(null);
   };

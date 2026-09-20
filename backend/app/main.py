@@ -30,6 +30,18 @@ from app.core.tracing import make_tracing_middleware  # noqa: E402  (after app i
 
 app.middleware("http")(make_tracing_middleware())
 
+# Global API rate limiting (spec §33 / §54).
+from app.core.rate_limit import RateLimitMiddleware  # noqa: E402
+
+app.add_middleware(
+    RateLimitMiddleware,
+    # Disabled under automated test rigs: a Playwright suite logs in once per
+    # test (with hydration retries) from a single IP and would exhaust the
+    # per-IP auth budget within the first minute. Production/staging/development
+    # keep full protection.
+    enabled=settings.environment not in ("test", "testing"),
+)
+
 
 @app.middleware("http")
 async def correlation_id_middleware(request, call_next):

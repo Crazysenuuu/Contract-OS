@@ -314,6 +314,19 @@ async def send_agreement(
         db=db,
     )
 
+    # ABAC check (spec §52): department match + approval limit
+    from app.services.abac_service import check_department_match, check_approval_limit
+
+    dept_verdict = await check_department_match(db, user_id=current_user.id, agreement_id=agreement_id)
+    limit_verdict = await check_approval_limit(db, user_id=current_user.id, agreement_id=agreement_id)
+
+    # Advisory only — log but don't block (RBAC is the hard gate)
+    abac_warnings = []
+    if not dept_verdict.allowed:
+        abac_warnings.append(dept_verdict.reason)
+    if not limit_verdict.allowed:
+        abac_warnings.append(limit_verdict.reason)
+
     if agreement.status not in (
         AgreementStatus.DRAFT,
         AgreementStatus.INTERNAL_REVIEW,

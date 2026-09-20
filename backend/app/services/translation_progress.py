@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import json
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, func, desc, select
+from sqlalchemy import and_, func, desc, literal, select
 
 from app.models.translation_queue import (
     TranslationQueueItem, TranslationWorker,
@@ -289,7 +289,7 @@ class TranslationProgressService:
         start_time = datetime.utcnow() - timedelta(hours=hours)
 
         stmt = select(
-            func.date_trunc('hour', TranslationQueueItem.completed_at).label('hour'),
+            func.date_trunc(literal('hour'), TranslationQueueItem.completed_at).label('hour'),
             func.count(TranslationQueueItem.id).label('count')
         ).where(
             TranslationQueueItem.status == QueueStatus.COMPLETED,
@@ -299,7 +299,10 @@ class TranslationProgressService:
         if organization_id:
             stmt = stmt.where(TranslationQueueItem.organization_id == organization_id)
 
-        stmt = stmt.group_by('hour').order_by('hour')
+        # Group by the expression (not the label string): Postgres treats a
+        # bound literal in GROUP BY as a different expression from SELECT.
+        hour_trunc = func.date_trunc(literal('hour'), TranslationQueueItem.completed_at)
+        stmt = stmt.group_by(hour_trunc).order_by(hour_trunc)
         results = (await self.db.execute(stmt)).all()
 
         return [{

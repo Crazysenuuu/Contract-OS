@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   getTranslationProgressDashboard,
 } from "@/lib/api";
@@ -56,6 +57,7 @@ interface DashboardData {
 export default function TranslationProgressPage() {
   const router = useRouter();
   const { token } = useAuth();
+  useRequireAuth();
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -76,12 +78,9 @@ export default function TranslationProgressPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     queueMicrotask(() => loadDashboard());
-  }, [token, loadDashboard, router]);
+  }, [token, loadDashboard]);
 
   useEffect(() => {
     if (autoRefresh && token) {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { currentSessionTokens, persistSessionTokens } from "@/lib/api";
 
 export default function SSOCallbackPage() {
   const [error, setError] = useState("");
@@ -20,6 +21,16 @@ export default function SSOCallbackPage() {
         setError("SSO sign-in did not return a session token.");
         return;
       }
+      // Persist the refresh token from the fragment so the session can be
+      // renewed after the 15-minute access token expires. authLogin below
+      // preserves whatever refresh token is already in the store.
+      persistSessionTokens({
+        accessToken,
+        refreshToken:
+          params.get("refresh_token") ??
+          currentSessionTokens()?.refreshToken ??
+          "",
+      });
       try {
         await authLogin(accessToken);
         router.replace("/dashboard");

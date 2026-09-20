@@ -35,23 +35,15 @@ async def supplier_intelligence(
     from app.models.agreement_access import AgreementParty
     from app.models.external_party import ExternalParty
 
-    # Find all agreements with external parties and aggregate
+    # Find all agreements with external parties and aggregate.
+    # Contract value lives in Agreement.data JSON, so aggregate in Python.
     supplier_rows = (
         await db.execute(
             select(
                 ExternalParty.company_name,
-                func.count(func.distinct(Agreement.id)).label("contract_count"),
-                func.coalesce(func.sum(Agreement.contract_value), 0).label("total_value"),
-                func.count(
-                    func.case(
-                        (Agreement.status.in_(["active", "executed"]), 1)
-                    )
-                ).label("active_count"),
-                func.count(
-                    func.case(
-                        (Agreement.status.in_(["signing", "sent"]), 1)
-                    )
-                ).label("pending_count"),
+                Agreement.id,
+                Agreement.status,
+                Agreement.data,
             )
             .join(Agreement, Agreement.id == ExternalParty.agreement_id)
             .where(
@@ -59,39 +51,46 @@ async def supplier_intelligence(
                 ExternalParty.company_name.is_not(None),
                 ExternalParty.company_name != "",
             )
-            .group_by(ExternalParty.company_name)
-            .order_by(func.count(func.distinct(Agreement.id)).desc())
-            .limit(50)
         )
     ).all()
 
+    def _value_of(data: dict | None) -> float:
+        raw = (data or {}).get("total_value") or (data or {}).get("contract_value")
+        if raw is None:
+            return 0.0
+        try:
+            return float(str(raw).replace(",", ""))
+        except (TypeError, ValueError):
+            return 0.0
+
+    per_supplier: dict[str, dict] = {}
+    for company, _aid, status, data in supplier_rows:
+        agg = per_supplier.setdefault(
+            company,
+            {"contracts": 0, "value": 0.0, "active": 0, "pending": 0},
+        )
+        agg["contracts"] += 1
+        agg["value"] += _value_of(data)
+        if status in ("active", "executed"):
+            agg["active"] += 1
+        elif status in ("signing", "sent"):
+            agg["pending"] += 1
+
+    ordered = sorted(
+        per_supplier.items(), key=lambda kv: kv[1]["contracts"], reverse=True
+    )[:50]
+
     suppliers = []
-    for row in supplier_rows:
-        company = row[0]
-        contract_count = row[1]
-        total_value = float(row[2])
-        active_count = row[3]
-        pending_count = row[4]
+    for company, agg in ordered:
+        contract_count = agg["contracts"]
+        total_value = agg["value"]
+        active_count = agg["active"]
+        pending_count = agg["pending"]
 
         # Obligations for this supplier
-        obligation_stats = (
+        obl_rows = (
             await db.execute(
-                select(
-                    func.count().label("total"),
-                    func.count(
-                        func.case((Obligation.status == "completed", 1))
-                    ).label("completed"),
-                    func.count(
-                        func.case(
-                            (
-                                Obligation.status.notin_(["completed", "cancelled"]),
-                                func.case(
-                                    (Obligation.due_date < date.today(), 1)
-                                ),
-                            )
-                        )
-                    ).label("overdue"),
-                )
+                select(Obligation.status, Obligation.due_date)
                 .join(Agreement, Agreement.id == Obligation.agreement_id)
                 .join(
                     ExternalParty,
@@ -102,7 +101,16 @@ async def supplier_intelligence(
                     ExternalParty.company_name == company,
                 )
             )
-        ).one()
+        ).all()
+        total_obl = len(obl_rows)
+        completed_obl = sum(1 for s, _ in obl_rows if s == "completed")
+        overdue_obl = sum(
+            1
+            for s, due in obl_rows
+            if s not in ("completed", "cancelled")
+            and due is not None
+            and due < date.today()
+        )
 
         # Renewals for this supplier
         renewal_count = (
@@ -128,9 +136,9 @@ async def supplier_intelligence(
             "active_contracts": active_count,
             "pending_contracts": pending_count,
             "obligations": {
-                "total": obligation_stats[0],
-                "completed": obligation_stats[1],
-                "overdue": obligation_stats[2],
+                "total": total_obl,
+                "completed": completed_obl,
+                "overdue": overdue_obl,
             },
             "renewals": renewal_count,
         })

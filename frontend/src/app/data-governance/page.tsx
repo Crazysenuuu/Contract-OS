@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   listRetentionPolicies,
   createRetentionPolicy,
@@ -55,6 +56,7 @@ const statusBadge: Record<string, string> = {
 
 export default function DataGovernancePage() {
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [policies, setPolicies] = useState<RetentionPolicy[]>([]);
   const [holds, setHolds] = useState<LegalHold[]>([]);
@@ -101,12 +103,9 @@ export default function DataGovernancePage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     queueMicrotask(() => load());
-  }, [token, load, router]);
+  }, [token, load]);
 
   const handleCreatePolicy = async () => {
     if (!token || !policyForm.name) return;
@@ -296,7 +295,7 @@ export default function DataGovernancePage() {
           ) : (
             <div className="bg-white shadow rounded-lg divide-y divide-gray-200">
               {policies.map((policy) => (
-                <div key={policy.id} className="p-4 flex items-start justify-between gap-4">
+                <div key={policy.id} data-testid={`policy-row-${policy.name}`} className="p-4 flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-gray-900">{policy.name}</span>
@@ -465,7 +464,7 @@ export default function DataGovernancePage() {
           ) : (
             <div className="bg-white shadow rounded-lg divide-y divide-gray-200">
               {erasures.map((erasure) => (
-                <div key={erasure.id} className="p-4 flex items-start justify-between gap-4">
+                <div key={erasure.id} data-testid={`erasure-row-${erasure.data_subject}`} className="p-4 flex items-start justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-gray-900">{erasure.data_subject}</span>
@@ -486,7 +485,10 @@ export default function DataGovernancePage() {
                       {erasure.completed_at && " (completed)"}
                     </p>
                   </div>
-                  {erasure.status === "pending" && (
+                  {/* Statuses that permit execution per the erasure lifecycle
+                      ('received' → 'under_review' → 'shredded'/'completed'/'denied').
+                      "pending" is not a status this backend ever sets. */}
+                  {(erasure.status === "received" || erasure.status === "under_review") && (
                     <button
                       onClick={() => handleExecuteErasure(erasure.id)}
                       disabled={busy}

@@ -58,6 +58,13 @@ class User(
         nullable=True,
     )
 
+    # E.164 phone for the SMS notification channel (spec §44). Optional —
+    # users without a registered number are simply skipped by SMS sends.
+    phone: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+
     mfa_enabled: Mapped[bool] = mapped_column(
         Boolean(),
         nullable=False,

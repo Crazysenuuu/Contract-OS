@@ -69,7 +69,11 @@ async function fillVisibleControls(page: Page) {
   }
 }
 
-test.describe.serial("New catalog types through the wizard", () => {
+// Each test below is fully independent: it performs its own login, opens its
+// own wizard session, and creates its own agreement. No test reads state
+// written by a sibling, so a failure never skips the others (the old
+// describe.serial wrapper cascaded "did not run" skips from one flaky test).
+test.describe("New catalog types through the wizard", () => {
   for (const t of NEW_TYPES) {
     test(`create agreement: ${t.name}`, async ({ page }) => {
       await sharedLogin(page);

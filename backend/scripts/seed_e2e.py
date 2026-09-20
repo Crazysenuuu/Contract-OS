@@ -25,6 +25,8 @@ E2E_EMAIL = "test@example.com"
 E2E_PASSWORD = "password123"
 E2E_ADMIN_EMAIL = "admin@example.com"
 E2E_ADMIN_PASSWORD = "password123"
+# Deterministic phone for SMS-channel verification (spec §44).
+E2E_PHONE = "+15551230000"
 
 
 async def seed_login_user() -> None:
@@ -57,6 +59,9 @@ async def _seed_user(
                 password_hash=hash_password(password),
                 status="active",
                 is_admin=is_admin,
+                # Deterministic phone so SMS-channel e2e tests (spec §44)
+                # can assert on gateway deliveries.
+                phone=E2E_PHONE,
             )
             db.add(user)
             await db.flush()
@@ -68,6 +73,8 @@ async def _seed_user(
             user.is_admin = is_admin
             if user.status != "active":
                 user.status = "active"
+            if not user.phone:
+                user.phone = E2E_PHONE
             print(f"  user {email} already exists (credentials refreshed)")
 
         membership = (
@@ -143,6 +150,9 @@ async def main() -> int:
         await seed_data.seed_extended_agreement_types(db)
         await seed_data.seed_catalog_agreement_types(db)
         await seed_data.seed_lifecycle(db)
+        # Jurisdictions feed the wizard's Governing-Law field (a required
+        # intake control); without them the creation flow cannot render it.
+        await seed_data.seed_jurisdictions(db)
         await db.commit()
     print("✅ e2e seed complete")
     return 0

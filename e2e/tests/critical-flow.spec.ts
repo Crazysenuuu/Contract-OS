@@ -29,7 +29,10 @@ async function clickIfVisible(page: Page, selector: string) {
   return false;
 }
 
-test.describe.serial("Critical Path", () => {
+// One self-contained lifecycle test split into ordered test.step phases —
+// steps share page state by design; no describe.serial wrapper is needed
+// (a single test failing skips nothing else).
+test.describe("Critical Path", () => {
   test("full agreement lifecycle", async ({ page }) => {
     await test.step("1. auth", async () => {
       await page.goto("/dashboard");

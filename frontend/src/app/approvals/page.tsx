@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 interface ApprovalItem {
   id: string;
@@ -32,6 +33,7 @@ const statusBadge: Record<string, string> = {
 
 export default function ApprovalsPage() {
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [items, setItems] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,9 +63,9 @@ export default function ApprovalsPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) { router.push("/login"); return; }
+    if (!token) return;
     load();
-  }, [token, router, load]);
+  }, [token, load]);
 
   const handleDecision = async (action: "approve" | "reject") => {
     if (!showDecisionModal || !token) return;

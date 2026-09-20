@@ -4,6 +4,7 @@ import { Suspense, useCallback } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   bulkImport,
   bulkAction,
@@ -24,6 +25,7 @@ interface BulkJob {
 function BulkPageContent() {
   const router = useRouter();
   const { token } = useAuth();
+  useRequireAuth();
   const [activeTab, setActiveTab] = useState<"import" | "export" | "actions" | "history">("import");
   const [jobs, setJobs] = useState<BulkJob[]>([]);
   const [loading, setLoading] = useState(false);
@@ -44,12 +46,9 @@ function BulkPageContent() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     queueMicrotask(() => loadJobs());
-  }, [token, loadJobs, router]);
+  }, [token, loadJobs]);
 
   const handleImport = async () => {
     if (!token || !csvContent.trim()) return;

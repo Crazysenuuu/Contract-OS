@@ -121,6 +121,17 @@ class Settings(BaseSettings):
     # (WebSocket + email still deliver) — never an error path.
     fcm_credentials_json: SecretStr | None = None
 
+    # SMS channel (spec §44: in-app, email, push, SMS, webhook). Generic
+    # HTTP SMS gateway: POST {base_url} with bearer auth and
+    # {"to", "from", "text"} — compatible with most provider bridges
+    # (Twilio proxy, Africa's Talking, local SMS gateways). When the base
+    # URL or key is unset the SMS channel degrades to a no-op, mirroring
+    # the push channel: a missing credential must never break the outbox.
+    sms_api_base_url: str | None = None
+    sms_api_key: SecretStr | None = None
+    sms_sender_id: str = "ContractOS"
+    sms_timeout_seconds: float = 10.0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

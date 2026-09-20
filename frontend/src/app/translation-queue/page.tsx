@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   getTranslationQueueStats,
   listTranslationQueue,
@@ -39,6 +40,7 @@ interface QueueItem {
 export default function TranslationQueuePage() {
   const router = useRouter();
   const { user, token } = useAuth();
+  useRequireAuth();
   const [stats, setStats] = useState<QueueStats | null>(null);
   const [items, setItems] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,12 +72,9 @@ export default function TranslationQueuePage() {
   }, [token, filterStatus, filterLanguage]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     queueMicrotask(() => loadData());
-  }, [token, filterStatus, filterLanguage, loadData, router]);
+  }, [token, filterStatus, filterLanguage, loadData]);
 
   const handleRetryFailed = async () => {
     if (!token) return;

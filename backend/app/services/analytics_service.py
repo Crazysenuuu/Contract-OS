@@ -25,7 +25,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import and_, cast, func, Float, Integer, select, Date
+from sqlalchemy import and_, cast, func, Float, Integer, literal, select, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agreement import Agreement, AgreementVersion
@@ -67,19 +67,24 @@ async def get_executive_analytics(
     volume_by_type = {str(row[0]): row[1] for row in type_rows}
 
     # --- Monthly creation trend (last 12 months) ---------------------------
+    # NOTE: group by the *expression* without a bind parameter — grouping by
+    # func.date_trunc("month", col) inlines "'month'" as a literal, whereas a
+    # bound literal makes asyncpg/Postgres treat SELECT and GROUP BY as
+    # different expressions (GroupingError at runtime).
     twelve_months_ago = datetime.now(timezone.utc) - timedelta(days=365)
+    month_trunc = func.date_trunc(literal("month"), Agreement.created_at)
     monthly_rows = (
         await db.execute(
             select(
-                func.date_trunc("month", Agreement.created_at).label("month"),
+                month_trunc.label("month"),
                 func.count(),
             )
             .where(
                 Agreement.organization_id == org_id,
                 Agreement.created_at >= twelve_months_ago,
             )
-            .group_by(func.date_trunc("month", Agreement.created_at))
-            .order_by(func.date_trunc("month", Agreement.created_at))
+            .group_by(month_trunc)
+            .order_by(month_trunc)
         )
     ).all()
     monthly_trend = [
@@ -285,50 +290,51 @@ async def get_financial_analytics(
     Returns committed spend, payment obligations, and value-by-type.
     """
 
-    # --- Total contract value across all agreements -------------------------
-    total_value = (
-        await db.scalar(
-            select(func.coalesce(func.sum(Agreement.contract_value), 0))
-            .where(
-                Agreement.organization_id == org_id,
-                Agreement.contract_value.is_not(None),
-            )
-        )
-    ) or 0
-
-    # --- Committed spend (active + executed) --------------------------------
-    committed_spend = (
-        await db.scalar(
-            select(func.coalesce(func.sum(Agreement.contract_value), 0))
-            .where(
-                Agreement.organization_id == org_id,
-                Agreement.status.in_(["active", "executed"]),
-                Agreement.contract_value.is_not(None),
-            )
-        )
-    ) or 0
-
-    # --- Average contract value by type -------------------------------------
-    avg_value_rows = (
+    # Contract value lives in the agreement's JSON data (`total_value` /
+    # `contract_value`), not a dedicated column — extract numerically in
+    # Python rather than relying on a SQL SUM over a nonexistent column.
+    status_data_rows = (
         await db.execute(
-            select(
-                Agreement.agreement_type_id,
-                func.avg(Agreement.contract_value),
-                func.count(),
+            select(Agreement.status, Agreement.data).where(
+                Agreement.organization_id == org_id
             )
-            .where(
-                Agreement.organization_id == org_id,
-                Agreement.contract_value.is_not(None),
-            )
-            .group_by(Agreement.agreement_type_id)
         )
     ).all()
+
+    def _value_of(data: dict | None) -> float:
+        raw = (data or {}).get("total_value") or (data or {}).get("contract_value")
+        if raw is None:
+            return 0.0
+        try:
+            return float(str(raw).replace(",", ""))
+        except (TypeError, ValueError):
+            return 0.0
+
+    all_values = [(_status, _data) for _status, _data in status_data_rows]
+    total_value = sum(_value_of(d) for _, d in all_values)
+    committed_spend = sum(
+        _value_of(d) for s, d in all_values if s in ("active", "executed")
+    )
+
+    # --- Average contract value by type -------------------------------------
+    type_data_rows = (
+        await db.execute(
+            select(Agreement.agreement_type_id, Agreement.data).where(
+                Agreement.organization_id == org_id
+            )
+        )
+    ).all()
+    type_values: dict[str, list[float]] = {}
+    for type_id, d in type_data_rows:
+        v = _value_of(d)
+        if v > 0:
+            type_values.setdefault(str(type_id), []).append(v)
     avg_value_by_type = {
-        str(row[0]): {
-            "average_value": round(float(row[1]), 2) if row[1] else 0,
-            "count": row[2],
+        type_id: {
+            "average_value": round(sum(vals) / len(vals), 2),
+            "count": len(vals),
         }
-        for row in avg_value_rows
+        for type_id, vals in type_values.items()
     }
 
     # --- Outstanding payment obligations ------------------------------------
@@ -369,27 +375,15 @@ async def get_financial_analytics(
     overdue_obligation_amount = sum(_safe_float(a) for a in overdue_amounts)
 
     # --- Value by status (risk exposure) ------------------------------------
-    value_by_status_rows = (
-        await db.execute(
-            select(
-                Agreement.status,
-                func.coalesce(func.sum(Agreement.contract_value), 0),
-                func.count(),
-            )
-            .where(
-                Agreement.organization_id == org_id,
-                Agreement.contract_value.is_not(None),
-            )
-            .group_by(Agreement.status)
-        )
-    ).all()
-    value_by_status = {
-        row[0]: {
-            "total_value": round(float(row[1]), 2),
-            "count": row[2],
-        }
-        for row in value_by_status_rows
-    }
+    value_by_status: dict[str, dict] = {}
+    for s, d in all_values:
+        v = _value_of(d)
+        if v > 0:
+            agg = value_by_status.setdefault(s, {"total_value": 0.0, "count": 0})
+            agg["total_value"] += v
+            agg["count"] += 1
+    for agg in value_by_status.values():
+        agg["total_value"] = round(agg["total_value"], 2)
 
     return {
         "total_contract_value": round(float(total_value), 2),
@@ -398,4 +392,182 @@ async def get_financial_analytics(
         "overdue_obligations": round(float(overdue_obligation_amount), 2),
         "average_value_by_type": avg_value_by_type,
         "value_by_status": value_by_status,
+        "financial_risks": await _financial_risk_indicators(db, org_id=org_id),
     }
+
+
+async def _financial_risk_indicators(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+) -> dict:
+    """Spec §85 — price escalation, penalty exposure, late-payment exposure."""
+    from app.models.document_intelligence import ExtractedClause
+
+    # Contracts with late-fee / penalty clauses
+    penalty_count = (
+        await db.scalar(
+            select(func.count(func.distinct(ExtractedClause.agreement_id)))
+            .select_from(ExtractedClause)
+            .join(Agreement, Agreement.id == ExtractedClause.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                ExtractedClause.clause_type.in_(["late_fee", "penalty", "liquidated_damage"]),
+            )
+        )
+    ) or 0
+
+    # Contracts with price escalation clauses
+    escalation_count = (
+        await db.scalar(
+            select(func.count(func.distinct(ExtractedClause.agreement_id)))
+            .select_from(ExtractedClause)
+            .join(Agreement, Agreement.id == ExtractedClause.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                ExtractedClause.clause_type.in_(["price_escalation", "annual_increase"]),
+            )
+        )
+    ) or 0
+
+    # Contracts with unlimited liability
+    unlimited_liability_count = (
+        await db.scalar(
+            select(func.count(func.distinct(ExtractedClause.agreement_id)))
+            .select_from(ExtractedClause)
+            .join(Agreement, Agreement.id == ExtractedClause.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                ExtractedClause.clause_type == "unlimited_liability",
+            )
+        )
+    ) or 0
+
+    return {
+        "contracts_with_penalties": penalty_count,
+        "contracts_with_price_escalation": escalation_count,
+        "contracts_with_unlimited_liability": unlimited_liability_count,
+    }
+
+
+async def get_supplier_performance(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+) -> dict:
+    """Supplier performance metrics (spec §84/86).
+
+    Per-supplier: obligation compliance rate, dispute count, renewal rate,
+    average risk score, total spend.
+    """
+    from app.models.agreement_access import AgreementParty
+    from app.models.external_party import ExternalParty
+    from app.models.obligation import Obligation
+    from app.models.renewal import ContractRenewal
+
+    supplier_rows = (
+        await db.execute(
+            select(
+                ExternalParty.company_name,
+                func.count(func.distinct(Agreement.id)).label("contracts"),
+                Agreement.data,
+            )
+            .join(Agreement, Agreement.id == ExternalParty.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                ExternalParty.company_name.is_not(None),
+                ExternalParty.company_name != "",
+            )
+            .group_by(ExternalParty.company_name, Agreement.id)
+        )
+    ).all()
+
+    # Aggregate spend in Python (contract value lives in JSON data).
+    def _value_of(data: dict | None) -> float:
+        raw = (data or {}).get("total_value") or (data or {}).get("contract_value")
+        if raw is None:
+            return 0.0
+        try:
+            return float(str(raw).replace(",", ""))
+        except (TypeError, ValueError):
+            return 0.0
+
+    per_supplier: dict[str, dict] = {}
+    for company, contracts, data in supplier_rows:
+        agg = per_supplier.setdefault(company, {"contracts": 0, "spend": 0.0})
+        agg["contracts"] += 1
+        agg["spend"] += _value_of(data)
+
+    supplier_rows = [
+        (company, agg["contracts"], agg["spend"])
+        for company, agg in sorted(
+            per_supplier.items(), key=lambda kv: kv[1]["contracts"], reverse=True
+        )[:20]
+    ]
+
+    suppliers = []
+    for row in supplier_rows:
+        company = row[0]
+        contracts = row[1]
+        spend = row[2]
+
+        # Obligation compliance
+        total_obl = (
+            await db.scalar(
+                select(func.count())
+                .select_from(Obligation)
+                .join(Agreement, Agreement.id == Obligation.agreement_id)
+                .join(ExternalParty, ExternalParty.agreement_id == Agreement.id)
+                .where(
+                    Agreement.organization_id == org_id,
+                    ExternalParty.company_name == company,
+                )
+            )
+        ) or 0
+        completed_obl = (
+            await db.scalar(
+                select(func.count())
+                .select_from(Obligation)
+                .join(Agreement, Agreement.id == Obligation.agreement_id)
+                .join(ExternalParty, ExternalParty.agreement_id == Agreement.id)
+                .where(
+                    Agreement.organization_id == org_id,
+                    ExternalParty.company_name == company,
+                    Obligation.status == "completed",
+                )
+            )
+        ) or 0
+
+        # Renewal count
+        renewal_count = (
+            await db.scalar(
+                select(func.count())
+                .select_from(ContractRenewal)
+                .join(Agreement, Agreement.id == ContractRenewal.agreement_id)
+                .join(ExternalParty, ExternalParty.agreement_id == Agreement.id)
+                .where(
+                    Agreement.organization_id == org_id,
+                    ExternalParty.company_name == company,
+                )
+            )
+        ) or 0
+
+        compliance_rate = (
+            round((completed_obl / total_obl) * 100, 1) if total_obl > 0 else None
+        )
+        renewal_rate = (
+            round((renewal_count / contracts) * 100, 1) if contracts > 0 else 0
+        )
+
+        suppliers.append({
+            "company_name": company,
+            "contracts": contracts,
+            "total_spend": round(spend, 2),
+            "obligation_compliance_rate": compliance_rate,
+            "total_obligations": total_obl,
+            "completed_obligations": completed_obl,
+            "renewal_count": renewal_count,
+            "renewal_rate": renewal_rate,
+        })
+
+    return {"suppliers": suppliers, "total": len(suppliers)}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   getMyOrganization,
   getTenant,
@@ -45,6 +46,7 @@ interface Theme {
 
 export default function OrganizationSettingsPage() {
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [org, setOrg] = useState<Organization | null>(null);
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
@@ -76,12 +78,9 @@ export default function OrganizationSettingsPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     queueMicrotask(() => load());
-  }, [token, load, router]);
+  }, [token, load]);
 
   const usagePercent = (used?: number, max?: number) => {
     if (!used || !max || max === 0) return null;

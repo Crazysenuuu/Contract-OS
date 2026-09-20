@@ -43,7 +43,12 @@ const selectClasses =
   "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white";
 
 // Types the wizard understands as input[type=...] attributes.
+// "text" (and any unrecognised type) falls back to a plain text input via
+// the default branch below — previously a plain text question rendered its
+// label with NO input, making required fields impossible to fill.
 const nativeInputTypes: Record<string, string> = {
+  text: "text",
+  date: "date",
   email: "email",
   phone: "tel",
   money: "number",

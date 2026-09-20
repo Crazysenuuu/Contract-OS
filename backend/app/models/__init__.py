@@ -144,6 +144,7 @@ from app.models.billing import (
     InvoiceLine,
 )
 from app.models.event_outbox import OutboxEvent
+from app.models.api_key import APIKey
 from app.models.saved_search import SavedSearch
 from app.models.user_task import (
     UserTask,
@@ -379,4 +380,5 @@ __all__ = [
     "IntelligencePromptVersion",
     "IntelligenceEvaluationRun",
     "IntelligenceAccessCheck",
+    "APIKey",
 ]

@@ -8,6 +8,8 @@ import {
   getQueueStats,
   getPerformanceStats,
   getLiveMetrics,
+  getSecurityScan,
+  type SecurityScanResult,
 } from "@/lib/api";
 
 interface Summary {
@@ -64,6 +66,7 @@ export default function ObservabilityPage() {
   const [queue, setQueue] = useState<QueueStats | null>(null);
   const [perf, setPerf] = useState<PerfStats | null>(null);
   const [live, setLive] = useState<LiveMetrics | null>(null);
+  const [securityScan, setSecurityScan] = useState<SecurityScanResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -93,13 +96,21 @@ export default function ObservabilityPage() {
     }
   }, [token]);
 
+  const loadSecurityScan = useCallback(async () => {
+    if (!token) return;
+    getSecurityScan(token)
+      .then(setSecurityScan)
+      .catch(() => {});
+  }, [token]);
+
   useEffect(() => {
     queueMicrotask(() => load());
+    queueMicrotask(() => loadSecurityScan());
     timerRef.current = setInterval(load, 30000);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [load]);
+  }, [load, loadSecurityScan]);
 
   const errorRate =
     summary && summary.requests.total > 0
@@ -269,6 +280,68 @@ export default function ObservabilityPage() {
               </div>
             )}
           </div>
+
+          {/* Security monitoring (spec §95) */}
+          {securityScan && (
+            <div className="bg-white shadow rounded-lg p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs text-gray-500 uppercase tracking-wide">
+                  Security Monitoring
+                </div>
+                <button
+                  onClick={loadSecurityScan}
+                  className="text-xs text-brand-600 hover:text-brand-800"
+                >
+                  Re-scan
+                </button>
+              </div>
+              {securityScan.total === 0 ? (
+                <div className="text-sm text-gray-500">
+                  No anomalies detected — all clear.
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-4 mb-3">
+                    <span className="text-sm text-red-600 font-medium">
+                      {securityScan.by_severity.high} high
+                    </span>
+                    <span className="text-sm text-amber-600 font-medium">
+                      {securityScan.by_severity.medium} medium
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      {securityScan.total} total findings
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {securityScan.findings.slice(0, 20).map((f, i) => (
+                      <div
+                        key={i}
+                        className="flex items-start justify-between gap-3 p-2 border border-gray-100 rounded"
+                      >
+                        <div>
+                          <div className="text-xs font-medium text-gray-800">
+                            {f.category.replace(/_/g, " ")}
+                          </div>
+                          <div className="text-xs text-gray-500">{f.description}</div>
+                        </div>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                            f.severity === "high"
+                              ? "bg-red-100 text-red-700"
+                              : f.severity === "medium"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {f.severity}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

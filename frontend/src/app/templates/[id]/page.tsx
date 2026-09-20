@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   getTemplateById,
   listTemplateVersions,
@@ -24,6 +25,7 @@ interface TemplateVersion {
 export default function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [template, setTemplate] = useState<TemplateDetail | null>(null);
   const [versions, setVersions] = useState<TemplateVersion[]>([]);
@@ -32,7 +34,7 @@ export default function TemplateDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) { router.push("/login"); return; }
+    if (!token) return;
     if (!id) return;
     Promise.all([
       getTemplateById(token, id).catch(() => null),

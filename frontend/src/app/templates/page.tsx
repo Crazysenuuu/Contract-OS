@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { listTemplatesPage, type TemplateDetail } from "@/lib/api";
 
 const statusBadge: Record<string, string> = {
@@ -14,6 +15,7 @@ const statusBadge: Record<string, string> = {
 
 export default function TemplatesPage() {
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [templates, setTemplates] = useState<TemplateDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,9 +34,9 @@ export default function TemplatesPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) { router.push("/login"); return; }
+    if (!token) return;
     void Promise.resolve().then(load);
-  }, [token, router, load]);
+  }, [token, load]);
 
   const filtered = templates.filter(
     (t) =>

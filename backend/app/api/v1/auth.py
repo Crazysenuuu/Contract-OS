@@ -192,12 +192,24 @@ async def login(
     if user is None or not verify_password(
         data.password, user.password_hash
     ):
+        # Known user but wrong password → attribute the failure to their
+        # org's audit chain so security monitoring can correlate it.
+        failed_tenant = None
+        if user is not None:
+            failed_tenant = await db.scalar(
+                select(OrganizationMember.organization_id).where(
+                    OrganizationMember.user_id == user.id,
+                    OrganizationMember.status == "active",
+                ).limit(1)
+            )
         await record_login_attempt(
             db,
             email=data.email,
             ip_address=ip,
             success=False,
             reason="invalid_credentials",
+            tenant_id=failed_tenant,
+            actor_id=user.id if user else None,
         )
         # Commit BEFORE raising — the 401 would otherwise roll back the
         # attempt record, defeating the rate limiter.
@@ -264,7 +276,13 @@ async def login(
         user_agent=request.headers.get("user-agent"),
     )
     await record_login_attempt(
-        db, email=data.email, ip_address=ip, success=True, reason="ok"
+        db,
+        email=data.email,
+        ip_address=ip,
+        success=True,
+        reason="ok",
+        tenant_id=org_id,
+        actor_id=user.id,
     )
 
     return TokenResponse(

@@ -4,6 +4,7 @@ import { Suspense, useCallback } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   listClauseLibrary,
   getClauseStats,
@@ -30,6 +31,7 @@ interface ClauseStats {
 function ClauseLibraryContent() {
   const router = useRouter();
   const { token } = useAuth();
+  useRequireAuth();
   const [clauses, setClauses] = useState<LibraryClause[]>([]);
   const [stats, setStats] = useState<ClauseStats | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("");
@@ -63,10 +65,7 @@ function ClauseLibraryContent() {
   }, [token, selectedCategory]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     // Defer so the effect body never triggers a synchronous setState cascade
     // (loadData ends with setLoading in a finally block).
     queueMicrotask(() => loadData());

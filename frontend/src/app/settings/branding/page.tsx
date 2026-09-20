@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   getTenant,
   createTenant,
@@ -14,6 +15,7 @@ import {
 export default function BrandingPage() {
   const router = useRouter();
   const { token } = useAuth();
+  useRequireAuth();
   type TenantInfo = Awaited<ReturnType<typeof getTenant>>;
   type LimitsInfo = Awaited<ReturnType<typeof getTenantLimits>>;
   interface BrandingInfo {
@@ -57,13 +59,13 @@ export default function BrandingPage() {
     }
   }, [token]);
 
-  useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-    queueMicrotask(() => loadData());
-  }, [token, loadData, router]);
+  useEffect(
+    () => {
+      if (!token) return;
+      queueMicrotask(() => loadData());
+    },
+    [token, loadData]
+  );
 
   const handleCreateTenant = async () => {
     if (!token || !slug.trim()) return;

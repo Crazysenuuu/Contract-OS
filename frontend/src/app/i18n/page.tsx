@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useLanguage, LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 interface Language {
@@ -30,6 +31,7 @@ interface GlossaryTerm {
 export default function I18nPage() {
   const router = useRouter();
   const { token } = useAuth();
+  useRequireAuth();
   const { language, setLanguage } = useLanguage();
   const [languages, setLanguages] = useState<Language[]>([]);
   const [glossary, setGlossary] = useState<GlossaryTerm[]>([]);
@@ -53,12 +55,9 @@ export default function I18nPage() {
   }, [language]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     void Promise.resolve().then(loadData);
-  }, [token, router, loadData]);
+  }, [token, loadData]);
 
   const getDirectionIcon = (dir: string) => (dir === "rtl" ? "←" : "→");
 

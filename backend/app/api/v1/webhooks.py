@@ -17,6 +17,7 @@ from app.dependencies.tenant import get_current_organization_id
 from app.dependencies.rbac import require_permission
 from app.domain.agreement_states import PRE_EXECUTION_STATES
 from app.models.user import User
+from app.services.webhook_guard import WebhookUrlError
 from app.services.webhook_service import WebhookService, WEBHOOK_EVENTS
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
@@ -109,16 +110,21 @@ async def create_webhook(
 ):
     """Create a new webhook endpoint."""
     service = WebhookService(db)
-    endpoint = await service.register_endpoint(
-        organization_id=org_id,
-        url=data.url,
-        description=data.description,
-        events=data.events,
-        headers=data.headers,
-        secret=data.secret,
-        retry_count=data.retry_count,
-        timeout_seconds=data.timeout_seconds,
-    )
+    try:
+        endpoint = await service.register_endpoint(
+            organization_id=org_id,
+            url=data.url,
+            description=data.description,
+            events=data.events,
+            headers=data.headers,
+            secret=data.secret,
+            retry_count=data.retry_count,
+            timeout_seconds=data.timeout_seconds,
+        )
+    except WebhookUrlError as exc:
+        # SSRF/transport validation rejection is a client error, not a
+        # server fault — return 400 with the reason, never a 500.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()
 
     return WebhookResponse(
@@ -365,7 +371,6 @@ async def retry_pending_webhooks(
     )
     deliveries = result.scalars().all()
 
-    from app.services.webhook_service import WebhookService
     service = WebhookService(db)
 
     retried = 0

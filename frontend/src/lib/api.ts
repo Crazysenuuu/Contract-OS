@@ -1,5 +1,166 @@
 const API_BASE = "/api/v1";
 
+// ---------------------------------------------------------------------------
+// Session storage (spec §7/§34: 15-minute access tokens + rotating refresh
+// tokens). The web app previously stored only the access token, so every
+// session hard-died after 15 minutes mid-use. This mirrors the mobile
+// auth_interceptor contract: on a 401, refresh once (single-flight —
+// concurrent 401s share one refresh call), replay the original request with
+// the new access token, and only sign the user out when the refresh itself
+// fails (refresh token expired/revoked).
+// ---------------------------------------------------------------------------
+
+export interface SessionTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
+/** Storage abstraction so the module works in node-test environments. */
+export interface SessionStore {
+  getTokens(): SessionTokens | null;
+  setTokens(tokens: SessionTokens): void;
+  clear(): void;
+}
+
+const LOCAL_STORAGE_KEY_ACCESS = "token";
+const LOCAL_STORAGE_KEY_REFRESH = "refresh_token";
+
+function browserSessionStore(): SessionStore | null {
+  const ls = (globalThis as { localStorage?: Storage }).localStorage;
+  if (!ls || typeof ls.getItem !== "function") return null;
+  return {
+    getTokens(): SessionTokens | null {
+      const accessToken = ls.getItem(LOCAL_STORAGE_KEY_ACCESS);
+      if (!accessToken) return null;
+      return {
+        accessToken,
+        refreshToken: ls.getItem(LOCAL_STORAGE_KEY_REFRESH) ?? "",
+      };
+    },
+    setTokens(tokens: SessionTokens): void {
+      ls.setItem(LOCAL_STORAGE_KEY_ACCESS, tokens.accessToken);
+      if (tokens.refreshToken) {
+        ls.setItem(LOCAL_STORAGE_KEY_REFRESH, tokens.refreshToken);
+      }
+    },
+    clear(): void {
+      ls.removeItem(LOCAL_STORAGE_KEY_ACCESS);
+      ls.removeItem(LOCAL_STORAGE_KEY_REFRESH);
+    },
+  };
+}
+
+let activeStore: SessionStore | null = browserSessionStore();
+let onSessionExpired: (() => void) | null = null;
+
+/** Swap the backing store (tests, embedded contexts). Pass null to detach. */
+export function setSessionStore(store: SessionStore | null): void {
+  activeStore = store;
+}
+
+/** Register the callback fired when the session cannot be refreshed. */
+export function setSessionExpiredHandler(handler: (() => void) | null): void {
+  onSessionExpired = handler;
+}
+
+export function currentSessionTokens(): SessionTokens | null {
+  return activeStore?.getTokens() ?? null;
+}
+
+export function persistSessionTokens(tokens: SessionTokens): void {
+  activeStore?.setTokens(tokens);
+}
+
+export function clearSessionTokens(): void {
+  activeStore?.clear();
+}
+
+interface TokenPairResponse {
+  access_token: string;
+  refresh_token?: string | null;
+  user_id: string;
+}
+
+function storeTokenPair(response: TokenPairResponse): string {
+  const tokens = currentSessionTokens();
+  persistSessionTokens({
+    accessToken: response.access_token,
+    // The backend rotates refresh tokens on every /auth/refresh; only
+    // overwrite when a new one was actually issued.
+    refreshToken: response.refresh_token || tokens?.refreshToken || "",
+  });
+  for (const listener of Array.from(tokensRotatedListeners)) {
+    try {
+      listener(response.access_token);
+    } catch {
+      // A broken listener must not break the request that rotated tokens.
+    }
+  }
+  return response.access_token;
+}
+
+type TokensRotatedListener = (accessToken: string) => void;
+
+const tokensRotatedListeners = new Set<TokensRotatedListener>();
+
+/**
+ * Subscribe to access-token rotations (login and background refreshes).
+ * Returns an unsubscribe function. lets React state stay in sync with the
+ * storage-backed session without prop drilling.
+ */
+export function onTokensRotated(
+  listener: TokensRotatedListener
+): () => void {
+  tokensRotatedListeners.add(listener);
+  return () => {
+    tokensRotatedListeners.delete(listener);
+  };
+}
+
+let refreshInFlight: Promise<string> | null = null;
+
+/**
+ * Exchange the stored refresh token for a fresh token pair. Concurrent
+ * callers share one in-flight request (single-flight) so N simultaneous 401s
+ * produce exactly one refresh and never burn rotation nonces.
+ */
+async function refreshSession(): Promise<string> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const tokens = currentSessionTokens();
+    if (!tokens?.refreshToken) {
+      throw new Error("no_refresh_token");
+    }
+    try {
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: tokens.refreshToken }),
+      });
+      if (!response.ok) {
+        throw new Error(`refresh failed: ${response.status}`);
+      }
+      const pair = (await response.json()) as TokenPairResponse;
+      return storeTokenPair(pair);
+    } catch (err) {
+      // Refresh failed — the session is unrecoverable. Clear credentials and
+      // let the app react (redirect to login, show a toast, etc.).
+      clearSessionTokens();
+      try {
+        onSessionExpired?.();
+      } catch {
+        // A broken handler must not mask the original error.
+      }
+      throw err;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
 // Legacy exported client (settings/alerting page composes URLs against the API)
 export const apiClient = { baseUrl: "" };
 
@@ -9,10 +170,10 @@ interface ApiOptions {
   token?: string;
 }
 
-async function apiRequest<T>(
+async function apiRequestOnce<T>(
   endpoint: string,
-  options: ApiOptions = {}
-): Promise<T> {
+  options: ApiOptions
+): Promise<{ ok: boolean; status: number; payload: T | null; error: unknown }> {
   const { method = "GET", body, token } = options;
 
   const headers: Record<string, string> = {
@@ -31,15 +192,48 @@ async function apiRequest<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || `API error: ${response.status}`);
+    return {
+      ok: false,
+      status: response.status,
+      payload: null,
+      error: new Error(error.detail || `API error: ${response.status}`),
+    };
   }
 
   const contentType = response.headers.get("content-type");
   if (contentType?.includes("application/json")) {
-    return response.json();
+    return { ok: true, status: response.status, payload: await response.json(), error: null };
   }
 
-  return response as unknown as T;
+  return { ok: true, status: response.status, payload: response as unknown as T, error: null };
+}
+
+async function apiRequest<T>(
+  endpoint: string,
+  options: ApiOptions = {}
+): Promise<T> {
+  let result = await apiRequestOnce<T>(endpoint, options);
+
+  // Access tokens are short-lived (15 minutes). A 401 on an authenticated
+  // call means the token expired — refresh once and replay the request
+  // before surfacing an error to the caller.
+  if (!result.ok && result.status === 401 && options.token) {
+    try {
+      const freshAccessToken = await refreshSession();
+      result = await apiRequestOnce<T>(endpoint, {
+        ...options,
+        token: freshAccessToken,
+      });
+    } catch {
+      // Fall through: return the original 401-shaped error below. The
+      // session-expired handler has already been notified.
+    }
+  }
+
+  if (!result.ok) {
+    throw result.error;
+  }
+  return result.payload as T;
 }
 
 // Auth
@@ -48,17 +242,23 @@ export async function register(data: {
   name: string;
   password: string;
 }) {
-  return apiRequest<{ access_token: string; user_id: string }>(
-    "/auth/register",
-    { method: "POST", body: data }
-  );
+  const result = await apiRequest<{
+    access_token: string;
+    refresh_token?: string | null;
+    user_id: string;
+  }>("/auth/register", { method: "POST", body: data });
+  storeTokenPair(result);
+  return result;
 }
 
 export async function login(data: { email: string; password: string }) {
-  return apiRequest<{ access_token: string; user_id: string }>(
-    "/auth/login",
-    { method: "POST", body: data }
-  );
+  const result = await apiRequest<{
+    access_token: string;
+    refresh_token?: string | null;
+    user_id: string;
+  }>("/auth/login", { method: "POST", body: data });
+  storeTokenPair(result);
+  return result;
 }
 
 export async function verifyEmail(token: string) {
@@ -1062,6 +1262,7 @@ export async function getNotificationPreferences(token: string) {
     email_workflow_transition: boolean;
     email_compliance_violation: boolean;
     email_obligation_reminder: boolean;
+    sms_enabled: boolean;
     digest_enabled: boolean;
     digest_frequency: string;
   }>("/notification-preferences", { token });
@@ -3336,5 +3537,52 @@ export interface SupplierIntelligence {
 }
 
 export async function getSupplierIntelligence(token: string): Promise<SupplierIntelligence> {
-  return apiRequest<SupplierIntelligence>('/phase4/supplier-risk/aggregate', { token });
+  return apiRequest<SupplierIntelligence>('/analytics/supplier-performance', { token });
+}
+
+// ─── Security monitoring (spec §95) ──────────────────────────────────────
+
+export interface SecurityScanResult {
+  findings: {
+    category: string;
+    severity: string;
+    description: string;
+    actor_id: string | null;
+    evidence: Record<string, unknown>;
+    detected_at: string;
+  }[];
+  total: number;
+  by_severity: { critical: number; high: number; medium: number; low: number };
+}
+
+export async function getSecurityScan(token: string): Promise<SecurityScanResult> {
+  return apiRequest<SecurityScanResult>('/security/scan', { token });
+}
+
+// ─── API keys (spec §7) ──────────────────────────────────────────────
+
+export interface APIKeyRecord {
+  id: string;
+  name: string;
+  key_prefix: string;
+  scopes: string | null;
+  is_active: boolean;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export async function listApiKeys(token: string): Promise<APIKeyRecord[]> {
+  return apiRequest<APIKeyRecord[]>('/api-keys', { token });
+}
+
+export async function createApiKey(
+  token: string,
+  data: { name: string; scopes?: string; expires_days?: number }
+): Promise<APIKeyRecord & { raw_key: string }> {
+  return apiRequest('/api-keys', { method: 'POST', body: data, token });
+}
+
+export async function revokeApiKey(token: string, keyId: string): Promise<void> {
+  return apiRequest(`/api-keys/${keyId}`, { method: 'DELETE', token });
 }

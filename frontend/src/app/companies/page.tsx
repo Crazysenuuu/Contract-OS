@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 interface ExternalParty {
   id: string;
@@ -19,6 +20,7 @@ interface PagedResult<T> { items: T[]; total: number; }
 
 export default function CompaniesPage() {
   const { token } = useAuth();
+  useRequireAuth();
   const router = useRouter();
   const [items, setItems] = useState<ExternalParty[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,9 +59,9 @@ export default function CompaniesPage() {
   }, [token, page, debouncedSearch]);
 
   useEffect(() => {
-    if (!token) { router.push("/login"); return; }
+    if (!token) return;
     load();
-  }, [token, router, load]);
+  }, [token, load]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 

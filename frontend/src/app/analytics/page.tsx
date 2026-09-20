@@ -11,6 +11,7 @@ import {
   type FinancialAnalytics,
   type ComplianceSummary,
 } from "@/lib/api";
+import { getSupplierIntelligence, type SupplierIntelligence } from "@/lib/api";
 
 const statusColorMap: Record<string, string> = {
   draft: "bg-gray-500",
@@ -87,24 +88,29 @@ export default function AnalyticsPage() {
   const [executive, setExecutive] = useState<ExecutiveAnalytics | null>(null);
   const [financial, setFinancial] = useState<FinancialAnalytics | null>(null);
   const [compliance, setCompliance] = useState<ComplianceSummary | null>(null);
+  const [suppliers, setSuppliers] = useState<SupplierIntelligence | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
-    setLoading(true);
-    Promise.all([
-      getExecutiveAnalytics(token).catch(() => null),
-      getFinancialAnalytics(token).catch(() => null),
-      getComplianceSummary(token).catch(() => null),
-    ])
-      .then(([e, f, c]) => {
-        setExecutive(e);
-        setFinancial(f);
-        setCompliance(c);
-      })
-      .catch((err) => setError(String(err)))
-      .finally(() => setLoading(false));
+    queueMicrotask(() => {
+      setLoading(true);
+      Promise.all([
+        getExecutiveAnalytics(token).catch(() => null),
+        getFinancialAnalytics(token).catch(() => null),
+        getComplianceSummary(token).catch(() => null),
+        getSupplierIntelligence(token).catch(() => null),
+      ])
+        .then(([e, f, c, s]) => {
+          setExecutive(e);
+          setFinancial(f);
+          setCompliance(c);
+          setSuppliers(s);
+        })
+        .catch((err) => setError(String(err)))
+        .finally(() => setLoading(false));
+    });
   }, [token]);
 
   if (loading) {
@@ -345,6 +351,62 @@ export default function AnalyticsPage() {
               <p className="text-sm text-gray-500">No value data available</p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ─── Supplier Intelligence (spec §86) ─── */}
+      {suppliers && suppliers.suppliers.length > 0 && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">
+            Supplier Intelligence
+            <span className="ml-2 text-sm font-normal text-gray-400">
+              {suppliers.total_suppliers} suppliers · contracts, spend, compliance &amp; renewals
+            </span>
+          </h2>
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Contracts</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Spend</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Obligations</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Compliance</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Renewals</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {suppliers.suppliers.map((s) => (
+                <tr key={s.company_name}>
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{s.company_name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 text-right">
+                    {s.contract_count} ({s.active_contracts} active)
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 text-right">
+                    ${s.total_value.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 text-right">
+                    {s.obligations.completed}/{s.obligations.total}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right">
+                    {s.obligations.total === 0 ? (
+                      <span className="text-gray-400">—</span>
+                    ) : (
+                      <span className={
+                        (s.obligations.completed / s.obligations.total) >= 0.8
+                          ? "text-emerald-600 font-medium"
+                          : (s.obligations.completed / s.obligations.total) >= 0.5
+                          ? "text-amber-600 font-medium"
+                          : "text-red-600 font-medium"
+                      }>
+                        {Math.round((s.obligations.completed / s.obligations.total) * 100)}%
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 text-right">{s.renewals}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

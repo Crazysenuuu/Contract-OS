@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import {
   listLegalEntities,
   listSignatories,
@@ -38,6 +39,7 @@ interface SigningReport {
 export default function SignatureAuthorityPage() {
   const router = useRouter();
   const { token } = useAuth();
+  useRequireAuth();
   const [entities, setEntities] = useState<LegalEntity[]>([]);
   const [selectedEntity, setSelectedEntity] = useState<string>("");
   const [signatories, setSignatories] = useState<Signatory[]>([]);
@@ -86,12 +88,9 @@ export default function SignatureAuthorityPage() {
   }, [token, selectedEntity]);
 
   useEffect(() => {
-    if (!token) {
-      router.push("/login");
-      return;
-    }
+    if (!token) return;
     queueMicrotask(() => loadEntities());
-  }, [token, loadEntities, router]);
+  }, [token, loadEntities]);
 
   useEffect(() => {
     if (selectedEntity && token) {

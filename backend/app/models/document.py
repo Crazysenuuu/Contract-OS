@@ -37,13 +37,43 @@ def _utcnow() -> datetime:
 
 
 class DocumentClassification(str):
-    """Classification ladder for data-sensitivity controls (spec 1.22 / 56)."""
+    """Classification ladder for data-sensitivity controls (spec 1.22 / 56).
 
+    Two orthogonal axes:
+    - Purpose: LEGAL_RECORD, EXECUTION_EVIDENCE, SUPPORTING_DOCUMENT
+    - Sensitivity: PUBLIC, INTERNAL, CONFIDENTIAL, HIGHLY_CONFIDENTIAL, RESTRICTED
+
+    A document carries *both* — e.g. a signed NDA is LEGAL_RECORD + CONFIDENTIAL.
+    """
+
+    # Purpose classifications
     LEGAL_RECORD = "LEGAL_RECORD"
     EXECUTION_EVIDENCE = "EXECUTION_EVIDENCE"
     SUPPORTING_DOCUMENT = "SUPPORTING_DOCUMENT"
+
+    # Sensitivity classifications (spec §56)
+    PUBLIC = "PUBLIC"
+    INTERNAL = "INTERNAL"
     CONFIDENTIAL = "CONFIDENTIAL"
+    HIGHLY_CONFIDENTIAL = "HIGHLY_CONFIDENTIAL"
+    RESTRICTED = "RESTRICTED"
+
+    # Legacy aliases
     PRIVATE = "PRIVATE"
+
+    @classmethod
+    def sensitivity_levels(cls) -> list[str]:
+        """Ordered sensitivity levels from least to most restrictive."""
+        return [cls.PUBLIC, cls.INTERNAL, cls.CONFIDENTIAL, cls.HIGHLY_CONFIDENTIAL, cls.RESTRICTED]
+
+    @classmethod
+    def is_at_least(cls, actual: str | None, required: str) -> bool:
+        """True if *actual* sensitivity >= *required*."""
+        levels = cls.sensitivity_levels()
+        try:
+            return levels.index(actual or cls.PUBLIC) >= levels.index(required)
+        except ValueError:
+            return False
 
 
 class DocumentStatus(str):

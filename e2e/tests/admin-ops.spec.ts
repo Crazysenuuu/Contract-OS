@@ -33,7 +33,9 @@ test.describe("Webhooks admin", () => {
   test("creates a webhook endpoint, lists it, then deletes it", async ({
     page,
   }) => {
-    const url = `https://hooks.example.com/e2e-${UNIQUE_SUFFIX()}`;
+    // example.com resolves publicly; hooks.example.com does not, and the
+    // backend's SSRF guard (correctly) rejects unresolvable webhook hosts.
+    const url = `https://example.com/hooks/e2e-${UNIQUE_SUFFIX()}`;
     await page.fill('input[placeholder="https://example.com/hooks/agreements"]', url);
 
     await page.getByRole("button", { name: "Create webhook" }).click();
@@ -75,13 +77,16 @@ test.describe("Feature flags admin (admin-only)", () => {
     await expect(
       page.getByRole("heading", { name: "Feature Flags" })
     ).toBeVisible();
+    // exact: true — the substring variant also matches
+    // "No flags enabled for your user." (strict-mode violation).
     await expect(
-      page.getByText("Enabled for you", { exact: false })
+      page.getByText("Enabled for you", { exact: true })
     ).toBeVisible();
 
-    // The flags list renders either flags or the empty-state message.
+    // The flags list renders the seeded flags (a .or("main") assertion is a
+    // strict-mode trap: main always exists, so both branches match at once).
     await expect(
-      page.getByText("No flags defined yet.").or(page.locator("main"))
+      page.getByTestId("flag-row-compliance_engine")
     ).toBeVisible();
   });
 
@@ -100,20 +105,19 @@ test.describe("Feature flags admin (admin-only)", () => {
     const created = page.getByText(flagName).first();
     await expect(created).toBeVisible({ timeout: 10000 });
 
-    // Toggle it off via the row action.
-    const row = page
-      .locator("div")
-      .filter({ has: page.getByText(flagName) })
-      .filter({ has: page.getByRole("button", { name: /delete/i }) })
-      .last();
-    await row.getByRole("button", { name: "Enabled" }).first().click();
+    // Toggle it off via the row action. Stable testid avoids matching the
+    // outermost ancestor div (Playwright hasText gotcha).
+    const row = page.getByTestId(`flag-row-${flagName}`);
+    await row.getByRole("button", { name: "Enabled" }).click();
     await expect(row.getByRole("button", { name: "Disabled" })).toBeVisible({
       timeout: 10000,
     });
 
-    // Clean up.
+    // Clean up. Scope to the flag row: the toast ("Flag \"…\" deleted")
+    // echoes the name and outlives the row, so a page-wide count never
+    // reaches 0.
     await row.getByRole("button", { name: /delete/i }).click();
-    await expect(page.getByText(flagName)).toHaveCount(0, { timeout: 10000 });
+    await expect(row).toHaveCount(0, { timeout: 10000 });
   });
 });
 
@@ -146,7 +150,7 @@ test.describe("Data governance", () => {
     await page.fill('input[placeholder="Policy name"]', policyName);
     await page.getByRole("button", { name: "Create policy" }).click();
 
-    const row = page.locator("div").filter({ hasText: policyName }).first();
+    const row = page.getByTestId(`policy-row-${policyName}`);
     await expect(row).toBeVisible({ timeout: 10000 });
 
     // Pause it — button flips to "Resume".
@@ -186,8 +190,10 @@ test.describe("Data governance", () => {
     );
     await page.getByRole("button", { name: "Create request" }).click();
 
-    const row = page.locator("div").filter({ hasText: subject }).first();
+    const row = page.getByTestId(`erasure-row-${subject}`);
     await expect(row).toBeVisible({ timeout: 10000 });
-    await expect(row.getByText("pending")).toBeVisible();
+    // Initial backend status for an erasure request is "received"
+    // ('received' → 'under_review' → 'shredded'/'completed'/'denied').
+    await expect(row.getByText("received", { exact: true })).toBeVisible();
   });
 });

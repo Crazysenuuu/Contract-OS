@@ -364,6 +364,7 @@ export default function FeatureFlagsAdminPage() {
             flags.map((f) => (
               <div
                 key={f.name}
+                data-testid={`flag-row-${f.name}`}
                 className="p-4 flex items-center justify-between gap-4"
               >
                 <div className="min-w-0">
