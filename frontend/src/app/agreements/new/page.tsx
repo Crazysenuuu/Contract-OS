@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   createAgreement,
@@ -47,9 +47,10 @@ const severityColors: Record<string, string> = {
   info: "bg-gray-50 border-gray-300 text-gray-800",
 };
 
-export default function NewAgreementPage() {
+function NewAgreementForm() {
   const { token } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -78,11 +79,19 @@ export default function NewAgreementPage() {
       listAgreementTypes(token)
         .then((types) => {
           setAgreementTypes(types);
+          const initialTemplateKey = searchParams.get("template_key");
+          if (initialTemplateKey) {
+            const match = types.find(t => t.template_key === initialTemplateKey);
+            if (match) {
+              setSelectedType(match);
+              setTitle(match.name);
+            }
+          }
         })
         .catch(console.error)
         .finally(() => setLoading(false));
     }
-  }, [token]);
+  }, [token, searchParams]);
 
   useEffect(() => {
     if (!token || !selectedType) return;
@@ -541,5 +550,13 @@ export default function NewAgreementPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function NewAgreementPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-gray-500">Loading...</div>}>
+      <NewAgreementForm />
+    </Suspense>
   );
 }

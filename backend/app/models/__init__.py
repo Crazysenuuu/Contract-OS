@@ -388,3 +388,9 @@ __all__ = [
     "IntelligenceAccessCheck",
     "APIKey",
 ]
+from app.models.stored_object import StoredObject
+__all__.append('StoredObject')
+from app.models.signer_evidence import SignerEvidence
+from app.models.special_form import SpecialFormRecord
+__all__.append('SignerEvidence')
+__all__.append('SpecialFormRecord')

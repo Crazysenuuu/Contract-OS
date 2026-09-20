@@ -11,9 +11,14 @@ import {
   issueTerminationNotice,
   listAmendments,
   listTerminations,
+  getRenewalConfig,
+  updateRenewalConfig,
+  processRenewal,
+  giveRenewalNotice,
   type Amendment,
   type SignatureProgress,
   type Termination,
+  type RenewalConfig,
 } from "@/lib/api";
 
 interface Props {
@@ -61,6 +66,7 @@ export default function AgreementLifecyclePanel({ token, agreementId, status, on
   const [progress, setProgress] = useState<SignatureProgress | null>(null);
   const [amendments, setAmendments] = useState<Amendment[]>([]);
   const [terminations, setTerminations] = useState<Termination[]>([]);
+  const [renewal, setRenewal] = useState<RenewalConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -76,15 +82,33 @@ export default function AgreementLifecyclePanel({ token, agreementId, status, on
     cure_period_days: "14",
   });
 
+  const [showRenewal, setShowRenewal] = useState(false);
+  const [renewForm, setRenewForm] = useState({
+    is_renewable: false,
+    auto_renew: false,
+    renewal_term_months: 12,
+    notice_period_days: 30,
+  });
+
   const load = useCallback(async () => {
-    const [p, a, t] = await Promise.allSettled([
+    const [p, a, t, r] = await Promise.allSettled([
       getSignatureProgress(token, agreementId),
       listAmendments(token, agreementId),
       listTerminations(token, agreementId),
+      getRenewalConfig(token, agreementId),
     ]);
     if (p.status === "fulfilled") setProgress(p.value);
     if (a.status === "fulfilled") setAmendments(a.value);
     if (t.status === "fulfilled") setTerminations(t.value);
+    if (r.status === "fulfilled") {
+      setRenewal(r.value);
+      setRenewForm({
+        is_renewable: r.value.is_renewable,
+        auto_renew: r.value.auto_renew,
+        renewal_term_months: r.value.renewal_term_months || 12,
+        notice_period_days: r.value.notice_period_days || 30,
+      });
+    }
   }, [token, agreementId]);
 
   useEffect(() => {
@@ -127,6 +151,17 @@ export default function AgreementLifecyclePanel({ token, agreementId, status, on
         cure_period_days: termForm.cure_required && termForm.cure_period_days ? Number(termForm.cure_period_days) : undefined,
       });
       setShowTerminate(false);
+    });
+
+  const submitRenewalConfig = () =>
+    run(async () => {
+      await updateRenewalConfig(token, agreementId, {
+        is_renewable: renewForm.is_renewable,
+        auto_renew: renewForm.auto_renew,
+        renewal_term_months: renewForm.renewal_term_months,
+        notice_period_days: renewForm.notice_period_days,
+      });
+      setShowRenewal(false);
     });
 
   const inForce = IN_FORCE.has(status);
@@ -399,6 +434,122 @@ export default function AgreementLifecyclePanel({ token, agreementId, status, on
               );
             })}
           </ul>
+        )}
+      </section>
+
+      {/* Renewals */}
+      <section className="rounded-lg bg-white p-6 shadow">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-gray-900">Renewal Settings</h2>
+            <p className="text-xs text-gray-500">Configure auto-renewal, term length, and notice periods.</p>
+          </div>
+          {inForce && (
+            <button
+              onClick={() => setShowRenewal((v) => !v)}
+              className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+            >
+              {showRenewal ? "Close" : "Edit Configuration"}
+            </button>
+          )}
+        </div>
+
+        {showRenewal && (
+          <div className="mb-4 grid gap-3 rounded-md border border-blue-100 bg-blue-50/40 p-4 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={renewForm.is_renewable}
+                onChange={(e) => setRenewForm({ ...renewForm, is_renewable: e.target.checked })}
+              />
+              Is Renewable
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={renewForm.auto_renew}
+                onChange={(e) => setRenewForm({ ...renewForm, auto_renew: e.target.checked })}
+              />
+              Auto-Renew
+            </label>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Renewal Term (Months)</label>
+              <input
+                type="number"
+                min={1}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm w-full"
+                value={renewForm.renewal_term_months}
+                onChange={(e) => setRenewForm({ ...renewForm, renewal_term_months: Number(e.target.value) })}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Notice Period (Days)</label>
+              <input
+                type="number"
+                min={0}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm w-full"
+                value={renewForm.notice_period_days}
+                onChange={(e) => setRenewForm({ ...renewForm, notice_period_days: Number(e.target.value) })}
+              />
+            </div>
+            <div className="sm:col-span-2 mt-2">
+              <button
+                disabled={busy}
+                onClick={submitRenewalConfig}
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Save Configuration"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {renewal ? (
+          <div className="mt-4">
+            <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+              <div>
+                <span className="text-gray-500 block text-xs">Status</span>
+                <Badge value={renewal.status || "Unknown"} />
+              </div>
+              <div>
+                <span className="text-gray-500 block text-xs">Current Expiry</span>
+                <span className="font-medium">{renewal.current_expiry_date || "—"}</span>
+              </div>
+              <div>
+                <span className="text-gray-500 block text-xs">Next Renewal</span>
+                <span className="font-medium">{renewal.next_renewal_date || "—"}</span>
+              </div>
+              <div>
+                <span className="text-gray-500 block text-xs">Notice Given?</span>
+                <span className="font-medium">
+                  {renewal.notice_given ? `Yes (on ${renewal.notice_given_date})` : "No"}
+                </span>
+              </div>
+            </div>
+
+            {inForce && (
+              <div className="flex gap-2">
+                <button
+                  disabled={busy}
+                  onClick={() => run(() => processRenewal(token, agreementId, true))}
+                  className="rounded-md border border-green-600 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
+                >
+                  Force Renew Now
+                </button>
+                {!renewal.notice_given && (
+                  <button
+                    disabled={busy}
+                    onClick={() => run(() => giveRenewalNotice(token, agreementId))}
+                    className="rounded-md border border-red-600 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Give Non-Renewal Notice
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No renewal config.</p>
         )}
       </section>
     </div>

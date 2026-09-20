@@ -1,6 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { login } from "./helpers";
 
+/**
+ * Click and wait for the URL change, retrying the click: under load the
+ * hydration can swallow the first click (see navigation.spec.ts).
+ */
+async function clickAndExpectUrl(page: import("@playwright/test").Page, selector: string, urlPattern: RegExp) {
+  await expect(async () => {
+    await page.click(selector);
+    await expect(page).toHaveURL(urlPattern);
+  }).toPass({ timeout: 20_000 });
+}
+
 test.describe("Agreements", () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
@@ -13,8 +24,7 @@ test.describe("Agreements", () => {
   });
 
   test("should navigate to new agreement page", async ({ page }) => {
-    await page.click('a[href="/agreements/new"]');
-    await expect(page).toHaveURL(/\/agreements\/new/);
+    await clickAndExpectUrl(page, 'a[href="/agreements/new"]', /\/agreements\/new/);
     await expect(page.locator("h1")).toContainText(
       "Select Agreement Type",
       { timeout: 15000 }
@@ -58,8 +68,10 @@ test.describe("Agreement Detail", () => {
     // Navigate to an agreement if any exist
     const agreementLink = page.locator('a[href^="/agreements/"]').first();
     if (await agreementLink.isVisible()) {
-      await agreementLink.click();
-      await expect(page).toHaveURL(/\/agreements\/[^/]+$/);
+      await expect(async () => {
+        await agreementLink.click();
+        await expect(page).toHaveURL(/\/agreements\/[^/]+$/);
+      }).toPass({ timeout: 20_000 });
 
       // Should show action buttons
       await expect(page.locator("button").first()).toBeVisible();

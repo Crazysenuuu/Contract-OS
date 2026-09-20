@@ -3280,6 +3280,26 @@ export async function activateAmendment(
 
 // ─── Terminations (spec §66 ACTIVE → TERMINATED) ─────────────────────────────
 
+export interface RenewalConfig {
+  id: string;
+  agreement_id: string;
+  is_renewable: boolean;
+  auto_renew: boolean;
+  renewal_term_months: number;
+  max_renewals: number | null;
+  current_renewal_count: number;
+  original_expiry_date: string | null;
+  current_expiry_date: string | null;
+  next_renewal_date: string | null;
+  last_renewal_date: string | null;
+  notice_period_days: number | null;
+  notice_given: boolean;
+  notice_given_date: string | null;
+  price_increase_percentage: number | null;
+  price_fixed_amount: number | null;
+  status: string;
+}
+
 export interface Termination {
   id: string;
   agreement_id: string;
@@ -3585,4 +3605,46 @@ export async function createApiKey(
 
 export async function revokeApiKey(token: string, keyId: string): Promise<void> {
   return apiRequest(`/api-keys/${keyId}`, { method: 'DELETE', token });
+}
+
+// ─── Renewals (spec §67 ACTIVE → RENEWED) ─────────────────────────────
+
+export async function getRenewalConfig(token: string, id: string): Promise<RenewalConfig> {
+  const res = await fetch(`${API_BASE}/agreements/${id}/renewal`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to get renewal config");
+  return res.json();
+}
+
+export async function updateRenewalConfig(token: string, id: string, data: Partial<RenewalConfig>): Promise<RenewalConfig> {
+  const res = await fetch(`${API_BASE}/agreements/${id}/renewal`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update renewal config");
+  return res.json();
+}
+
+export async function processRenewal(token: string, id: string, force = false): Promise<any> {
+  const res = await fetch(`${API_BASE}/agreements/${id}/renewal/process`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "Failed to process renewal");
+  }
+  return res.json();
+}
+
+export async function giveRenewalNotice(token: string, id: string): Promise<RenewalConfig> {
+  const res = await fetch(`${API_BASE}/agreements/${id}/renewal/notice`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to give non-renewal notice");
+  return res.json();
 }

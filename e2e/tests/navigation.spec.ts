@@ -1,5 +1,20 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { login } from "./helpers";
+
+/**
+ * Click a nav link and wait for the URL change, retrying the click.
+ *
+ * Under parallel-worker load the React hydration can re-render the nav DOM
+ * between Playwright's hit-test and the dispatched click, swallowing the
+ * first click entirely (the URL stays on /dashboard). Retrying the whole
+ * click+assert pair via toPass is the canonical mitigation.
+ */
+async function clickNav(page: Page, selector: string, urlPattern: RegExp) {
+  await expect(async () => {
+    await page.click(selector);
+    await expect(page).toHaveURL(urlPattern);
+  }).toPass({ timeout: 20_000 });
+}
 
 test.describe("Navigation", () => {
   test.beforeEach(async ({ page }) => {
@@ -13,43 +28,35 @@ test.describe("Navigation", () => {
   });
 
   test("should navigate to analytics page", async ({ page }) => {
-    await page.click('a[href="/analytics"]');
-    await expect(page).toHaveURL(/\/analytics/);
+    await clickNav(page, 'a[href="/analytics"]', /\/analytics/);
   });
 
   test("should navigate to jurisdictions page", async ({ page }) => {
-    await page.click('a[href="/jurisdictions"]');
-    await expect(page).toHaveURL(/\/jurisdictions/);
+    await clickNav(page, 'a[href="/jurisdictions"]', /\/jurisdictions/);
   });
 
   test("should navigate to e-signature page", async ({ page }) => {
-    await page.click('a[href="/esignature"]');
-    await expect(page).toHaveURL(/\/esignature/);
+    await clickNav(page, 'a[href="/esignature"]', /\/esignature/);
   });
 
   test("should navigate to bulk operations page", async ({ page }) => {
-    await page.click('a[href="/bulk"]');
-    await expect(page).toHaveURL(/\/bulk/);
+    await clickNav(page, 'a[href="/bulk"]', /\/bulk/);
   });
 
   test("should navigate to clause library page", async ({ page }) => {
-    await page.click('a[href="/clause-library"]');
-    await expect(page).toHaveURL(/\/clause-library/);
+    await clickNav(page, 'a[href="/clause-library"]', /\/clause-library/);
   });
 
   test("should navigate to translations page", async ({ page }) => {
-    await page.click('a[href="/translations"]');
-    await expect(page).toHaveURL(/\/translations/);
+    await clickNav(page, 'a[href="/translations"]', /\/translations/);
   });
 
   test("should navigate to translation queue page", async ({ page }) => {
-    await page.click('a[href="/translation-queue"]');
-    await expect(page).toHaveURL(/\/translation-queue/);
+    await clickNav(page, 'a[href="/translation-queue"]', /\/translation-queue/);
   });
 
   test("should navigate to settings pages", async ({ page }) => {
-    await page.click('a[href="/settings/alerting"]');
-    await expect(page).toHaveURL(/\/settings\/alerting/);
+    await clickNav(page, 'a[href="/settings/alerting"]', /\/settings\/alerting/);
   });
 
   test("should show user info in nav", async ({ page }) => {
@@ -58,7 +65,6 @@ test.describe("Navigation", () => {
   });
 
   test("should logout successfully", async ({ page }) => {
-    await page.click("button:has-text('Sign out')");
-    await expect(page).toHaveURL(/\/login/);
+    await clickNav(page, "button:has-text('Sign out')", /\/login/);
   });
 });

@@ -1,9 +1,11 @@
+import datetime
 import uuid
 from datetime import date
 
 from sqlalchemy import (
     Boolean,
     Date,
+    DateTime,
     ForeignKey,
     Integer,
     JSON,
@@ -138,6 +140,15 @@ class Agreement(
         server_default="false",
         index=True,
     )
+
+    # eSignature fields
+    sealed_document_key: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    sealed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
 
     organization = relationship(
         "Organization",

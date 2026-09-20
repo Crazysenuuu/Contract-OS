@@ -194,11 +194,13 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
         AgreementStatus.PARTIALLY_SIGNED,
         AgreementStatus.EXECUTED,
         AgreementStatus.CANCELLED,
+        AgreementStatus.DRAFT,
     },
     AgreementStatus.PARTIALLY_SIGNED: {
         AgreementStatus.PARTIALLY_SIGNED,
         AgreementStatus.EXECUTED,
         AgreementStatus.CANCELLED,
+        AgreementStatus.DRAFT,
     },
     AgreementStatus.EXECUTED: {
         AgreementStatus.ACTIVE,
@@ -311,6 +313,8 @@ DEFAULT_TRANSITION_RULES: list[dict] = [
     _rule("partial_sign", S.PARTIALLY_SIGNED, S.PARTIALLY_SIGNED, "Further signature collected; still incomplete"),
     _rule("execute", S.SIGNING, S.EXECUTED, "All required signatures collected", "agreement.sign", {"all_signed": True}),
     _rule("execute", S.PARTIALLY_SIGNED, S.EXECUTED, "All required signatures collected", "agreement.sign", {"all_signed": True}),
+    _rule("decline", S.SIGNING, S.DRAFT, "Counterparty declined to sign"),
+    _rule("decline", S.PARTIALLY_SIGNED, S.DRAFT, "Counterparty declined to sign"),
     # --- in force (spec §25, §35) ----------------------------------------
     _rule("activate", S.EXECUTED, S.ACTIVE, "Move into force"),
     _rule("activate", S.RENEWED, S.ACTIVE, "Renewal in force"),

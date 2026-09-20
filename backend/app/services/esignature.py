@@ -79,6 +79,33 @@ class ESignatureProvider(ABC):
         """Cancel an envelope."""
         pass
 
+    @abstractmethod
+    async def void_envelope(
+        self,
+        envelope_id: str,
+        reason: str,
+    ) -> bool:
+        """Void an envelope."""
+        pass
+
+    @abstractmethod
+    async def decline_envelope(
+        self,
+        envelope_id: str,
+        signer_email: str,
+        reason: str,
+    ) -> bool:
+        """Decline signing an envelope."""
+        pass
+
+    @abstractmethod
+    async def download_signed_document(
+        self,
+        envelope_id: str,
+    ) -> bytes:
+        """Download the signed document."""
+        pass
+
 
 class MockESignatureProvider(ESignatureProvider):
     """
@@ -169,6 +196,50 @@ class MockESignatureProvider(ESignatureProvider):
         envelope["status"] = "cancelled"
         logger.info(f"[MOCK] Cancelled envelope {envelope_id}")
         return True
+
+    async def void_envelope(
+        self,
+        envelope_id: str,
+        reason: str,
+    ) -> bool:
+        """Void a mock envelope."""
+        envelope = self._envelopes.get(envelope_id)
+        if not envelope:
+            return False
+
+        envelope["status"] = "voided"
+        envelope["void_reason"] = reason
+        logger.info(f"[MOCK] Voided envelope {envelope_id}: {reason}")
+        return True
+
+    async def decline_envelope(
+        self,
+        envelope_id: str,
+        signer_email: str,
+        reason: str,
+    ) -> bool:
+        """Decline a mock envelope."""
+        envelope = self._envelopes.get(envelope_id)
+        if not envelope:
+            return False
+
+        envelope["status"] = "declined"
+        envelope["decline_reason"] = reason
+        logger.info(f"[MOCK] Signer {signer_email} declined envelope {envelope_id}: {reason}")
+        return True
+
+    async def download_signed_document(
+        self,
+        envelope_id: str,
+    ) -> bytes:
+        """Download the mock signed document."""
+        envelope = self._envelopes.get(envelope_id)
+        if not envelope:
+            raise ValueError("Envelope not found")
+        if envelope["status"] != "completed":
+            raise ValueError("Envelope not completed")
+
+        return b"MOCK_SIGNED_PDF_CONTENT_" + envelope_id.encode("utf-8")
 
     async def simulate_signing(
         self,
@@ -517,6 +588,39 @@ class DocuSignProvider(ESignatureProvider):
             )
             return False
 
+    async def void_envelope(self, envelope_id: str, reason: str) -> bool:
+        """Void a DocuSign envelope."""
+        from docusign_esign import EnvelopesApi
+        self._require_client()
+        envelopes_api = EnvelopesApi(self._client)
+        try:
+            envelopes_api.update_envelope(
+                account_id=self._account_id,
+                envelope_id=envelope_id,
+                envelope={"status": "voided", "voided_reason": reason},
+            )
+            return True
+        except Exception:
+            return False
+
+    async def decline_envelope(self, envelope_id: str, signer_email: str, reason: str) -> bool:
+        """Decline a DocuSign envelope."""
+        return await self.void_envelope(envelope_id, f"Declined by {signer_email}: {reason}")
+
+    async def download_signed_document(self, envelope_id: str) -> bytes:
+        """Download signed document from DocuSign."""
+        from docusign_esign import EnvelopesApi
+        self._require_client()
+        envelopes_api = EnvelopesApi(self._client)
+        # Returns path to temporary file if not passed an output dir
+        temp_file_path = envelopes_api.get_document(
+            account_id=self._account_id,
+            envelope_id=envelope_id,
+            document_id="combined"
+        )
+        with open(temp_file_path, "rb") as f:
+            return f.read()
+
 
 class AdobeSignProvider(ESignatureProvider):
     """
@@ -769,6 +873,35 @@ class AdobeSignProvider(ESignatureProvider):
                 f"HTTP {resp.status_code} {resp.text[:200]}"
             )
             return False
+
+    async def void_envelope(self, envelope_id: str, reason: str) -> bool:
+        """Void an Adobe Sign agreement."""
+        import httpx
+        self._configure()
+        url = f"{self._base_url}/agreements/{envelope_id}/state"
+        payload = {
+            "value": "CANCELLED",
+        }
+        # Adobe Sign doesn't support a dedicated 'void reason' in the state endpoint like DocuSign does
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(url, headers=self._headers(), json=payload, timeout=30)
+            if resp.status_code in (200, 204):
+                return True
+            return False
+
+    async def decline_envelope(self, envelope_id: str, signer_email: str, reason: str) -> bool:
+        """Decline an Adobe Sign agreement."""
+        return await self.void_envelope(envelope_id, reason)
+
+    async def download_signed_document(self, envelope_id: str) -> bytes:
+        """Download signed document from Adobe Sign."""
+        import httpx
+        self._configure()
+        url = f"{self._base_url}/agreements/{envelope_id}/combinedDocument"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=self._headers(), timeout=30)
+            resp.raise_for_status()
+            return resp.content
 
 
 # Provider factory

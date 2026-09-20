@@ -18,6 +18,10 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
+  // Local runs hit the dev server with parallel workers; navigation-dependent
+  // assertions (toHaveURL after a click) need headroom for cold route
+  // compiles. Healthy assertions still pass instantly.
+  expect: { timeout: 15_000 },
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "html",
   use: {
     baseURL: "http://localhost:3000",
@@ -28,6 +32,17 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // The restart-persistence spec runs in its own project (see below) so it
+      // never restarts the backend while other specs are in flight.
+      testIgnore: /flag-restart-persistence\.spec\.ts/,
+    },
+    {
+      name: "restart",
+      // Depends on "chromium": guaranteed to run only after the entire main
+      // suite has finished. Kills and relaunches the backend mid-test, which
+      // would break any spec running concurrently.
+      dependencies: ["chromium"],
+      testMatch: /flag-restart-persistence\.spec\.ts/,
     },
   ],
   webServer: {

@@ -22,6 +22,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,12 @@ from app.models.signature import InternalSignature
 from app.services.agreement_versioning import get_latest_version, lock_version
 from app.services.audit_service import record_event
 from app.services.lifecycle_service import TransitionNotAllowed, apply_transition
+
+if TYPE_CHECKING:
+    from app.services.esignature import ESignatureProvider
+
+# Sentinel UUID used when a transition is triggered by the system (no human actor).
+_SYSTEM_ACTOR_ID = uuid.UUID(int=0)
 
 # External party statuses that remove the party from the required-signer set.
 _NON_SIGNING_EXTERNAL_STATUSES = frozenset({"rejected", "declined", "revoked"})
@@ -107,6 +114,7 @@ async def check_and_execute(
     *,
     agreement: Agreement,
     org_id: uuid.UUID,
+    provider: ESignatureProvider | None = None,
 ) -> bool:
     """Advance the agreement after a signature was recorded.
 
@@ -131,7 +139,7 @@ async def check_and_execute(
                     db,
                     agreement=agreement,
                     action_key="partial_sign",
-                    actor_id=None,
+                    actor_id=_SYSTEM_ACTOR_ID,
                     org_id=org_id,
                     actor_type="system",
                     metadata_json=progress.to_dict(),
@@ -147,7 +155,7 @@ async def check_and_execute(
             db,
             agreement=agreement,
             action_key="execute",
-            actor_id=None,
+            actor_id=_SYSTEM_ACTOR_ID,
             org_id=org_id,
             actor_type="system",
             metadata_json=progress.to_dict(),
@@ -180,4 +188,127 @@ async def check_and_execute(
             )
 
     await db.flush()
+    
+    # Check if immovable (requires special form)
+    from app.models.execution import ExecutionRequirement
+    reqs = await db.execute(
+        select(ExecutionRequirement).where(
+            (ExecutionRequirement.agreement_id == agreement.id) | 
+            (ExecutionRequirement.agreement_type_id == agreement.agreement_type_id),
+            ExecutionRequirement.requirement_type.in_(["notarization", "witness"])
+        )
+    )
+    is_immovable = reqs.first() is not None
+
+    if is_immovable:
+        from app.services.special_form_service import create_special_form_record
+        await create_special_form_record(db, agreement.id)
+        # Skip sealing via eSign provider
+        return True
+
+    if provider:
+        await seal(db, agreement, provider, org_id)
+
     return True
+
+async def seal(
+    db: AsyncSession,
+    agreement: Agreement,
+    provider: ESignatureProvider | None,
+    org_id: uuid.UUID
+) -> None:
+    """Download signed PDF, upload to Object Storage, update agreement."""
+    from app.services.storage_service import StorageService
+    from app.services.esignature import get_esignature_provider
+    from app.core.config import get_settings_lazy
+
+    envelope_id: str | None = getattr(agreement, "envelope_id", None) or getattr(agreement, "esignature_envelope_id", None)
+    if not envelope_id:
+        return
+
+    if provider is None:
+        settings = get_settings_lazy()
+        provider_name = getattr(settings, "esign_provider", "mock")
+        provider = get_esignature_provider(provider_name)
+
+    # Download signed PDF
+    pdf_bytes = await provider.download_signed_document(envelope_id)
+
+    # Initialize storage service
+    storage = StorageService(db)
+
+    key = f"agreements/{org_id}/{agreement.id}/signed_{envelope_id}.pdf"
+    
+    # Upload and get StoredObject
+    stored_obj = await storage.upload_document(
+        agreement_id=agreement.id,
+        file_data=pdf_bytes,
+        key=key,
+        content_type="application/pdf",
+        uploaded_by=None
+    )
+
+    agreement.sealed_document_key = stored_obj.key
+    agreement.sealed_at = datetime.now(timezone.utc)
+    await db.flush()
+
+
+async def cancel_signing(
+    db: AsyncSession,
+    agreement: Agreement,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID | None = None,
+    provider: ESignatureProvider | None = None,
+    reason: str = "Signing cancelled",
+) -> None:
+    from app.services.esignature import get_esignature_provider
+    from app.core.config import get_settings_lazy
+
+    envelope_id: str | None = getattr(agreement, "envelope_id", None) or getattr(agreement, "esignature_envelope_id", None)
+    if envelope_id:
+        if provider is None:
+            settings = get_settings_lazy()
+            provider_name = getattr(settings, "esign_provider", "mock")
+            provider = get_esignature_provider(provider_name)
+        await provider.void_envelope(envelope_id, reason)
+    
+    await apply_transition(
+        db,
+        agreement=agreement,
+        action_key="cancel",
+        actor_id=actor_id if actor_id is not None else _SYSTEM_ACTOR_ID,
+        org_id=org_id,
+        actor_type="user" if actor_id else "system",
+        metadata_json={"reason": reason}
+    )
+    await db.flush()
+
+async def decline_signing(
+    db: AsyncSession,
+    agreement: Agreement,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID | None = None,
+    provider: ESignatureProvider | None = None,
+    reason: str = "Signing declined by counterparty",
+) -> None:
+    from app.services.esignature import get_esignature_provider
+    from app.core.config import get_settings_lazy
+
+    envelope_id: str | None = getattr(agreement, "envelope_id", None) or getattr(agreement, "esignature_envelope_id", None)
+    if envelope_id:
+        if provider is None:
+            settings = get_settings_lazy()
+            provider_name = getattr(settings, "esign_provider", "mock")
+            provider = get_esignature_provider(provider_name)
+        await provider.void_envelope(envelope_id, reason)
+
+    await apply_transition(
+        db,
+        agreement=agreement,
+        action_key="decline",
+        actor_id=actor_id if actor_id is not None else _SYSTEM_ACTOR_ID,
+        org_id=org_id,
+        actor_type="user" if actor_id else "system",
+        metadata_json={"reason": reason}
+    )
+    await db.flush()

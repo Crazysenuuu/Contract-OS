@@ -76,6 +76,7 @@ class Settings(BaseSettings):
 
     # E-signature provider: 'mock' | 'docusign' | 'adobe_sign' (spec 24.5)
     esignature_provider: str = "mock"
+    esign_callback_base_url: str | None = None
 
     # DocuSign credentials (used when esignature_provider == 'docusign')
     docusign_integration_key: SecretStr | None = None

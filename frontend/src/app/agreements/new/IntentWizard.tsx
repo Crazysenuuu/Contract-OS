@@ -20,6 +20,13 @@ export const IntentWizard: React.FC<IntentWizardProps> = ({
     }
   };
 
+  const pendingTypes = [
+    { label: "Partnership", prompt: "I need a Partnership Agreement between two companies sharing profits and control." },
+    { label: "Independent Contractor", prompt: "I need an Independent Contractor Agreement to hire a freelancer." },
+    { label: "Software License", prompt: "I need a Software License Agreement for our enterprise customers." },
+    { label: "Franchise", prompt: "I need a Franchise Agreement to open a new location." },
+  ];
+
   return (
     <div className="bg-white shadow rounded-lg p-8 border-t-4 border-blue-600">
       <div className="max-w-2xl mx-auto text-center">
@@ -73,6 +80,19 @@ export const IntentWizard: React.FC<IntentWizardProps> = ({
             </div>
           </div>
         </form>
+
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {pendingTypes.map((type) => (
+            <button
+              key={type.label}
+              type="button"
+              onClick={() => setIntent(type.prompt)}
+              className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              + {type.label}
+            </button>
+          ))}
+        </div>
 
         {promptError && (
           <div className="mt-4 p-4 bg-red-50 rounded-md border border-red-200 text-left">
