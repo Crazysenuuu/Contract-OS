@@ -93,6 +93,10 @@ from app.models.notification import (
     Notification,
     NotificationPreference,
 )
+from app.models.feature_flag import (
+    FeatureFlagRecord,
+    FeatureFlagOverrideRecord,
+)
 from app.models.webhook import (
     WebhookEndpoint,
     WebhookDelivery,
@@ -290,6 +294,8 @@ __all__ = [
     "ComplianceReport",
     "Notification",
     "NotificationPreference",
+    "FeatureFlagRecord",
+    "FeatureFlagOverrideRecord",
     "WebhookEndpoint",
     "WebhookDelivery",
     "Jurisdiction",
