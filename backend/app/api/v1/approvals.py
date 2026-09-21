@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.dependencies.agreement_access import verify_agreement_access
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
-from app.models.agreement import Agreement
+from app.models.agreement import Agreement, AgreementVersion
 from app.models.user import User
 from app.services.approval_engine import (
     advance_stage,
@@ -229,6 +229,36 @@ async def start_approval_endpoint(
             approval_type=data.approval_type,
             definition_id=data.definition_id,
         )
+        # Spec §24.2: submitting to the approval chain is a real state change.
+        # The agreement leaves Draft so the lifecycle column reflects that an
+        # approval is pending; a rejection reverts it to Draft, forcing the
+        # amended agreement to restart the cycle.
+        if record.status in ("pending", "in_progress"):
+            agreement_result = await db.execute(
+                select(Agreement).where(Agreement.id == agreement_id)
+            )
+            agreement = agreement_result.scalar_one_or_none()
+            if agreement is not None and agreement.status in (
+                "draft",
+                "internal_review",
+                "pending_approval",
+            ):
+                try:
+                    await apply_transition(
+                        db,
+                        agreement=agreement,
+                        action_key="submit_for_approval",
+                        actor_id=current_user.id,
+                        org_id=org_id,
+                        actor_type="user",
+                        metadata_json={"via": "approval_start"},
+                    )
+                except TransitionNotAllowed as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Approval started but agreement could not be moved to pending approval: {e}",
+                    )
+
         # Routing transparency: which definition matched and why (rule
         # conditions or DOA matrix) — lets the UI show "Routed by: value
         # > 1M rule" instead of a black box.
@@ -368,15 +398,58 @@ async def make_decision(
         comment=data.comment,
     )
 
-    # If rejected, cancel the approval
+    # If rejected, cancel the approval and revert the agreement to Draft.
+    # Spec §24.2: "If an agreement is rejected or redlined during the
+    # approval chain, it must revert to the Draft state, requiring the
+    # approval cycle to restart once amended."
     if data.decision == "rejected":
         await cancel_approval(db, record)
+        result = await db.execute(select(Agreement).where(Agreement.id == agreement_id))
+        agreement = result.scalar_one_or_none()
+        if agreement is not None:
+            try:
+                if agreement.status == "pending_approval":
+                    await apply_transition(
+                        db,
+                        agreement=agreement,
+                        action_key="reject",
+                        actor_id=current_user.id,
+                        org_id=org_id,
+                        actor_type="user",
+                        metadata_json={"via": "approval_reject"},
+                    )
+                elif agreement.status == "internal_review":
+                    await apply_transition(
+                        db,
+                        agreement=agreement,
+                        action_key="reopen",
+                        actor_id=current_user.id,
+                        org_id=org_id,
+                        actor_type="user",
+                        metadata_json={"via": "approval_reject"},
+                    )
+                elif agreement.status == "draft":
+                    pass  # already in Draft; nothing to revert
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"Cannot revert agreement to Draft from status "
+                            f"'{agreement.status}' after rejection"
+                        ),
+                    )
+            except TransitionNotAllowed as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Approval rejected but agreement could not be reverted to Draft: {e}",
+                )
     else:
         # Advance to next stage
         await advance_stage(db, record)
 
     # When every stage is approved, drive the agreement lifecycle forward:
-    # draft -> internal_review -> approved. Spec 24: approvals gate signing.
+    # draft -> internal_review -> approved (or pending_approval -> approved).
+    # Spec 24: approvals gate signing.
     if record.status == "approved":
         result = await db.execute(select(Agreement).where(Agreement.id == agreement_id))
         agreement = result.scalar_one_or_none()
@@ -391,14 +464,23 @@ async def make_decision(
                         org_id=org_id,
                         actor_type="user",
                     )
-                await apply_transition(
-                    db,
-                    agreement=agreement,
-                    action_key="approve",
-                    actor_id=current_user.id,
-                    org_id=org_id,
-                    actor_type="user",
-                )
+                    await apply_transition(
+                        db,
+                        agreement=agreement,
+                        action_key="approve",
+                        actor_id=current_user.id,
+                        org_id=org_id,
+                        actor_type="user",
+                    )
+                elif agreement.status in ("pending_approval", "internal_review"):
+                    await apply_transition(
+                        db,
+                        agreement=agreement,
+                        action_key="approve",
+                        actor_id=current_user.id,
+                        org_id=org_id,
+                        actor_type="user",
+                    )
             except TransitionNotAllowed as e:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -435,6 +517,174 @@ async def cancel_approval_endpoint(
         )
 
     return await cancel_approval(db, record)
+
+
+# --------------------------------------------------------------------------
+# Approval context (spec 2.05 §1-§7): read-only workspace payload. The
+# client never decides whether the user may approve — this endpoint
+# aggregates agreement, current version, viewer capability, legal-review
+# state, workflow step, and negotiation change counts in one response.
+# --------------------------------------------------------------------------
+
+@record_router.get(
+    "/{agreement_id}/approval-context",
+)
+async def get_approval_context(
+    agreement_id: UUID,
+    current_user: User = Depends(get_current_user),
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Build the executive approval workspace context (spec 2.05)."""
+    from app.models.agreement_access import AgreementParticipant, AgreementParty
+    from app.models.approval import ApprovalDecision, ApprovalRecord
+    from app.models.legal_entity import LegalEntity
+    from app.models.negotiation import AgreementChange, AgreementChangeItem
+
+    await verify_agreement_access(
+        agreement_id=agreement_id,
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+
+    agreement = (
+        await db.execute(select(Agreement).where(Agreement.id == agreement_id))
+    ).scalar_one_or_none()
+    if agreement is None:
+        raise HTTPException(status_code=404, detail="Agreement not found")
+
+    # Viewer capability: explicit AgreementParticipant binding wins; the
+    # agreement creator counts as the owning organization's authorized
+    # representative for the org party.
+    participant = (
+        await db.scalar(
+            select(AgreementParticipant).where(
+                AgreementParticipant.agreement_id == agreement_id,
+                AgreementParticipant.user_id == current_user.id,
+                AgreementParticipant.status == "active",
+            )
+        )
+    )
+    viewer_party_id: UUID | None = None
+    viewer_role = "reviewer"
+    can_approve = False
+    if participant is not None:
+        viewer_party_id = participant.agreement_party_id
+        viewer_role = participant.participant_role
+        can_approve = participant.can_approve
+    elif agreement.created_by == current_user.id:
+        org_party = (
+            await db.scalar(
+                select(AgreementParty.id)
+                .join(LegalEntity, LegalEntity.id == AgreementParty.legal_entity_id)
+                .where(
+                    AgreementParty.agreement_id == agreement_id,
+                    LegalEntity.organization_id == org_id,
+                )
+            )
+        )
+        viewer_party_id = org_party
+        viewer_role = "authorized_representative"
+        can_approve = org_party is not None
+
+    # Current version (the exact terms under review — spec 2.05 §4 §5).
+    version = (
+        await db.scalar(
+            select(AgreementVersion).where(
+                AgreementVersion.agreement_id == agreement_id,
+                AgreementVersion.status == "current",
+            )
+        )
+    )
+
+    # Legal review: any legal_review record already fully approved.
+    legal_review = {"status": "pending", "confirmed_by": None, "confirmed_at": None}
+    legal_record = (
+        await db.scalar(
+            select(ApprovalRecord).where(
+                ApprovalRecord.agreement_id == agreement_id,
+                ApprovalRecord.approval_type == "legal_review",
+                ApprovalRecord.status.in_(("approved", "completed")),
+            )
+        )
+    )
+    if legal_record is not None:
+        confirm_decision = (
+            await db.scalar(
+                select(ApprovalDecision)
+                .where(ApprovalDecision.record_id == legal_record.id)
+                .order_by(ApprovalDecision.decided_at.desc())
+                .limit(1)
+            )
+        )
+        legal_review = {
+            "status": "confirmed",
+            "confirmed_by": str(confirm_decision.user_id) if confirm_decision else None,
+            "confirmed_at": (
+                confirm_decision.decided_at.isoformat() if confirm_decision else None
+            ),
+        }
+
+    # Workflow step label from the lifecycle state.
+    step_by_status = {
+        "draft": "drafting",
+        "internal_review": "legal_review",
+        "pending_approval": "party_a_confirmation",
+        "negotiation": "party_a_confirmation",
+        "approved": "confirmed",
+        "sent": "released",
+        "ready_for_signature": "released",
+        "signing": "released",
+    }
+
+    # Negotiation change counts (spec 2.05 §1): aggregate accepted items.
+    change_rows = (
+        await db.execute(
+            select(AgreementChangeItem.change_type)
+            .join(AgreementChange, AgreementChange.id == AgreementChangeItem.change_id)
+            .where(
+                AgreementChange.agreement_id == agreement_id,
+                AgreementChange.status == "accepted",
+                AgreementChangeItem.status == "accepted",
+            )
+        )
+    ).scalars().all()
+    counts = {"added": 0, "modified": 0, "removed": 0, "replace": 0}
+    for ct in change_rows:
+        key = {"add": "added", "modify": "modified", "remove": "removed"}.get(ct)
+        if key is not None:
+            counts[key] += 1
+        else:
+            counts["replace"] += 1
+
+    return {
+        "agreement": {
+            "id": str(agreement.id),
+            "title": agreement.title,
+            "status": agreement.status,
+        },
+        "version": (
+            {
+                "id": str(version.id),
+                "version_number": version.version_number,
+                "content_hash": version.content_hash,
+            }
+            if version is not None
+            else None
+        ),
+        "viewer": {
+            "member_id": str(current_user.id),
+            "party_id": str(viewer_party_id) if viewer_party_id else None,
+            "role": viewer_role,
+            "can_approve": can_approve,
+        },
+        "legal_review": legal_review,
+        "workflow": {
+            "current_step": step_by_status.get(agreement.status, agreement.status),
+        },
+        "changes": {k: v for k, v in counts.items() if k != "replace" or v > 0},
+    }
 
 
 # --- Pending Approvals ---

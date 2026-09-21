@@ -223,6 +223,21 @@ class AgreementVersion(
         nullable=True,
     )
 
+    # Immutable snapshot of the agreement answers at the moment this version
+    # was created (spec §26/§3: editing a draft appends version N+1 and never
+    # mutates version N). Enables view/diff/restore of a version's inputs,
+    # not just its rendered text.
+    data: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    # Human-readable label describing what this version captures.
+    note: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
     translation_sync: Mapped[dict | None] = mapped_column(
         JSON,
         nullable=True,

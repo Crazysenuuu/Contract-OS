@@ -188,7 +188,32 @@ async def check_and_execute(
             )
 
     await db.flush()
-    
+
+    # Spec 24.6: execution is the trigger point for downstream consumers.
+    # Publish an outbox event in the SAME transaction as the execute, so a
+    # retried signature record cannot double-fire. The dispatcher turns the
+    # event into notifications and (when subscribed) ERP/partner webhooks.
+    from app.services.event_service import EventService
+
+    await EventService.publish_once(
+        db,
+        event_type="agreement.executed",
+        aggregate_type="agreement",
+        aggregate_id=agreement.id,
+        organization_id=org_id,
+        payload={
+            "agreement_id": str(agreement.id),
+            "agreement_title": agreement.title,
+            "org_id": str(org_id),
+            "execution_date": (
+                agreement.execution_date or datetime.now(timezone.utc).date()
+            ).isoformat(),
+            "status": "executed",
+            "parties_signed": progress.to_dict(),
+        },
+        dedup_key=str(agreement.id),
+    )
+
     # Check if immovable (requires special form)
     from app.models.execution import ExecutionRequirement
     reqs = await db.execute(

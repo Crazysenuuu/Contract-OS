@@ -78,6 +78,20 @@ from app.api.v1.analytics import router as analytics_router
 from app.api.v1.compliance_summary import router as compliance_summary_router
 from app.api.v1.security_monitoring import router as security_monitoring_router
 from app.api.v1.api_keys import router as api_keys_router
+from app.api.v1.orchestration import (
+    workflows_router as orchestration_workflows_router,
+)
+from app.api.v1.orchestration import (
+    instances_router as orchestration_instances_router,
+)
+from app.api.v1.orchestration import tasks_router as orchestration_tasks_router
+from app.api.v1.orchestration import (
+    incidents_router as orchestration_incidents_router,
+)
+from app.api.v1.orchestration import (
+    deadletters_router as orchestration_deadletters_router,
+)
+from app.api.v1.orchestration import events_router as orchestration_events_router
 from app.api.v1.evidence import router as evidence_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -160,6 +174,12 @@ api_router.include_router(compliance_summary_router)
 api_router.include_router(security_monitoring_router)
 api_router.include_router(api_keys_router)
 api_router.include_router(evidence_router)
+api_router.include_router(orchestration_workflows_router)
+api_router.include_router(orchestration_instances_router)
+api_router.include_router(orchestration_tasks_router)
+api_router.include_router(orchestration_incidents_router)
+api_router.include_router(orchestration_deadletters_router)
+api_router.include_router(orchestration_events_router)
 
 # External party review endpoints are mounted directly in main.py
 # (no /api/v1 prefix - token-based auth)

@@ -48,14 +48,14 @@ final dashboardSummaryProvider =
   final resp = await ref
       .watch(apiClientProvider)
       .dio
-      .get('/api/v1/dashboard/summary');
+      .get('/dashboard/summary');
   return DashboardSummary.fromJson(resp.data as Map<String, dynamic>);
 });
 
 final recentActivityProvider =
     FutureProvider.autoDispose<List<ContractSummary>>((ref) async {
   final resp = await ref.watch(apiClientProvider).dio.get(
-        '/api/v1/agreements',
+        '/agreements',
         queryParameters: {'limit': 5, 'sort': '-updated_at'},
       );
   final items = (resp.data['items'] as List?) ?? [];
@@ -70,7 +70,7 @@ final aiInsightProvider = FutureProvider.autoDispose<String?>((ref) async {
     final resp = await ref
         .watch(apiClientProvider)
         .dio
-        .get('/api/v1/intelligence/portfolio-summary');
+        .get('/intelligence/portfolio-summary');
     return resp.data['summary'] as String?;
   } on DioException {
     return null; // AI insights are best-effort
@@ -565,7 +565,7 @@ class _ContractSearchDelegate extends SearchDelegate<String?> {
     final parsed = _parser.parse(query);
     return FutureBuilder<Response>(
       future: _ref.read(apiClientProvider).dio.get(
-            '/api/v1/search/agreements',
+            '/search/agreements',
             queryParameters: parsed.toQueryParameters(limit: 20),
           ),
       builder: (context, snap) {

@@ -47,16 +47,16 @@ class _StubAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final path = options.uri.path;
-    if (path.endsWith('/api/v1/dashboard/tasks')) {
+    if (path.endsWith('/dashboard/tasks')) {
       if (tasksFail) {
         return ResponseBody.fromString('{"detail":"boom"}', 500);
       }
       return _json(tasks);
     }
-    if (path.endsWith('/api/v1/approvals')) {
+    if (path.endsWith('/approvals')) {
       return _json({'items': approvals});
     }
-    if (path.endsWith('/api/v1/agreements')) {
+    if (path.endsWith('/agreements')) {
       return _json({'items': signatureContracts});
     }
     return ResponseBody.fromString('{"detail":"no stub"}', 404);

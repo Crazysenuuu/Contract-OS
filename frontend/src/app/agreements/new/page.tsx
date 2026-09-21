@@ -10,6 +10,9 @@ import {
   updateAgreementAnswers,
   validateAgreement,
   listAgreementTypes,
+  listJurisdictions,
+  suggestClauses,
+  listLegalEntities,
   AgreementType,
   ComplianceResult,
 } from "@/lib/api";
@@ -74,6 +77,40 @@ function NewAgreementForm() {
   const [checkingCompliance, setCheckingCompliance] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 2.03 authoring wizard steps: jurisdiction, party assignment, clauses.
+  const [jurisdictions, setJurisdictions] = useState<
+    Array<{
+      code: string;
+      name: string;
+      region: string | null;
+      legal_system: string | null;
+      default_dispute_resolution: string | null;
+      required_clauses: string[] | null;
+    }>
+  >([]);
+  const [jurisdictionCode, setJurisdictionCode] = useState("");
+  const [governingLaw, setGoverningLaw] = useState("");
+  const [venue, setVenue] = useState("");
+  const [legalEntities, setLegalEntities] = useState<
+    Array<{ id: string; legal_name: string }>
+  >([]);
+  const [partyAId, setPartyAId] = useState("");
+  const [partyBId, setPartyBId] = useState("");
+  const [counselA, setCounselA] = useState("");
+  const [counselB, setCounselB] = useState("");
+  const [clauseSuggestions, setClauseSuggestions] = useState<
+    Array<{
+      clause_type: string;
+      name: string;
+      explanation: string;
+      risk_level: string;
+      is_mandatory: boolean;
+    }>
+  >([]);
+  const [clauseSelections, setClauseSelections] = useState<
+    Record<string, boolean>
+  >({});
+
   useEffect(() => {
     if (token) {
       listAgreementTypes(token)
@@ -114,8 +151,57 @@ function NewAgreementForm() {
       .finally(() => setLoading(false));
   }, [token, selectedType]);
 
+  useEffect(() => {
+    if (!token) return;
+    listJurisdictions(token)
+      .then(setJurisdictions)
+      .catch(console.error);
+    listLegalEntities(token)
+      .then(setLegalEntities)
+      .catch(console.error);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || !selectedType || !jurisdictionCode) return;
+    suggestClauses(
+      token,
+      jurisdictionCode,
+      selectedType.template_key || "mutual_nda"
+    )
+      .then((suggestions) => {
+        setClauseSuggestions(
+          suggestions.map((s) => ({
+            clause_type: s.clause_type,
+            name: s.name,
+            explanation: s.explanation,
+            risk_level: s.risk_level,
+            is_mandatory: s.is_mandatory,
+          }))
+        );
+        const selections: Record<string, boolean> = {};
+        suggestions.forEach((s) => {
+          selections[s.clause_type] = s.is_mandatory;
+        });
+        setClauseSelections(selections);
+      })
+      .catch(console.error);
+  }, [token, selectedType, jurisdictionCode]);
+
+  // 2.03 stepper: step 0 = setup (title/jurisdiction/parties), middle steps
+  // = schema sections, final step = clause selection before generation.
   const sections = Array.from(new Set(questions.map((q) => q.section)));
-  const currentSection = sections[currentStep];
+  const wizardSteps = [
+    "Set up",
+    ...sections,
+    "Clauses",
+  ];
+  const setupStep = 0;
+  const clausesStep = wizardSteps.length - 1;
+  const currentStepName = wizardSteps[currentStep];
+  const currentSection =
+    currentStep > setupStep && currentStep < clausesStep
+      ? sections[currentStep - 1]
+      : sections[0];
   // Dynamic questionnaire (spec §4.2): conditions are evaluated against the
   // live answers so branching questions appear/disappear in real time as the
   // user answers the branch trigger.
@@ -155,6 +241,26 @@ function NewAgreementForm() {
     [token, agreementId]
   );
 
+  const composeAnswers = (): Record<string, unknown> => {
+    const selected = clauseSuggestions
+      .filter((s) => clauseSelections[s.clause_type])
+      .map((s) => s.clause_type);
+    const partyA = legalEntities.find((e) => e.id === partyAId)?.legal_name || "";
+    const partyB = legalEntities.find((e) => e.id === partyBId)?.legal_name || "";
+    return {
+      ...answers,
+      jurisdiction: jurisdictionCode,
+      governing_law: governingLaw || jurisdictionCode,
+      legal_system: jurisdictions.find((j) => j.code === jurisdictionCode)?.legal_system || null,
+      venue: venue || undefined,
+      party_a_entity: partyA || undefined,
+      party_b_entity: partyB || undefined,
+      party_a_counsel_email: counselA || undefined,
+      party_b_counsel_email: counselB || undefined,
+      selected_clauses: selected.length > 0 ? selected : undefined,
+    };
+  };
+
   const handlePromptCreate = async (intent: string) => {
     if (!token || !intent.trim()) {
       setPromptError("Describe the agreement you want to create.");
@@ -183,7 +289,7 @@ function NewAgreementForm() {
         agreement_type_id: selectedType.id,
       });
       setAgreementId(result.id);
-      await updateAgreementAnswers(token, result.id, answers, false);
+      await updateAgreementAnswers(token, result.id, composeAnswers(), false);
       return result.id;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create");
@@ -201,7 +307,7 @@ function NewAgreementForm() {
       const result = await updateAgreementAnswers(
         token,
         agreementId,
-        answers,
+        composeAnswers(),
         false
       );
       if (result.compliance) {
@@ -240,7 +346,7 @@ function NewAgreementForm() {
       await handleSaveAnswers();
     }
 
-    if (currentStep < sections.length - 1) {
+    if (currentStep < wizardSteps.length - 1) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -358,15 +464,15 @@ function NewAgreementForm() {
           <div className="mb-8">
             <div className="flex justify-between text-sm text-gray-500 mb-2">
               <span>
-                Step {currentStep + 1} of {sections.length}
+                Step {currentStep + 1} of {wizardSteps.length}
               </span>
-              <span>{currentSection}</span>
+              <span>{currentStepName}</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div
                 className="bg-blue-600 h-2 rounded-full transition-all"
                 style={{
-                  width: `${((currentStep + 1) / sections.length) * 100}%`,
+                  width: `${((currentStep + 1) / wizardSteps.length) * 100}%`,
                 }}
               />
             </div>
@@ -378,18 +484,212 @@ function NewAgreementForm() {
             </div>
           )}
 
-          {/* Questions */}
-          <div className="bg-white shadow rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">
-              {currentSection}
-            </h2>
+          {/* Wizard steps: setup, schema sections, clauses */}
+          {currentStep === setupStep ? (
+            <div className="bg-white shadow rounded-lg p-6 mb-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">
+                Jurisdiction & Parties
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Jurisdiction
+                  </label>
+                  <select
+                    value={jurisdictionCode}
+                    onChange={(e) => setJurisdictionCode(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select jurisdiction...</option>
+                    {jurisdictions.map((j) => (
+                      <option key={j.code} value={j.code}>
+                        {j.name} ({j.code})
+                        {j.legal_system ? ` — ${j.legal_system}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {jurisdictionCode && (
+                    <p className="mt-1 text-xs text-gray-500">
+                      {jurisdictions.find((j) => j.code === jurisdictionCode)
+                        ?.default_dispute_resolution || "No default dispute resolution listed."}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Governing Law (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={governingLaw}
+                    onChange={(e) => setGoverningLaw(e.target.value)}
+                    placeholder="Defaults to jurisdiction code"
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Venue (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={venue}
+                    onChange={(e) => setVenue(e.target.value)}
+                    placeholder="e.g. Singapore"
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
 
-            <DynamicFormBuilder
-              questions={sectionQuestions}
-              answers={answers}
-              onChange={updateAnswer}
-            />
-          </div>
+              <h3 className="text-md font-medium text-gray-900 mt-6 mb-3">
+                Parties & Counsel
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Party A (you)
+                  </label>
+                  <select
+                    value={partyAId}
+                    onChange={(e) => setPartyAId(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select legal entity...</option>
+                    {legalEntities.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.legal_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Party B (counterparty)
+                  </label>
+                  <select
+                    value={partyBId}
+                    onChange={(e) => setPartyBId(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select legal entity...</option>
+                    {legalEntities.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.legal_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Party A counsel email (optional)
+                  </label>
+                  <input
+                    type="email"
+                    value={counselA}
+                    onChange={(e) => setCounselA(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Party B counsel email (optional)
+                  </label>
+                  <input
+                    type="email"
+                    value={counselB}
+                    onChange={(e) => setCounselB(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : currentStep === clausesStep ? (
+            <div className="bg-white shadow rounded-lg p-6 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-medium text-gray-900">
+                  Clause Selection
+                </h2>
+                {jurisdictionCode && (
+                  <span className="text-xs text-gray-500">
+                    Based on {jurisdictions.find((j) => j.code === jurisdictionCode)?.name || jurisdictionCode}
+                  </span>
+                )}
+              </div>
+              {!jurisdictionCode ? (
+                <p className="text-sm text-gray-500">
+                  Select a jurisdiction in step 1 to see recommended clauses.
+                </p>
+              ) : clauseSuggestions.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  No clause recommendations returned. Continue without selecting
+                  clauses.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {clauseSuggestions.map((s) => {
+                    const included = !!clauseSelections[s.clause_type];
+                    return (
+                      <div
+                        key={s.clause_type}
+                        className={`border rounded-lg p-4 flex items-start justify-between ${
+                          s.is_mandatory ? "border-blue-300 bg-blue-50" : "border-gray-200"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium text-gray-900">{s.name}</h3>
+                            {s.is_mandatory && (
+                              <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">
+                                Required
+                              </span>
+                            )}
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded ${
+                                s.risk_level === "high"
+                                  ? "bg-red-100 text-red-700"
+                                  : s.risk_level === "medium"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-green-100 text-green-700"
+                              }`}
+                            >
+                              {s.risk_level} risk
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">
+                            {s.explanation}
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={included}
+                          disabled={s.is_mandatory}
+                          onChange={() =>
+                            setClauseSelections((prev) => ({
+                              ...prev,
+                              [s.clause_type]: !included,
+                            }))
+                          }
+                          className="mt-1 h-5 w-5 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-white shadow rounded-lg p-6 mb-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">
+                {currentSection}
+              </h2>
+
+              <DynamicFormBuilder
+                questions={sectionQuestions}
+                answers={answers}
+                onChange={updateAnswer}
+              />
+            </div>
+          )}
 
           {/* Navigation */}
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -401,7 +701,7 @@ function NewAgreementForm() {
               Back
             </button>
 
-            {currentStep < sections.length - 1 ? (
+            {currentStep < wizardSteps.length - 1 ? (
               <button
                 onClick={handleNext}
                 disabled={saving}

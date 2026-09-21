@@ -471,9 +471,15 @@ export default function AgreementDetailPage() {
 
           {/* Versions history (spec §26 / §48) */}
           <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">
-              Versions
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-gray-900">Versions</h2>
+              <Link
+                href={`/agreements/${id}/versions`}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Manage versions →
+              </Link>
+            </div>
             {versions.length === 0 ? (
               <p className="text-sm text-gray-500">No versions yet</p>
             ) : (

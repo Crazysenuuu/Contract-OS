@@ -236,10 +236,10 @@ async def dispatch_event(
     else:
         sms_result = None
 
-    # 3. Cross-process fanout (Redis) when available — non-blocking. The
-    # envelope targets the recipient's user id so any API replica holding
-    # that user's WebSocket forwards the push (the Celery worker itself
-    # holds none — this is how worker-originated events reach browsers).
+# 3. Cross-process fanout (Redis) when available — non-blocking. The
+    #    envelope targets the recipient's user id so any API replica holding
+    #    that user's WebSocket forwards the push (the Celery worker itself
+    #    holds none — this is how worker-originated events reach browsers).
     publish_redis_channel(
         event.tenant_id,
         {
@@ -255,6 +255,24 @@ async def dispatch_event(
         },
         user_ids=[str(recipient_user_id)] if recipient_user_id else None,
     )
+
+    # 4. Partner / ERP webhooks (spec 24.6). fire_event only queues
+    #    deliveries for endpoints whose subscription list includes this
+    #    event type — nothing registered => a fast no-op. Best-effort: a
+    #    slow or failing endpoint must never break the outbox lifecycle.
+    if event.tenant_id is not None:
+        try:
+            from app.services.webhook_service import WebhookService
+
+            await WebhookService(db).fire_event(
+                event.event_type,
+                payload,
+                organization_id=event.tenant_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning(
+                "webhook dispatch failed for event %s: %s", event.id, exc
+            )
 
     event.status = "published"
     event.published_at = now_utc()
@@ -306,6 +324,7 @@ def _notification_type(event_type: str) -> str:
     """Map an outbox event type to a notification_type value."""
     mapping = {
         "agreement.status_changed": "workflow_transition",
+        "agreement.executed": "workflow_transition",
         "negotiation.proposal_created": "change_requested",
         "negotiation.proposal_accepted": "agreement_accepted",
         "signature.requested": "signature_request",

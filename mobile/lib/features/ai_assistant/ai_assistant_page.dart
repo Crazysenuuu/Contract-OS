@@ -87,7 +87,7 @@ class _AiAssistantPageState extends ConsumerState<AiAssistantPage> {
     try {
       final client = ref.read(apiClientProvider);
       final resp = await client.dio.post<Map<String, dynamic>>(
-        '/api/v1/intelligence/ask',
+        '/intelligence/ask',
         data: {
           'question': query,
           if (_conversationId != null)

@@ -126,7 +126,7 @@ final taskHubProvider =
   // 1. Dashboard tasks (primary surface; failures here fail the load).
   try {
     final resp = await client.dio.get<List<dynamic>>(
-      '/api/v1/dashboard/tasks',
+      '/dashboard/tasks',
       queryParameters: {'status': 'pending', 'limit': 50},
       options: headers,
     );
@@ -140,7 +140,7 @@ final taskHubProvider =
   // 2. Pending approvals (spec 2.02: "Contract awaiting your approval").
   try {
     final resp = await client.dio.get<Map<String, dynamic>>(
-      '/api/v1/approvals',
+      '/approvals',
       queryParameters: {'status': 'pending', 'page_size': 50},
       options: headers,
     );
@@ -154,7 +154,7 @@ final taskHubProvider =
   // 3. Contracts awaiting signature (spec 2.02: "awaiting your signature").
   try {
     final resp = await client.dio.get<Map<String, dynamic>>(
-      '/api/v1/agreements',
+      '/agreements',
       queryParameters: {'status': 'pending_signature', 'limit': 20},
       options: headers,
     );

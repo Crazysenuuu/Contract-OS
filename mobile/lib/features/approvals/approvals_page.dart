@@ -59,7 +59,7 @@ final approvalsProvider =
   if (token == null || token.isEmpty) return [];
 
   final resp = await client.dio.get<Map<String, dynamic>>(
-    '/api/v1/approvals',
+    '/approvals',
     queryParameters: {'status': 'pending', 'page_size': 50},
     options: Options(headers: {'Authorization': 'Bearer $token'}),
   );
@@ -239,7 +239,7 @@ class _ApprovalDetailPageState extends ConsumerState<ApprovalDetailPage> {
     try {
       final client = ref.read(apiClientProvider);
       await client.dio.post<void>(
-        '/api/v1/approvals/${widget.item.id}/$action',
+        '/approvals/${widget.item.id}/$action',
         data: {'notes': _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim()},

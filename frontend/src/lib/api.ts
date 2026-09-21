@@ -670,17 +670,88 @@ export async function getRedline(
   );
 }
 
+export interface AgreementVersionSummary {
+  id: string;
+  version_number: number;
+  status: string;
+  content_hash: string;
+  note: string | null;
+  created_by: string;
+  locked_at: string | null;
+  created_at: string;
+}
+
+export interface AgreementVersionDetail extends AgreementVersionSummary {
+  agreement_id: string;
+  content: string;
+  data: Record<string, unknown> | null;
+  updated_at: string;
+}
+
 export async function listVersions(
   token: string,
   agreementId: string
 ) {
-  return apiRequest<Array<{
-    id: string;
-    version_number: number;
-    status: string;
-    content_hash: string;
-    created_at: string;
-  }>>(`/agreements/${agreementId}/versions`, { token });
+  return apiRequest<AgreementVersionSummary[]>(
+    `/agreements/${agreementId}/versions`,
+    { token }
+  );
+}
+
+export async function getAgreementVersion(
+  token: string,
+  agreementId: string,
+  versionNumber: number
+) {
+  return apiRequest<AgreementVersionDetail>(
+    `/agreements/${agreementId}/versions/${versionNumber}`,
+    { token }
+  );
+}
+
+export async function createAgreementVersion(
+  token: string,
+  agreementId: string,
+  data: { note?: string; content?: string; data?: Record<string, unknown> } = {}
+) {
+  return apiRequest<AgreementVersionDetail>(
+    `/agreements/${agreementId}/versions`,
+    { method: "POST", body: data, token }
+  );
+}
+
+export async function compareAgreementVersions(
+  token: string,
+  agreementId: string,
+  fromVersion: number,
+  toVersion: number
+) {
+  return apiRequest<{
+    from_version: number;
+    to_version: number;
+    from_content_hash: string;
+    to_content_hash: string;
+    content_diff: string;
+    data_diff: {
+      added: Array<{ key: string; new: unknown }>;
+      removed: Array<{ key: string; old: unknown }>;
+      changed: Array<{ key: string; old: unknown; new: unknown }>;
+    };
+  }>(
+    `/agreements/${agreementId}/versions/compare?from_version=${fromVersion}&to_version=${toVersion}`,
+    { token }
+  );
+}
+
+export async function restoreAgreementVersion(
+  token: string,
+  agreementId: string,
+  versionNumber: number
+) {
+  return apiRequest<AgreementVersionDetail>(
+    `/agreements/${agreementId}/versions/${versionNumber}/restore`,
+    { method: "POST", token }
+  );
 }
 
 // External Party
@@ -2868,6 +2939,116 @@ export async function decideIngestionReview(
     `/ingestion/review-queue/${taskId}/decision`,
     { method: "POST", body: { approved, corrected_text: correctedText, notes }, token }
   );
+}
+
+// ---------------------------------------------------------------------------
+// Approval workspace (spec 2.05): context + decisions + pending (spec 24.2)
+// ---------------------------------------------------------------------------
+
+export interface ApprovalContext {
+  agreement: { id: string; title: string; status: string };
+  version: {
+    id: string;
+    version_number: number;
+    content_hash: string;
+  } | null;
+  viewer: {
+    member_id: string;
+    party_id: string | null;
+    role: string;
+    can_approve: boolean;
+  };
+  legal_review: {
+    status: string;
+    confirmed_by?: string | null;
+    confirmed_at?: string | null;
+  };
+  workflow: { current_step: string };
+  changes: { added: number; modified: number; removed: number };
+}
+
+export interface ApprovalRecordInfo {
+  id: string;
+  agreement_id: string;
+  definition_id: string;
+  current_stage_id: string | null;
+  status: string;
+  agreement_version_id: string | null;
+  approval_type: string;
+  created_at: string;
+}
+
+export async function getApprovalContext(
+  token: string,
+  agreementId: string
+) {
+  return apiRequest<ApprovalContext>(
+    `/agreements/${agreementId}/approval-context`,
+    { token }
+  );
+}
+
+export async function getApprovalForAgreement(
+  token: string,
+  agreementId: string
+) {
+  return apiRequest<ApprovalRecordInfo>(
+    `/agreements/${agreementId}/approvals`,
+    { token }
+  );
+}
+
+export async function startApproval(
+  token: string,
+  agreementId: string,
+  body: { definition_id?: string | null; approval_type?: string }
+) {
+  return apiRequest<ApprovalRecordInfo & { routing?: Record<string, unknown> | null }>(
+    `/agreements/${agreementId}/approvals/start`,
+    { token, method: "POST", body: { agreement_id: agreementId, ...body } }
+  );
+}
+
+export async function makeApprovalDecision(
+  token: string,
+  agreementId: string,
+  recordId: string,
+  body: { decision: string; comment?: string | null; mfa_code?: string | null }
+) {
+  return apiRequest<{
+    id: string;
+    record_id: string;
+    stage_id: string;
+    user_id: string;
+    decision: string;
+    comment: string | null;
+    decided_at: string;
+  }>(`/agreements/${agreementId}/approvals/${recordId}/decide`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export async function getPendingApprovals(token: string) {
+  return apiRequest<Array<Record<string, unknown>>>(`/approvals/pending`, {
+    token,
+  });
+}
+
+export async function listApprovalDefinitions(token: string) {
+  return apiRequest<
+    Array<{
+      id: string;
+      organization_id: string;
+      name: string;
+      description: string | null;
+      is_active: boolean;
+      min_value: number | null;
+      max_value: number | null;
+      created_at: string;
+    }>
+  >(`/approval-definitions`, { token });
 }
 
 // ---------------------------------------------------------------------------

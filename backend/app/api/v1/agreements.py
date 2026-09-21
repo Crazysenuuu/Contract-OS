@@ -1,3 +1,4 @@
+import copy
 import hashlib
 from uuid import UUID
 
@@ -20,7 +21,10 @@ from app.schemas.agreement import (
     AgreementResponse,
     AgreementTypeResponse,
     AgreementUpdate,
+    AgreementVersionDetailResponse,
     AgreementVersionResponse,
+    CreateVersionRequest,
+    VersionCompareResponse,
 )
 from app.services.agreement_renderer import (
     get_template_questions,
@@ -28,6 +32,12 @@ from app.services.agreement_renderer import (
     render_agreement,
     resolve_template_key,
     validate_answers,
+)
+from app.services.agreement_versioning import (
+    compare_versions as compare_agreement_versions,
+    create_version,
+    get_version_by_number,
+    restore_version,
 )
 from app.services.schema_validation_service import (
     validate_agreement_schema,
@@ -254,6 +264,8 @@ async def create_agreement(
         content_hash=calculate_hash(""),
         status="draft",
         created_by=current_user.id,
+        data=copy.deepcopy(intake) if intake else None,
+        note="Initial version",
     )
     db.add(initial_version)
     await db.flush()
@@ -377,6 +389,156 @@ async def list_versions(
         .order_by(AgreementVersion.version_number)
     )
     return result.scalars().all()
+
+
+async def _load_owned_agreement(
+    db: AsyncSession,
+    agreement_id: UUID,
+    org_id: UUID,
+) -> Agreement:
+    result = await db.execute(
+        select(Agreement).where(
+            Agreement.id == agreement_id,
+            Agreement.organization_id == org_id,
+        )
+    )
+    agreement = result.scalar_one_or_none()
+    if agreement is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agreement not found",
+        )
+    return agreement
+
+
+@router.get(
+    "/{agreement_id}/versions/compare",
+    response_model=VersionCompareResponse,
+)
+async def compare_agreement_version_endpoints(
+    agreement_id: UUID,
+    from_version: int,
+    to_version: int,
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Diff two versions of an agreement (content + answers)."""
+    await _load_owned_agreement(db, agreement_id, org_id)
+    try:
+        return await compare_agreement_versions(
+            db, agreement_id, from_version, to_version
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+
+@router.get(
+    "/{agreement_id}/versions/{version_number}",
+    response_model=AgreementVersionDetailResponse,
+)
+async def get_agreement_version(
+    agreement_id: UUID,
+    version_number: int,
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch a single version including its answers snapshot."""
+    await _load_owned_agreement(db, agreement_id, org_id)
+    version = await get_version_by_number(db, agreement_id, version_number)
+    if version is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Version {version_number} not found",
+        )
+    return version
+
+
+@router.post(
+    "/{agreement_id}/versions",
+    response_model=AgreementVersionDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_agreement_version(
+    agreement_id: UUID,
+    data: CreateVersionRequest = CreateVersionRequest(),
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Snapshot the agreement's current state as a new immutable version.
+
+    History is append-only: this never mutates existing versions.
+    """
+    agreement = await _load_owned_agreement(db, agreement_id, org_id)
+
+    latest_content = ""
+    latest = (
+        await db.execute(
+            select(AgreementVersion)
+            .where(AgreementVersion.agreement_id == agreement_id)
+            .order_by(AgreementVersion.version_number.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest is not None and latest.content:
+        latest_content = latest.content
+
+    snapshot = data.data if data.data is not None else agreement.data
+    version = await create_version(
+        db=db,
+        agreement=agreement,
+        content=data.content if data.content is not None else latest_content,
+        created_by=current_user.id,
+        status="draft",
+        data=snapshot,
+        note=data.note or "Manual snapshot",
+    )
+    return version
+
+
+@router.post(
+    "/{agreement_id}/versions/{version_number}/restore",
+    response_model=AgreementVersionDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def restore_agreement_version(
+    agreement_id: UUID,
+    version_number: int,
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Restore a previous version by appending a new version with its content.
+
+    The working agreement is reset to the restored answers; no existing
+    version is modified.
+    """
+    agreement = await _load_owned_agreement(db, agreement_id, org_id)
+    if agreement.status not in EDITABLE_STATES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agreement cannot be modified in current status",
+        )
+    if agreement_is_immutable(agreement):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Executed agreements cannot be edited directly; create an amendment",
+        )
+
+    version = await get_version_by_number(db, agreement_id, version_number)
+    if version is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Version {version_number} not found",
+        )
+
+    restored = await restore_version(db, agreement, version, current_user.id)
+    await db.flush()
+    await db.refresh(restored)
+    return restored
 
 
 # --- Template & Rendering Endpoints ---
@@ -513,6 +675,7 @@ async def update_answers(
     data: UpdateAnswersRequest,
     org_id: UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update the answers_json for an agreement (wizard progress)."""
     result = await db.execute(
@@ -561,6 +724,31 @@ async def update_answers(
     flag_modified(agreement, "answer_provenance")
     await db.flush()
     await db.refresh(agreement)
+
+    # Spec §26/§3: editing a draft appends version N+1 and never mutates
+    # version N. Skip the append when the answers are byte-for-byte identical
+    # to the latest snapshot so repeated saves / compliance checks don't
+    # inflate history.
+    from app.services.agreement_versioning import (
+        calculate_data_hash,
+        get_latest_version,
+    )
+
+    new_data_hash = calculate_data_hash(agreement.data)
+    latest_version = await get_latest_version(db, agreement_id)
+    latest_hash = (
+        calculate_data_hash(latest_version.data) if latest_version is not None else None
+    )
+    if latest_version is None or new_data_hash != latest_hash:
+        await create_version(
+            db=db,
+            agreement=agreement,
+            content="",
+            created_by=current_user.id,
+            status="draft",
+            data=agreement.data,
+            note="Answers updated",
+        )
 
     # Formal schema validation (spec 1.9) — warnings are returned to the
     # client but do not block saving draft progress.

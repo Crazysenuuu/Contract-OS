@@ -1915,6 +1915,10 @@ PERMISSION_CATALOG = [
     {"key": "integration.manage", "description": "Configure enterprise integrations"},
     {"key": "webhook.manage", "description": "Manage outbound webhooks"},
     {"key": "legal_entity.manage", "description": "Manage legal entities and authorised signatories"},
+    {"key": "workflow.view", "description": "View workflow definitions and instances"},
+    {"key": "workflow.manage", "description": "Create, edit, validate, publish and disable workflow definitions"},
+    {"key": "workflow.execute", "description": "Dispatch workflow events and complete tasks"},
+    {"key": "workflow.resolve_incident", "description": "Resolve workflow incidents"},
 ]
 
 

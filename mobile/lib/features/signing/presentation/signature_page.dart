@@ -15,19 +15,19 @@ class SigningRepository {
   final Dio _dio;
 
   Future<SigningSession> getSession(String sessionId) async {
-    final resp = await _dio.get('/api/v1/signing-sessions/$sessionId');
+    final resp = await _dio.get('/signing/sessions/$sessionId');
     return SigningSession.fromJson(resp.data as Map<String, dynamic>);
   }
 
   Future<SigningSession> exchangeToken(String oneTimeToken) async {
-    final resp = await _dio.post('/api/v1/signing-sessions/exchange', data: {
+    final resp = await _dio.post('/signing/sessions/exchange', data: {
       'token': oneTimeToken,
     });
     return SigningSession.fromJson(resp.data as Map<String, dynamic>);
   }
 
   Future<void> recordConsent(String sessionId) async {
-    await _dio.post('/api/v1/signing-sessions/$sessionId/consent');
+    await _dio.post('/signing/sessions/$sessionId/consent');
   }
 
   Future<void> submitSignature({
@@ -35,14 +35,14 @@ class SigningRepository {
     required String signatureData, // base64 or consent-click marker
     required String signatureType, // 'drawn' | 'click_to_sign'
   }) async {
-    await _dio.post('/api/v1/signing-sessions/$sessionId/sign', data: {
+    await _dio.post('/signing/sessions/$sessionId/sign', data: {
       'signature_data': signatureData,
       'signature_type': signatureType,
     });
   }
 
   Future<Map<String, dynamic>> getAgreementPreview(String agreementId) async {
-    final resp = await _dio.get('/api/v1/agreements/$agreementId');
+    final resp = await _dio.get('/agreements/$agreementId');
     return resp.data as Map<String, dynamic>;
   }
 }

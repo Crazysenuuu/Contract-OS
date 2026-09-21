@@ -16,7 +16,7 @@ import 'package:mocktail/mocktail.dart';
 
 class _MockAuthApi extends Mock implements AuthApi {}
 
-/// Serves canned responses for the boot test's GET /api/v1/agreements call;
+/// Serves canned responses for the boot test's GET /agreements call;
 /// anything else fails immediately (no sockets, no pending timers).
 class _StubAdapter implements HttpClientAdapter {
   @override
@@ -29,7 +29,7 @@ class _StubAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final path = options.uri.path;
-    if (path.endsWith('/api/v1/agreements') && options.method == 'GET') {
+    if (path.endsWith('/agreements') && options.method == 'GET') {
       return ResponseBody.fromString(
         '''{"items": [{"id": "a-1", "title": "MSA with Globex", "status": "pending_signature", "counterparty": "Globex", "agreement_type_name": "MSA"}]}''',
         200,

@@ -141,7 +141,7 @@ class ContractsRepository {
   }) async {
     final params = <String, dynamic>{'limit': limit, 'offset': offset};
     if (status != null) params['status'] = status;
-    final resp = await _dio.get('/api/v1/agreements', queryParameters: params);
+    final resp = await _dio.get('/agreements', queryParameters: params);
     final items = (resp.data['items'] as List?) ?? [];
     return items
         .cast<Map<String, dynamic>>()
@@ -428,7 +428,7 @@ class ContractDetailPage extends ConsumerWidget {
         final resp = await ref
             .watch(apiClientProvider)
             .dio
-            .get('/api/v1/agreements/$contractId');
+            .get('/agreements/$contractId');
         return resp.data as Map<String, dynamic>;
       }),
     );

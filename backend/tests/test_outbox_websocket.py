@@ -111,6 +111,72 @@ class TestOutbox:
         # the status filter. Here we assert the published state.
         assert event.status == "published"
 
+    async def test_dispatch_forwards_event_to_webhook_service(
+        self, db_session: AsyncSession, test_org, test_user
+    ):
+        """Spec 24.6 — the dispatcher fires subscribed partner/ERP webhooks,
+        scoped to the tenant, without breaking the outbox lifecycle."""
+        from unittest.mock import AsyncMock, patch
+
+        from app.services.webhook_service import WebhookService
+
+        event = await enqueue_event(
+            db_session,
+            tenant_id=test_org.id,
+            event_type="agreement.executed",
+            aggregate_type="agreement",
+            aggregate_id=uuid.uuid4(),
+            payload={"agreement_title": "MSA", "status": "executed"},
+        )
+        await db_session.commit()
+
+        fired: list[tuple[str, dict, object]] = []
+
+        async def _fake_fire(event_type, payload, organization_id=None):
+            fired.append((event_type, dict(payload), organization_id))
+            return 0
+
+        with patch.object(WebhookService, "fire_event", AsyncMock(side_effect=_fake_fire)):
+            await dispatch_event(db_session, event)
+            await db_session.commit()
+
+        assert len(fired) == 1
+        assert fired[0][0] == "agreement.executed"
+        assert fired[0][1]["agreement_title"] == "MSA"
+        assert fired[0][2] == test_org.id
+        assert event.status == "published"
+
+    async def test_dispatch_survives_webhook_failure(
+        self, db_session: AsyncSession, test_org, test_user
+    ):
+        from unittest.mock import AsyncMock, patch
+
+        from app.services.webhook_service import WebhookService
+
+        event = await enqueue_event(
+            db_session,
+            tenant_id=test_org.id,
+            event_type="agreement.status_changed",
+            aggregate_type="agreement",
+            payload={"recipient_email": "ops@firm.com"},
+        )
+        await db_session.commit()
+
+        with patch.object(
+            WebhookService, "fire_event", AsyncMock(side_effect=RuntimeError("endpoint down"))
+        ):
+            await dispatch_event(db_session, event)
+            await db_session.commit()
+
+        # A failing webhook must never break the outbox lifecycle.
+        assert event.status == "published"
+        notif_result = await db_session.execute(
+            select(Notification).where(
+                Notification.organization_id == test_org.id
+            )
+        )
+        assert len(notif_result.scalars().all()) == 1
+
 
 class TestOutboxApi:
     async def test_enqueue_and_process_api(self, client, test_org, test_user, auth_headers, db_session):

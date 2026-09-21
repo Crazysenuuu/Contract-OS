@@ -310,7 +310,7 @@ async def apply_transition(
     # ------------------------------------------------------------------ #
     # QUALITY GATE (MVP gap fix)
     # ------------------------------------------------------------------ #
-    QUALITY_GATED_ACTIONS = {"send", "submit", "submit_for_review", "submit_for_approval"}
+    QUALITY_GATED_ACTIONS = {"send", "submit", "submit_for_review"}
     if rule.action_key in QUALITY_GATED_ACTIONS:
         report = await _quality_gate_report(db, agreement)
         if report.get("has_blockers"):

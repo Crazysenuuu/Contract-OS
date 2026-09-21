@@ -75,7 +75,7 @@ class NotificationsRepository {
     final params = <String, dynamic>{'limit': 50};
     if (unreadOnly) params['unread_only'] = true;
     final resp =
-        await _dio.get('/api/v1/notifications', queryParameters: params);
+        await _dio.get('/notifications', queryParameters: params);
     final items = (resp.data['items'] as List?) ??
         (resp.data as List?) ??
         <dynamic>[];
@@ -86,11 +86,11 @@ class NotificationsRepository {
   }
 
   Future<void> markRead(String id) async {
-    await _dio.patch('/api/v1/notifications/$id/read');
+    await _dio.patch('/notifications/$id/read');
   }
 
   Future<void> markAllRead() async {
-    await _dio.post('/api/v1/notifications/mark-all-read');
+    await _dio.post('/notifications/mark-all-read');
   }
 }
 

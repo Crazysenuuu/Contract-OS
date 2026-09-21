@@ -7,6 +7,8 @@ import 'core/network/mobile_config_service.dart';
 import 'core/notifications/push_banner_actions.dart';
 import 'core/notifications/push_banner_overlay.dart';
 import 'features/onboarding/auth_gate.dart';
+import 'features/signing/presentation/signature_page.dart';
+import 'features/signing/presentation/signing_entry_page.dart';
 
 class ContractOSApp extends ConsumerWidget {
   const ContractOSApp({super.key});
@@ -31,6 +33,22 @@ class ContractOSApp extends ConsumerWidget {
       // Deep links (spec 2.02 §23): starts app_links listeners as soon as
       // the navigator exists so cold-start links are not dropped.
       home: const _DeepLinkBoot(child: _VersionGate()),
+      // Named routes (spec 2.06 signing flow). ReviewPage carries the
+      // signing session id as route arguments; a bare arrive lands on the
+      // token-exchange entry for push/deep-link arrivals.
+      onGenerateRoute: (settings) {
+        if (settings.name == '/signing/auth') {
+          final arg = settings.arguments;
+          final Widget page = (arg is String && arg.isNotEmpty)
+              ? SignaturePage(sessionId: arg)
+              : const SigningEntryPage();
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => page,
+          );
+        }
+        return null;
+      },
     );
   }
 }

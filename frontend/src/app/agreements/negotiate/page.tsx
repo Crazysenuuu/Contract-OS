@@ -120,7 +120,9 @@ function NegotiateContent() {
         modifications: [
           {
             clause_identifier: proposal.clause_identifier,
-            change_type: proposal.change_type === "scope_change" ? "modified" : "modified",
+            // Clause-level change_type is add|remove|modify|replace — editing a
+            // clause's content is always a modification.
+            change_type: "modify",
             new_content: proposal.new_content,
             reason: proposal.reason || undefined,
           },

@@ -40,7 +40,7 @@ class _SigningEntryPageState extends ConsumerState<SigningEntryPage> {
     });
     try {
       final resp = await ref.read(apiClientProvider).dio.post(
-        '/api/v1/signing-sessions/exchange',
+        '/signing/sessions/exchange',
         data: {'token': widget.token},
       );
       final session =

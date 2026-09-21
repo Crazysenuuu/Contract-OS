@@ -61,6 +61,10 @@ PERMISSION_KEYS: frozenset[str] = frozenset(
         "integration.manage",
         "webhook.manage",
         "legal_entity.manage",
+        "workflow.view",
+        "workflow.manage",
+        "workflow.execute",
+        "workflow.resolve_incident",
     }
 )
 

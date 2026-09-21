@@ -4,6 +4,8 @@ Every new proposal or change creates a new version.
 Versions are immutable — once created, content never changes.
 """
 
+import copy
+import difflib
 import hashlib
 import uuid
 
@@ -19,6 +21,14 @@ from app.models.agreement import (
 def calculate_hash(content: str) -> str:
     """Calculate SHA-256 hash of content."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def calculate_data_hash(data: dict | None) -> str:
+    """Calculate a stable SHA-256 hash of an answers snapshot."""
+    import json
+
+    canonical = json.dumps(data or {}, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 async def get_latest_version(
@@ -56,6 +66,8 @@ async def create_version(
     content: str,
     created_by: uuid.UUID,
     status: str = "draft",
+    data: dict | None = None,
+    note: str | None = None,
 ) -> AgreementVersion:
     """Create a new immutable version for an agreement.
 
@@ -65,6 +77,8 @@ async def create_version(
         content: The full text content of this version.
         created_by: User ID creating the version.
         status: Version status (default: 'draft').
+        data: Immutable snapshot of the agreement answers at this version.
+        note: Human-readable label for the version.
 
     Returns:
         The newly created AgreementVersion.
@@ -87,6 +101,8 @@ async def create_version(
         content_hash=calculate_hash(content),
         status=status,
         created_by=created_by,
+        data=copy.deepcopy(data) if data is not None else None,
+        note=note,
     )
 
     db.add(version)
@@ -176,3 +192,106 @@ async def promote_version(
 
     await cancel_approvals_for_agreement(db, agreement.id)
     return version
+
+
+def diff_data(
+    old: dict | None,
+    new: dict | None,
+) -> dict:
+    """Compute an answer-level diff between two version snapshots.
+
+    Returns added / removed / changed key lists plus the old and new values
+    for each changed key so the client can render a field-level comparison.
+    """
+    old = old or {}
+    new = new or {}
+    old_keys = set(old.keys())
+    new_keys = set(new.keys())
+
+    added = sorted(new_keys - old_keys)
+    removed = sorted(old_keys - new_keys)
+    changed = sorted(
+        key
+        for key in (old_keys & new_keys)
+        if old.get(key) != new.get(key)
+    )
+
+    return {
+        "added": [{"key": k, "new": new.get(k)} for k in added],
+        "removed": [{"key": k, "old": old.get(k)} for k in removed],
+        "changed": [
+            {"key": k, "old": old.get(k), "new": new.get(k)} for k in changed
+        ],
+    }
+
+
+async def compare_versions(
+    db: AsyncSession,
+    agreement_id: uuid.UUID,
+    from_version: int,
+    to_version: int,
+) -> dict:
+    """Compare two versions of an agreement.
+
+    Returns a unified text diff of rendered content plus an answer-level
+    data diff. Either side may be missing content (an un-rendered draft
+    version), in which case the text diff is empty.
+    """
+    old = await get_version_by_number(db, agreement_id, from_version)
+    new = await get_version_by_number(db, agreement_id, to_version)
+    if old is None:
+        raise ValueError(f"Version {from_version} not found")
+    if new is None:
+        raise ValueError(f"Version {to_version} not found")
+
+    old_lines = (old.content or "").splitlines(keepends=True)
+    new_lines = (new.content or "").splitlines(keepends=True)
+    unified = "".join(
+        difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"v{from_version}",
+            tofile=f"v{to_version}",
+        )
+    )
+
+    return {
+        "from_version": from_version,
+        "to_version": to_version,
+        "from_content_hash": old.content_hash,
+        "to_content_hash": new.content_hash,
+        "content_diff": unified,
+        "data_diff": diff_data(old.data, new.data),
+    }
+
+
+async def restore_version(
+    db: AsyncSession,
+    agreement: Agreement,
+    version: AgreementVersion,
+    created_by: uuid.UUID,
+) -> AgreementVersion:
+    """Restore a previous version by appending a new version with its content.
+
+    History is never rewritten: the restore is itself a new version (N+1)
+    carrying the restored answers and rendered text, and the agreement's
+    working data is reset to the restored snapshot.
+    """
+    restored_data = copy.deepcopy(version.data) if version.data is not None else None
+
+    if restored_data is not None:
+        agreement.data = restored_data
+        from sqlalchemy.orm.attributes import flag_modified
+
+        flag_modified(agreement, "data")
+
+    return await create_version(
+        db=db,
+        agreement=agreement,
+        content=version.content or "",
+        created_by=created_by,
+        status="draft",
+        data=restored_data,
+        note=f"Restored from v{version.version_number}",
+    )
+

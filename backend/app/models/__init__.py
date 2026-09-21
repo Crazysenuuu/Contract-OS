@@ -75,6 +75,21 @@ from app.models.workflow import (
     WorkflowTransition,
     WorkflowInstance,
 )
+from app.models.orchestration import (
+    OrchWorkflowDefinition,
+    OrchStepDefinition,
+    OrchTransition,
+    OrchWorkflowInstance,
+    OrchStepInstance,
+    OrchDependency,
+    OrchTask,
+    OrchTimer,
+    OrchEventWait,
+    OrchActionAttempt,
+    OrchIncident,
+    OrchWorkflowEventLog,
+    OrchDeadLetter,
+)
 from app.models.ai_analysis import (
     RiskFinding,
     ContractSummary,

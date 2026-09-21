@@ -45,17 +45,23 @@ async def issue_otp(
     signature_request_id: uuid.UUID,
     channel: str = "email",
     email: str | None = None,
+    phone: str | None = None,
     max_attempts: int = OTP_MAX_ATTEMPTS,
 ) -> dict:
     """Generate, store (hashed), and deliver a one-time code.
 
     Returns the challenge id, expiry, and the raw code ONLY for the
-    caller to embed in the delivery mechanism (the email service). For
-    email delivery the raw code is passed to the email service; for SMS a
-    stub provider can be swapped in.
+    caller to embed in the delivery mechanism. Delivery follows the chosen
+    channel: email via the email service, SMS via the provider-agnostic
+    gateway. Both are optional-by-construction — a missing credential skips
+    delivery but never loses the challenge (the dev/log fallback echoes the
+    code through ``debug_code``).
     """
     code = "".join(secrets.choice("0123456789") for _ in range(OTP_LENGTH))
     expires_at = _utcnow() + timedelta(seconds=OTP_TTL_SECONDS)
+
+    if channel == "sms" and not phone:
+        raise OTPError("sms channel requires a phone number")
 
     challenge = OTPChallenge(
         organization_id=organization_id,
@@ -71,22 +77,33 @@ async def issue_otp(
     await db.flush()
 
     # Deliver the code. The email service logs when SendGrid is absent, so
-    # dev environments can read the code from the log.
+    # dev environments can read the code from the log; the SMS gateway
+    # reports disabled without credentials. Delivery failure must not lose
+    # the challenge — log-only fallback.
     delivery_ref = None
     try:
-        from app.services.email_service import EmailService
+        if channel == "sms":
+            from app.services.sms_sender_service import send_sms
 
-        service = EmailService()
-        result = service.send_email(
-            to_email=email or "",
-            subject="Your verification code",
-            template_name="verification_code",
-            template_data={"code": code},
-        )
-        if result:
-            delivery_ref = getattr(result, "message_id", None) or None
+            result = await send_sms(
+                phone or "",
+                f"Your ContractOS verification code is {code}",
+            )
+            if result.sent:
+                delivery_ref = result.provider_message_id
+        else:
+            from app.services.email_service import EmailService
+
+            service = EmailService()
+            result = service.send_email(
+                to_email=email or "",
+                subject="Your verification code",
+                template_name="verification_code",
+                template_data={"code": code},
+            )
+            if result:
+                delivery_ref = getattr(result, "message_id", None) or None
     except Exception:
-        # Delivery failure should not lose the challenge; log-only fallback.
         pass
 
     challenge.delivery_ref = delivery_ref

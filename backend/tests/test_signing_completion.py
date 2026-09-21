@@ -118,6 +118,50 @@ async def test_all_required_signers_executes_and_locks(db_session, test_agreemen
 
 
 @pytest.mark.asyncio
+async def test_execution_publishes_agreement_executed_outbox_event(
+    db_session, test_agreement, test_user, test_legal_entity
+):
+    """Spec 24.6 — execution triggers the outbox in the same transaction, so
+    ERP/partner webhooks and notifications can react only once."""
+    from sqlalchemy import select
+
+    from app.models.event_outbox import OutboxEvent
+    from app.services.signing_completion import check_and_execute
+
+    version = await _version(db_session, test_agreement, test_user)
+    party = await _external_party(db_session, test_agreement, test_legal_entity, "jane@counterparty.example")
+    db_session.add(_internal_sig(test_agreement, test_user, version))
+    db_session.add(_external_sig(test_agreement, party, version))
+    test_agreement.status = "partially_signed"
+    await db_session.flush()
+
+    executed = await check_and_execute(db_session, agreement=test_agreement, org_id=test_agreement.organization_id)
+    assert executed is True
+
+    result = await db_session.execute(
+        select(OutboxEvent).where(
+            OutboxEvent.aggregate_id == test_agreement.id,
+            OutboxEvent.event_type == "agreement.executed",
+        )
+    )
+    rows = result.scalars().all()
+    assert len(rows) == 1
+    assert rows[0].status == "pending"
+    assert rows[0].payload["agreement_id"] == str(test_agreement.id)
+    assert rows[0].payload["execution_date"] == test_agreement.execution_date.isoformat()
+
+    # Re-running completion must not double-publish (idempotent dedup key).
+    await check_and_execute(db_session, agreement=test_agreement, org_id=test_agreement.organization_id)
+    result = await db_session.execute(
+        select(OutboxEvent).where(
+            OutboxEvent.aggregate_id == test_agreement.id,
+            OutboxEvent.event_type == "agreement.executed",
+        )
+    )
+    assert len(result.scalars().all()) == 1
+
+
+@pytest.mark.asyncio
 async def test_declined_party_is_not_a_required_signer(db_session, test_agreement, test_user, test_legal_entity):
     version = await _version(db_session, test_agreement, test_user)
     party = await _external_party(db_session, test_agreement, test_legal_entity, "jane@counterparty.example")

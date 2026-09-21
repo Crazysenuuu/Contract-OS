@@ -72,6 +72,12 @@ celery_app.conf.beat_schedule = {
         'task': 'app.tasks.scheduler.auto_seal_audit_batches_task',
         'schedule': crontab(minute=10),
     },
+    # Every minute: fire elapsed workflow orchestrator DELAY/retry timers
+    # (spec 2.11.23 process_due_timers).
+    'process-workflow-timers': {
+        'task': 'app.tasks.scheduler.process_workflow_timers',
+        'schedule': crontab(minute='*'),
+    },
 }
 
 
@@ -418,6 +424,30 @@ def auto_seal_audit_batches_task(
                     min_batch_size=min_batch_size,
                     max_batches_per_tenant=max_batches_per_tenant,
                 )
+                await db.commit()
+                return result
+            except Exception:
+                await db.rollback()
+                raise
+
+    return _run_async(_run)
+
+
+@celery_app.task(name="app.tasks.scheduler.process_workflow_timers")
+def process_workflow_timers(limit: int = 200):
+    """Fire elapsed orchestrator timers (spec 2.11.23).
+
+    Sweeps PENDING DELAY/action-retry timers whose scheduled time has passed
+    and re-enters the affected workflows. Safe to run every minute: already
+    fired timers are skipped by status filter.
+    """
+    from app.core.database import AsyncSessionLocal
+    from app.services.orchestration_engine import process_due_timers
+
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            try:
+                result = await process_due_timers(db, limit=limit)
                 await db.commit()
                 return result
             except Exception:

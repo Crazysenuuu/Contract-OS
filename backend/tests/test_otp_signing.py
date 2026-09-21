@@ -117,6 +117,88 @@ async def test_attempt_limit(db_session, test_org):
 
 
 @pytest.mark.asyncio
+async def test_sms_otp_delivers_via_sms_gateway(db_session, test_org):
+    """Spec 24.4 — the SMS channel sends through the provider-agnostic
+    gateway and records the provider message id as the delivery ref."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.sms_sender_service import SmsDeliveryResult
+
+    sent: dict = {}
+
+    async def _fake_send(to_phone, body, *, sender_id=None):
+        sent["to_phone"] = to_phone
+        sent["body"] = body
+        return SmsDeliveryResult(sent=True, provider_message_id="sms-otp-1")
+
+    with patch("app.services.sms_sender_service.send_sms", AsyncMock(side_effect=_fake_send)):
+        challenge = await issue_otp(
+            db_session,
+            organization_id=test_org.id,
+            signature_request_id=uuid.uuid4(),
+            channel="sms",
+            phone="+15550001000",
+        )
+        await db_session.flush()
+
+    assert sent["to_phone"] == "+15550001000"
+    assert challenge["debug_code"] in sent["body"]
+
+    row = (
+        await db_session.execute(
+            select(OTPChallenge).where(OTPChallenge.id == challenge["challenge_id"])
+        )
+    ).scalar_one()
+    assert row.channel == "sms"
+    assert row.delivery_ref == "sms-otp-1"
+
+    verified = await verify_otp(db_session, challenge_id=row.id, code=challenge["debug_code"])
+    assert verified.consumed is True
+
+
+@pytest.mark.asyncio
+async def test_sms_channel_rejects_missing_phone(db_session, test_org):
+    with pytest.raises(OTPError, match="requires a phone"):
+        await issue_otp(
+            db_session,
+            organization_id=test_org.id,
+            signature_request_id=uuid.uuid4(),
+            channel="sms",
+            email="signer@example.com",
+        )
+
+
+@pytest.mark.asyncio
+async def test_sms_disabled_gateway_still_keeps_challenge(db_session, test_org):
+    """A missing SMS gateway credential must not lose the challenge — the
+    dev/log fallback still returns the code via debug_code."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.sms_sender_service import SmsDeliveryResult
+
+    with patch(
+        "app.services.sms_sender_service.send_sms",
+        AsyncMock(return_value=SmsDeliveryResult(sent=False, disabled=True)),
+    ):
+        challenge = await issue_otp(
+            db_session,
+            organization_id=test_org.id,
+            signature_request_id=uuid.uuid4(),
+            channel="sms",
+            phone="+15550001000",
+        )
+        await db_session.flush()
+
+    assert len(challenge["debug_code"]) == 6
+    row = (
+        await db_session.execute(
+            select(OTPChallenge).where(OTPChallenge.id == challenge["challenge_id"])
+        )
+    ).scalar_one()
+    assert row.delivery_ref is None
+
+
+@pytest.mark.asyncio
 async def test_otp_api_flow(client, auth_headers, test_org, test_agreement):
     """OTP endpoints require an existing signature request, so this verifies
     the endpoint wiring rejects missing requests (404) rather than 500."""

@@ -17,7 +17,8 @@ class ReviewPage extends StatelessWidget {
             const Text('Document review — fetched via the session document API'),
             const SizedBox(height: 24),
             FilledButton(
-              onPressed: () => Navigator.of(context).pushNamed('/signing/auth'),
+              onPressed: () => Navigator.of(context)
+                  .pushNamed('/signing/auth', arguments: sessionId),
               child: const Text('Consent & Continue'),
             ),
           ],

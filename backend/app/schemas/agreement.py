@@ -54,10 +54,34 @@ class AgreementVersionResponse(BaseModel):
     status: str
     created_by: UUID
     locked_at: date | None
+    note: str | None = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AgreementVersionDetailResponse(AgreementVersionResponse):
+    """A single version including its immutable answers snapshot."""
+
+    data: dict | None = None
+
+
+class CreateVersionRequest(BaseModel):
+    """Create an immutable snapshot of the agreement's current state."""
+
+    note: str | None = Field(default=None, max_length=255)
+    content: str | None = None
+    data: dict | None = None
+
+
+class VersionCompareResponse(BaseModel):
+    from_version: int
+    to_version: int
+    from_content_hash: str
+    to_content_hash: str
+    content_diff: str
+    data_diff: dict
 
 
 class AgreementTypeResponse(BaseModel):

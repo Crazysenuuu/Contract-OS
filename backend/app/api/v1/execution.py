@@ -268,6 +268,7 @@ async def sign_signature_request_endpoint(
 
 class OTPIssueRequest(BaseModel):
     channel: str = "email"
+    phone: str | None = None
 
 
 class OTPVerifyRequest(BaseModel):
@@ -312,6 +313,7 @@ async def issue_signer_otp(
         signature_request_id=request_id,
         channel=data.channel,
         email=req.email,
+        phone=data.phone,
     )
     await db.commit()
     return result
