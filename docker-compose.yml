@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15
+    # pgvector-enabled image: knowledge_chunks.embedding is a native
+    # vector(1536) column (spec 2.10.6). The app degrades gracefully to
+    # JSON + Python scoring when the extension is absent.
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: contractos
       POSTGRES_PASSWORD: contractos_password

@@ -64,6 +64,14 @@ celery_app.conf.beat_schedule = {
         'task': 'app.tasks.scheduler.send_renewal_notices',
         'schedule': crontab(hour=8, minute=30),
     },
+    # Hourly at :10: auto-seal audit chains into Merkle batches (spec
+    # 1.20.15-16). Externally anchors roots when a TSA is configured.
+    # Offset from the top of the hour so it never collides with the
+    # expiration sweep.
+    'auto-seal-audit-batches': {
+        'task': 'app.tasks.scheduler.auto_seal_audit_batches_task',
+        'schedule': crontab(minute=10),
+    },
 }
 
 
@@ -377,6 +385,39 @@ def run_retention_worker_task(dry_run: bool = False):
         async with AsyncSessionLocal() as db:
             try:
                 result = await run_retention_worker(db, org_id=None, dry_run=dry_run)
+                await db.commit()
+                return result
+            except Exception:
+                await db.rollback()
+                raise
+
+    return _run_async(_run)
+
+
+@celery_app.task(name="app.tasks.scheduler.auto_seal_audit_batches_task")
+def auto_seal_audit_batches_task(
+    min_batch_size: int = 100,
+    max_batches_per_tenant: int = 20,
+):
+    """Auto-seal audit chains into Merkle batches (spec 1.20.15).
+
+    Runs hourly via beat. For every tenant with >= min_batch_size
+    un-batched audit events, seals contiguous sequence ranges (TSA-anchored
+    when a timestamp authority is configured). Bounded per run; the next
+    tick continues. Idempotent across overlapping runs because already
+    batched events are skipped.
+    """
+    from app.core.database import AsyncSessionLocal
+    from app.services.audit_batching import auto_seal_audit_batches
+
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            try:
+                result = await auto_seal_audit_batches(
+                    db,
+                    min_batch_size=min_batch_size,
+                    max_batches_per_tenant=max_batches_per_tenant,
+                )
                 await db.commit()
                 return result
             except Exception:

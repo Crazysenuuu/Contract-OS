@@ -11,6 +11,7 @@ Policies are per-organization and configurable via API.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field, asdict
@@ -19,6 +20,11 @@ from enum import Enum
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Incident records live in the shared StateStore (Redis when configured) so
+# acknowledge/resolve/stats work across API replicas. Incidents expire after
+# 7 days — they are operational alert state, not audit history.
+INCIDENT_TTL_SECONDS = 7 * 24 * 3600
 
 
 # ── Escalation severity ──────────────────────────────────────────────────────
@@ -179,18 +185,18 @@ def _default_migration_policy(org_id: str) -> EscalationPolicy:
 
 class EscalationService:
     """
-    In-memory escalation policy manager and incident tracker.
+    Escalation policy manager and incident tracker.
 
-    In production, persist policies in the database. This keeps them
-    in memory for fast lookups and easy testing.
+    Policies are process-local (they are configuration, seeded by
+    ``ensure_default_policies`` and managed via the admin API; every replica
+    seeds the same defaults). Throttling counters and incident records live
+    in the shared StateStore (Redis when REDIS_URL is set) so a cooldown
+    applies across replicas and an incident acknowledged on one worker is
+    visible on all of them.
     """
 
     def __init__(self):
         self._policies: dict[str, EscalationPolicy] = {}
-        self._incidents: list[EscalationIncident] = []
-        self._cooldown_tracker: dict[str, float] = {}  # key → last_alert_time
-        self._hourly_counter: dict[str, list[float]] = {}  # key → [timestamps]
-        self._incident_counter = 0
 
     # ── Policy management ───────────────────────────────────────────────
 
@@ -269,15 +275,18 @@ class EscalationService:
             logger.debug("No escalation policy for %s/%s", category, severity)
             return None
 
-        # Check throttling
+        # Check throttling (shared counters — see _is_throttled)
         throttle_key = f"{organization_id}:{category}"
         if self._is_throttled(throttle_key, policy):
             logger.info("Alert throttled: %s", throttle_key)
             return None
 
-        self._incident_counter += 1
+        # Unique across replicas: a per-process counter would collide in the
+        # shared incident store (two workers both minting inc-000001).
+        import uuid as _uuid
+
         incident = EscalationIncident(
-            id=f"inc-{self._incident_counter:06d}",
+            id=f"inc-{_uuid.uuid4().hex[:12]}",
             policy_id=policy.id,
             organization_id=organization_id,
             category=category,
@@ -288,11 +297,10 @@ class EscalationService:
             current_tier=1,
             status=EscalationStatus.PENDING,
         )
-        self._incidents.append(incident)
+        self._store_incident(incident)
 
-        # Record throttle timestamp
-        self._cooldown_tracker[throttle_key] = time.time()
-        self._record_hourly(throttle_key)
+        # Record throttle timestamp (shared across replicas)
+        self._record_throttle(throttle_key, policy)
 
         logger.info(
             "Escalation incident created: %s (tier 1: %s)",
@@ -313,6 +321,7 @@ class EscalationService:
             "by": by,
             "at": incident.acknowledged_at.isoformat(),
         })
+        self._store_incident(incident)
         return True
 
     def resolve_incident(self, incident_id: str, by: str = "system") -> bool:
@@ -327,6 +336,7 @@ class EscalationService:
             "by": by,
             "at": incident.resolved_at.isoformat(),
         })
+        self._store_incident(incident)
         return True
 
     def get_incidents(
@@ -336,19 +346,22 @@ class EscalationService:
         status: EscalationStatus | None = None,
         limit: int = 50,
     ) -> list[EscalationIncident]:
-        filtered = self._incidents
+        incidents = self._load_incidents()
 
         if organization_id:
-            filtered = [i for i in filtered if i.organization_id == organization_id]
+            incidents = [i for i in incidents if i.organization_id == organization_id]
         if category:
-            filtered = [i for i in filtered if i.category == category]
+            incidents = [i for i in incidents if i.category == category]
         if status:
-            filtered = [i for i in filtered if i.status == status]
+            incidents = [i for i in incidents if i.status == status]
 
-        return list(reversed(filtered[-limit:]))
+        return list(reversed(incidents[-limit:]))
 
     def get_incident_stats(self, organization_id: str) -> dict[str, Any]:
-        incidents = [i for i in self._incidents if i.organization_id == organization_id]
+        incidents = [
+            i for i in self._load_incidents()
+            if i.organization_id == organization_id
+        ]
         now = datetime.now(timezone.utc)
         last_24h = [
             i for i in incidents
@@ -388,35 +401,121 @@ class EscalationService:
                     return policy
         return None
 
+    # ── Shared-state helpers (StateStore: Redis when configured) ─────────
+
+    def get_incident(self, incident_id: str) -> EscalationIncident | None:
+        """Fetch a single incident from the shared store (public API)."""
+        return self._get_incident(incident_id)
+
     def _is_throttled(self, key: str, policy: EscalationPolicy) -> bool:
-        last_time = self._cooldown_tracker.get(key)
-        if last_time and (time.time() - last_time) < policy.cooldown_seconds:
+        """Read-only check — recording happens in ``_record_throttle`` only
+        when an incident is actually created (matching the original flow)."""
+        from app.core.distributed_state import get_state_store
+
+        store = get_state_store()
+
+        # Cooldown: TTL key set at last alert.
+        if store.get(f"escalation:cooldown:{key}") is not None:
             return True
 
-        # Check hourly rate
-        timestamps = self._hourly_counter.get(key, [])
-        one_hour_ago = time.time() - 3600
-        recent = [t for t in timestamps if t > one_hour_ago]
-        if len(recent) >= policy.max_alerts_per_hour:
-            return True
+        # Hourly rate: shared sliding window (read-only here).
+        stats = store.window_count(f"escalation:rate:{key}", window_seconds=3600)
+        return stats >= policy.max_alerts_per_hour
 
-        return False
+    def _record_throttle(self, key: str, policy: EscalationPolicy):
+        from app.core.distributed_state import get_state_store
 
-    def _record_hourly(self, key: str):
-        if key not in self._hourly_counter:
-            self._hourly_counter[key] = []
-        self._hourly_counter[key].append(time.time())
-        # Prune old entries
-        one_hour_ago = time.time() - 3600
-        self._hourly_counter[key] = [
-            t for t in self._hourly_counter[key] if t > one_hour_ago
-        ]
+        store = get_state_store()
+        store.set(
+            f"escalation:cooldown:{key}",
+            str(time.time()),
+            ttl_seconds=policy.cooldown_seconds,
+        )
+        # Hourly budget: record this alert's slot in the shared window.
+        store.window_add(
+            f"escalation:rate:{key}",
+            window_seconds=3600,
+            max_events=policy.max_alerts_per_hour,
+        )
+
+    def _store_incident(self, incident: EscalationIncident) -> None:
+        from app.core.distributed_state import get_state_store
+
+        store = get_state_store()
+        store.set_json(
+            f"escalation:incident:{incident.id}",
+            incident.to_dict(),
+            ttl_seconds=INCIDENT_TTL_SECONDS,
+        )
+        # Registry of ids per org for listing (index, not source of truth).
+        index_key = f"escalation:incidents:{incident.organization_id}"
+        try:
+            ids = store.get_json(index_key) or []
+        except (json.JSONDecodeError, TypeError):
+            ids = []
+        if incident.id not in ids:
+            ids.append(incident.id)
+        store.set_json(index_key, ids[-500:], ttl_seconds=INCIDENT_TTL_SECONDS)
+
+    def _load_incidents(self) -> list[EscalationIncident]:
+        from app.core.distributed_state import get_state_store
+
+        store = get_state_store()
+        incidents: list[EscalationIncident] = []
+        for index_key in store.keys("escalation:incidents:*"):
+            ids = store.get_json(index_key) or []
+            for incident_id in ids:
+                raw = store.get_json(f"escalation:incident:{incident_id}")
+                if raw is None:
+                    continue
+                incidents.append(self._incident_from_dict(raw))
+        # Dedup (an org index may appear under multiple scans) and sort by id.
+        seen: set[str] = set()
+        unique: list[EscalationIncident] = []
+        for incident in sorted(incidents, key=lambda i: i.id):
+            if incident.id not in seen:
+                seen.add(incident.id)
+                unique.append(incident)
+        return unique
+
+    @staticmethod
+    def _incident_from_dict(raw: dict) -> EscalationIncident:
+        def _dt(value: str | None) -> datetime | None:
+            if value is None:
+                return None
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+
+        return EscalationIncident(
+            id=raw["id"],
+            policy_id=raw["policy_id"],
+            organization_id=raw["organization_id"],
+            category=raw["category"],
+            title=raw["title"],
+            message=raw["message"],
+            severity=EscalationLevel(raw["severity"]),
+            current_tier=raw.get("current_tier", 1),
+            status=EscalationStatus(raw["status"]),
+            details=raw.get("details") or {},
+            created_at=_dt(raw.get("created_at")) or datetime.now(timezone.utc),
+            escalated_at=_dt(raw.get("escalated_at")),
+            acknowledged_at=_dt(raw.get("acknowledged_at")),
+            resolved_at=_dt(raw.get("resolved_at")),
+            notifications_sent=raw.get("notifications_sent") or [],
+        )
 
     def _get_incident(self, incident_id: str) -> EscalationIncident | None:
-        for i in self._incidents:
-            if i.id == incident_id:
-                return i
-        return None
+        from app.core.distributed_state import get_state_store
+
+        raw = get_state_store().get_json(f"escalation:incident:{incident_id}")
+        if raw is None:
+            return None
+        try:
+            return self._incident_from_dict(raw)
+        except (KeyError, ValueError):
+            return None
 
 
 # ── Global singleton ────────────────────────────────────────────────────────

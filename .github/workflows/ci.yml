@@ -18,7 +18,10 @@ jobs:
     
     services:
       postgres:
-        image: postgres:16
+        # pgvector-enabled: the migration creates the vector extension for
+        # knowledge_chunks.embedding (spec 2.10.6) and CI asserts schema
+        # parity via alembic check.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: cs
           POSTGRES_PASSWORD: password
@@ -133,7 +136,7 @@ jobs:
     
     services:
       postgres:
-        image: postgres:15
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: test_user
           POSTGRES_PASSWORD: test_password
@@ -237,7 +240,10 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector-enabled: the migration creates the vector extension for
+        # knowledge_chunks.embedding (spec 2.10.6) and CI asserts schema
+        # parity via alembic check.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: cs
           POSTGRES_PASSWORD: password

@@ -18,8 +18,6 @@ returned as a structured verdict so callers can audit it.
 from __future__ import annotations
 
 import re
-import time
-from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -146,31 +144,39 @@ class MassDownloadDetector:
     Exceeding ``max_downloads`` within ``window_seconds`` raises
     RateLimitedError (429) and reports the burst so the security event
     pipeline can alert on it (spec 1.22.32).
+
+    Counters live in the shared StateStore (Redis when REDIS_URL is set) so
+    the threshold holds across API replicas — per-process counters would
+    each see only a fraction of a burst behind a load balancer.
     """
 
     def __init__(self, *, max_downloads: int = 100, window_seconds: int = 300):
         self.max_downloads = max_downloads
         self.window_seconds = window_seconds
-        self._events: dict[str, deque[float]] = defaultdict(deque)
 
     def check(self, user_id: str) -> dict:
-        now = time.monotonic()
-        window = self._events[user_id]
-        while window and now - window[0] > self.window_seconds:
-            window.popleft()
-        window.append(now)
-        if len(window) > self.max_downloads:
+        from app.core.distributed_state import get_state_store
+
+        key = f"dlp:downloads:{user_id}"
+        stats = get_state_store().window_add(
+            key,
+            window_seconds=self.window_seconds,
+            max_events=self.max_downloads,
+        )
+        if stats["exceeded"]:
             raise RateLimitedError(
                 "Download rate limit exceeded; account flagged for review",
                 details={
-                    "downloads_in_window": len(window),
+                    "downloads_in_window": stats["count"],
                     "window_seconds": self.window_seconds,
                 },
             )
-        return {"downloads_in_window": len(window), "limit": self.max_downloads}
+        return {"downloads_in_window": stats["count"], "limit": self.max_downloads}
 
     def reset(self, user_id: str) -> None:
-        self._events.pop(user_id, None)
+        from app.core.distributed_state import get_state_store
+
+        get_state_store().window_reset(f"dlp:downloads:{user_id}")
 
 
 # --- Shared singletons -------------------------------------------------------

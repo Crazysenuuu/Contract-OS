@@ -98,6 +98,22 @@ from app.models import *  # noqa
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
+# ===== Distributed-state isolation (autouse) =====
+@pytest.fixture(autouse=True)
+def _reset_distributed_state():
+    """Give every test a fresh in-process StateStore.
+
+    DLP sliding windows, escalation throttles and incidents now live in the
+    shared StateStore (Redis in production). Without this, counters leak
+    between tests the way per-process state never did.
+    """
+    from app.core.distributed_state import reset_state_store
+
+    reset_state_store()
+    yield
+    reset_state_store()
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for the test session."""

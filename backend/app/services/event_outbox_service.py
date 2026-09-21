@@ -5,10 +5,11 @@ state change. The dispatcher marks events published (idempotently) and
 delivers them: creating Notification records and pushing real-time updates
 over WebSocket to connected users, with per-tenant channel isolation.
 
-The WebSocket connection manager is in-memory per process; multi-process
-deployments should back it with Redis pub/sub (see redis_channels helper
-below) so a notification pushed on one worker reaches users connected to
-another.
+Real-time delivery is cross-process: the dispatcher publishes a
+user-targeted envelope to Redis ``notify:*`` channels (via the shared
+StateStore), and every API process runs a subscriber (see
+``app.services.ws_fanout``) that forwards envelopes to the sockets it
+holds. Without Redis, delivery degrades to in-process sockets only.
 """
 
 from __future__ import annotations
@@ -235,15 +236,24 @@ async def dispatch_event(
     else:
         sms_result = None
 
-    # 3. Cross-process channel (Redis) when available — non-blocking.
+    # 3. Cross-process fanout (Redis) when available — non-blocking. The
+    # envelope targets the recipient's user id so any API replica holding
+    # that user's WebSocket forwards the push (the Celery worker itself
+    # holds none — this is how worker-originated events reach browsers).
     publish_redis_channel(
         event.tenant_id,
         {
+            "event_id": str(event.id),
             "event_type": event.event_type,
+            "aggregate_type": event.aggregate_type,
             "aggregate_id": (
                 str(event.aggregate_id) if event.aggregate_id else None
             ),
+            "notification_type": _notification_type(event.event_type),
+            "subject": subject,
+            "payload": _safe_payload(payload),
         },
+        user_ids=[str(recipient_user_id)] if recipient_user_id else None,
     )
 
     event.status = "published"
@@ -391,23 +401,27 @@ connection_manager = ConnectionManager()
 def publish_redis_channel(
     tenant_id: uuid.UUID | None,
     message: dict,
+    *,
+    user_ids: list[uuid.UUID | str] | None = None,
 ) -> None:
-    """Publish to a per-tenant Redis channel when Redis is configured.
+    """Publish a user-targeted envelope to ``notify:<tenant>`` via Redis.
 
-    Deliberately best-effort: absence of Redis must never break delivery.
-    A subscriber process forwards channel messages to the WebSocket
-    manager for cross-worker propagation.
+    The envelope carries ``user_ids`` so API-replica subscribers know which
+    of their locally-connected sockets to forward to (spec 1.14.21-22).
+    Deliberately best-effort: absence of Redis must never break delivery —
+    in-process sockets were already pushed directly in step 2 above.
     """
     try:
-        import os
+        from app.core.distributed_state import get_state_store
+        from app.services.ws_fanout import ORIGIN_ID
 
-        redis_url = os.environ.get("REDIS_URL")
-        if not redis_url:
-            return
-        import redis
-
-        r = redis.Redis.from_url(redis_url, decode_responses=True)
         channel = f"notify:{tenant_id}" if tenant_id else "notify:global"
-        r.publish(channel, __import__("json").dumps(message, default=str))
+        envelope = {
+            "channel": channel,
+            "origin": ORIGIN_ID,
+            "user_ids": [str(u) for u in (user_ids or [])],
+            "message": message,
+        }
+        get_state_store().publish(channel, envelope)
     except Exception:  # noqa: BLE001
         return

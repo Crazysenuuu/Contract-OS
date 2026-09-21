@@ -182,6 +182,13 @@ export default function AdminPage() {
             </div>
             <span className="text-indigo-500 group-hover:translate-x-1 transition-transform">→</span>
           </Link>
+          <Link href="/admin/audit-batches" className="glass-card rounded-2xl px-5 py-4 flex items-center justify-between hover:border-indigo-300 transition-colors group">
+            <div>
+              <p className="text-sm font-bold text-gray-900">Audit Batch Sealing</p>
+              <p className="text-xs text-gray-500">Merkle-seal audit chains + verify TSA anchors</p>
+            </div>
+            <span className="text-indigo-500 group-hover:translate-x-1 transition-transform">→</span>
+          </Link>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">

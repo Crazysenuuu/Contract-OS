@@ -104,6 +104,38 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     ai_provider: str = "openai"
 
+    # Long-contract analysis (spec 1.19.24). Long contracts are split into
+    # overlapping chunks so the model reads the whole agreement instead of
+    # silently analyzing only the first N chars. 0 disables chunking (one
+    # request per prompt).
+    ai_chunk_chars: int = 60000
+    ai_chunk_overlap_chars: int = 800
+    ai_max_chunks_per_analysis: int = 20
+
+    # Distributed state (spec 1.14.21-22). When set, DLP sliding windows,
+    # escalation throttles/incidents and WebSocket fanout live in Redis so
+    # they survive multiple API replicas + the Celery worker; unset falls
+    # back to in-process state (single-instance deployments / tests).
+    redis_url: str | None = None
+
+    # External timestamp authority (spec 1.20.16). When set, audit batches
+    # are anchored with an RFC 3161 token from this TSA in addition to the
+    # Merkle root; unset keeps batches honest but internal_only.
+    tsa_url: str | None = None
+    tsa_username: str | None = None
+    tsa_password: SecretStr | None = None
+    tsa_policy_oid: str | None = None
+    tsa_request_certificate: bool = False
+    tsa_timeout_seconds: float = 10.0
+
+    # Embeddings for contract-intelligence retrieval (spec 2.10.3-2.10.6).
+    # 'openai' requires OPENAI_API_KEY and fails closed when unavailable;
+    # 'hash' is the deterministic local fallback (dev/test, SQLite suite).
+    # embedding_dim must match the pgvector column / HNSW index.
+    embedding_provider: str = "hash"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1536
+
     # Incoming billing webhook (spec 22 "Incoming webhook security").
     # HMAC-SHA256 secret shared with the provider; when unset the webhook
     # endpoint refuses to process events.

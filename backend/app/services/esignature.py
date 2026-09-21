@@ -907,18 +907,26 @@ class AdobeSignProvider(ESignatureProvider):
 # Provider factory
 def get_esignature_provider(provider: str = "mock") -> ESignatureProvider:
     """
-    Get e-signature provider instance.
+    Get e-signature provider instance by name (spec 24.5).
 
     Args:
-        provider: "mock", "docusign", or "adobe_sign"
+        provider: "mock", "docusign", or "adobe_sign" (aliases:
+            "adobe"/"adobesign"). Matching is case-insensitive.
 
     Returns:
-        ESignatureProvider instance
+        ESignatureProvider instance. Unknown names degrade to the mock
+        provider with a warning rather than failing envelope creation.
     """
-    if provider == "docusign":
+    name = (provider or "mock").strip().lower()
+    if name == "docusign":
         return DocuSignProvider()
-    else:
-        return MockESignatureProvider()
+    if name in ("adobe_sign", "adobesign", "adobe"):
+        return AdobeSignProvider()
+    if name != "mock":
+        logger.warning(
+            "Unknown e-signature provider %r; using mock provider", provider
+        )
+    return MockESignatureProvider()
 
 
 def resolve_esignature_provider() -> ESignatureProvider:
@@ -926,8 +934,8 @@ def resolve_esignature_provider() -> ESignatureProvider:
 
     Reads the ESIGNATURE_PROVIDER environment variable (default "mock"):
       - "mock"      -> MockESignatureProvider (development)
-      - "docusign"  -> DocuSignProvider (requires provider credentials)
-      - "adobe_sign"-> falls back to mock until Adobe provider is wired
+      - "docusign"  -> DocuSignProvider (requires DOCUSIGN_* credentials)
+      - "adobe_sign"-> AdobeSignProvider (requires ADOBESIGN_ACCESS_TOKEN)
 
     Unknown or unconfigured provider names degrade gracefully to mock with
     a warning rather than failing envelope creation.

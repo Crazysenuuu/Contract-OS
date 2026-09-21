@@ -35,11 +35,24 @@ ai_service = AIService()
 # --- Schemas ---
 
 
+class AnalysisCoverage(BaseModel):
+    """Honest accounting of how much of the contract the model read
+    (spec 1.19.24) — absent only from legacy in-process results."""
+
+    characters_total: int
+    chunks: int
+    chunks_analyzed: int
+    chunks_failed: int
+    truncated: bool
+    note: str | None = None
+
+
 class AnalysisResponse(BaseModel):
     summary: str
     key_terms: dict
     risks: list[dict]
     confidence: float
+    coverage: AnalysisCoverage | None = None
 
 
 class RiskFindingResponse(BaseModel):
@@ -61,6 +74,7 @@ class ComparisonResponse(BaseModel):
     changes_detected: int
     risk_changes: list[dict]
     detailed_changes: list[dict]
+    coverage: dict | None = None
 
 
 class ReviewStatusUpdate(BaseModel):
@@ -157,6 +171,7 @@ async def analyze_contract(
             for r in analysis.risks
         ],
         confidence=analysis.confidence,
+        coverage=analysis.coverage or None,
     )
 
 
@@ -370,4 +385,5 @@ async def compare_versions(
         changes_detected=comparison.get("changes_detected", 0),
         risk_changes=comparison.get("risk_changes", []),
         detailed_changes=comparison.get("detailed_changes", []),
+        coverage=comparison.get("coverage"),
     )

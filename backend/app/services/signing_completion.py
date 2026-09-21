@@ -206,10 +206,38 @@ async def check_and_execute(
         # Skip sealing via eSign provider
         return True
 
-    if provider:
-        await seal(db, agreement, provider, org_id)
+    # Seal via the eSign provider when the agreement has a provider envelope;
+    # seal() resolves the configured provider and no-ops without one.
+    await seal(db, agreement, provider, org_id)
 
     return True
+
+async def _resolve_envelope_id(db: AsyncSession, agreement: Agreement) -> str | None:
+    """Find the provider envelope id for an agreement.
+
+    Prefer explicit agreement columns when present, then fall back to the
+    ``provider_envelope_id`` recorded on the agreement's signature requests
+    when envelopes were created via /esignature/envelope (spec 24.5).
+    """
+    explicit = getattr(agreement, "envelope_id", None) or getattr(
+        agreement, "esignature_envelope_id", None
+    )
+    if explicit:
+        return str(explicit)
+
+    from app.models.execution import SignatureRequest
+
+    result = await db.execute(
+        select(SignatureRequest)
+        .where(SignatureRequest.agreement_id == agreement.id)
+        .order_by(SignatureRequest.created_at.desc())
+    )
+    for req in result.scalars():
+        envelope_id = (req.metadata_json or {}).get("provider_envelope_id")
+        if envelope_id:
+            return str(envelope_id)
+    return None
+
 
 async def seal(
     db: AsyncSession,
@@ -219,17 +247,14 @@ async def seal(
 ) -> None:
     """Download signed PDF, upload to Object Storage, update agreement."""
     from app.services.storage_service import StorageService
-    from app.services.esignature import get_esignature_provider
-    from app.core.config import get_settings_lazy
+    from app.services.esignature import resolve_esignature_provider
 
-    envelope_id: str | None = getattr(agreement, "envelope_id", None) or getattr(agreement, "esignature_envelope_id", None)
+    envelope_id = await _resolve_envelope_id(db, agreement)
     if not envelope_id:
         return
 
     if provider is None:
-        settings = get_settings_lazy()
-        provider_name = getattr(settings, "esign_provider", "mock")
-        provider = get_esignature_provider(provider_name)
+        provider = resolve_esignature_provider()
 
     # Download signed PDF
     pdf_bytes = await provider.download_signed_document(envelope_id)
@@ -261,15 +286,12 @@ async def cancel_signing(
     provider: ESignatureProvider | None = None,
     reason: str = "Signing cancelled",
 ) -> None:
-    from app.services.esignature import get_esignature_provider
-    from app.core.config import get_settings_lazy
+    from app.services.esignature import resolve_esignature_provider
 
-    envelope_id: str | None = getattr(agreement, "envelope_id", None) or getattr(agreement, "esignature_envelope_id", None)
+    envelope_id = await _resolve_envelope_id(db, agreement)
     if envelope_id:
         if provider is None:
-            settings = get_settings_lazy()
-            provider_name = getattr(settings, "esign_provider", "mock")
-            provider = get_esignature_provider(provider_name)
+            provider = resolve_esignature_provider()
         await provider.void_envelope(envelope_id, reason)
     
     await apply_transition(
@@ -291,15 +313,12 @@ async def decline_signing(
     provider: ESignatureProvider | None = None,
     reason: str = "Signing declined by counterparty",
 ) -> None:
-    from app.services.esignature import get_esignature_provider
-    from app.core.config import get_settings_lazy
+    from app.services.esignature import resolve_esignature_provider
 
-    envelope_id: str | None = getattr(agreement, "envelope_id", None) or getattr(agreement, "esignature_envelope_id", None)
+    envelope_id = await _resolve_envelope_id(db, agreement)
     if envelope_id:
         if provider is None:
-            settings = get_settings_lazy()
-            provider_name = getattr(settings, "esign_provider", "mock")
-            provider = get_esignature_provider(provider_name)
+            provider = resolve_esignature_provider()
         await provider.void_envelope(envelope_id, reason)
 
     await apply_transition(

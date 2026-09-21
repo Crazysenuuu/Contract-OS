@@ -24,6 +24,15 @@ interface Agreement {
   data?: Record<string, unknown>;
 }
 
+interface AnalysisCoverage {
+  characters_total: number;
+  chunks: number;
+  chunks_analyzed: number;
+  chunks_failed: number;
+  truncated: boolean;
+  note?: string | null;
+}
+
 interface AnalysisResult {
   summary: string;
   key_terms: Record<string, unknown>;
@@ -36,6 +45,7 @@ interface AnalysisResult {
     confidence: number;
   }>;
   confidence: number;
+  coverage?: AnalysisCoverage | null;
 }
 
 interface ExtractedClause {
@@ -74,6 +84,34 @@ interface ComparisonResult {
   changes_detected: number;
   risk_changes: Array<unknown>;
   detailed_changes: Array<unknown>;
+  coverage?: AnalysisCoverage | null;
+}
+
+function CoverageBanner({ coverage }: { coverage: AnalysisCoverage }) {
+  const failed = coverage.chunks_failed > 0;
+  const truncated = coverage.truncated;
+  if (!failed && !truncated && coverage.chunks <= 1) return null;
+
+  return (
+    <div
+      className={`mt-3 rounded border p-2 text-xs ${
+        truncated
+          ? "border-orange-300 bg-orange-50 text-orange-800"
+          : failed
+            ? "border-yellow-300 bg-yellow-50 text-yellow-800"
+            : "border-blue-200 bg-blue-50 text-blue-700"
+      }`}
+    >
+      <span className="font-medium">Analysis coverage:</span>{
+      " "}
+      {coverage.chunks_analyzed}/{coverage.chunks} section(s) analyzed
+      {coverage.chunks_failed > 0 && ` · ${coverage.chunks_failed} failed`}
+      {" · "}
+      {coverage.characters_total.toLocaleString()} characters read
+      {truncated && " · capped by AI_MAX_CHUNKS_PER_ANALYSIS — some sections were skipped"}
+      {coverage.note && <div className="mt-1 italic">{coverage.note}</div>}
+    </div>
+  );
 }
 
 const severityColors: Record<string, string> = {
@@ -340,6 +378,9 @@ function AnalysisContent() {
               <div className="mt-4 text-sm text-gray-500">
                 Confidence: {Math.round(analysis.confidence * 100)}%
               </div>
+              {analysis.coverage && (
+                <CoverageBanner coverage={analysis.coverage} />
+              )}
             </div>
           ) : (
             <p className="text-sm text-gray-500">
@@ -617,6 +658,10 @@ function AnalysisContent() {
           {comparison && (
             <div className="mt-4">
               <p className="text-sm text-gray-700 mb-4">{comparison.summary}</p>
+
+              {comparison.coverage && (
+                <CoverageBanner coverage={comparison.coverage} />
+              )}
 
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div className="text-center p-3 bg-gray-50 rounded">

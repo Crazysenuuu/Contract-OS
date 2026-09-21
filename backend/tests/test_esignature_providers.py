@@ -16,6 +16,7 @@ from app.services.esignature import (
     EnvelopeResult,
     MockESignatureProvider,
     SignerInfo,
+    get_esignature_provider,
     resolve_esignature_provider,
 )
 
@@ -646,6 +647,39 @@ class TestAdobeSignProvider:
             mock_settings.return_value.adobesign_access_token = None
             with pytest.raises(ValueError, match="not configured"):
                 provider._configure()
+
+
+# ===========================================================================
+# get_esignature_provider (by-name factory, spec 24.5)
+# ===========================================================================
+
+
+class TestGetProviderByName:
+    def test_docusign_by_name(self):
+        provider = get_esignature_provider("docusign")
+        assert isinstance(provider, DocuSignProvider)
+
+    def test_adobe_sign_by_name(self):
+        """Regression: 'adobe_sign' previously fell back to mock."""
+        provider = get_esignature_provider("adobe_sign")
+        assert isinstance(provider, AdobeSignProvider)
+
+    @pytest.mark.parametrize("alias", ["adobe", "adobesign", "ADOBE_SIGN"])
+    def test_adobe_sign_aliases(self, alias):
+        provider = get_esignature_provider(alias)
+        assert isinstance(provider, AdobeSignProvider)
+
+    def test_mock_by_name(self):
+        provider = get_esignature_provider("mock")
+        assert isinstance(provider, MockESignatureProvider)
+
+    def test_default_is_mock(self):
+        provider = get_esignature_provider()
+        assert isinstance(provider, MockESignatureProvider)
+
+    def test_unknown_name_degrades_to_mock(self):
+        provider = get_esignature_provider("nonsense")
+        assert isinstance(provider, MockESignatureProvider)
 
 
 # ===========================================================================

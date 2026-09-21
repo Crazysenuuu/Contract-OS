@@ -160,3 +160,68 @@ async def test_executed_agreement_is_never_reprocessed(db_session, test_agreemen
     test_agreement.status = "executed"
     await db_session.flush()
     assert await check_and_execute(db_session, agreement=test_agreement, org_id=test_agreement.organization_id) is False
+
+
+@pytest.mark.asyncio
+async def test_seal_without_explicit_provider_resolves_config_provider(
+    db_session, test_agreement, test_user
+):
+    """Regression (two bugs):
+
+    1. seal() read a nonexistent ``esign_provider`` setting, so it always
+       silently used the mock provider even when DocuSign/Adobe Sign was
+       configured. It must now resolve via resolve_esignature_provider().
+    2. seal() read nonexistent ``agreement.envelope_id`` attributes, so it
+       always returned early. The envelope id lives on the agreement's
+       SignatureRequest.metadata_json.provider_envelope_id.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.execution import SignatureRequest
+    from app.models.agreement import AgreementVersion
+    from app.services.esignature import MockESignatureProvider
+
+    version = AgreementVersion(
+        agreement_id=test_agreement.id,
+        version_number=1,
+        content="Agreement text",
+        content_hash=hashlib.sha256(b"Agreement text").hexdigest(),
+        status="draft",
+        created_by=test_user.id,
+    )
+    db_session.add(version)
+    await db_session.flush()
+
+    db_session.add(
+        SignatureRequest(
+            tenant_id=test_agreement.organization_id,
+            agreement_id=test_agreement.id,
+            version_id=version.id,
+            name="Jane Signer",
+            email="jane@counterparty.example",
+            created_by=test_user.id,
+            metadata_json={"provider_envelope_id": "env-regression-1"},
+        )
+    )
+    await db_session.flush()
+
+    fake_provider = MockESignatureProvider()
+    fake_provider.download_signed_document = AsyncMock(return_value=b"%PDF-1.4 signed")
+
+    with patch(
+        "app.services.esignature.resolve_esignature_provider",
+        return_value=fake_provider,
+    ) as resolver:
+        from app.services.signing_completion import seal
+
+        await seal(db_session, test_agreement, provider=None, org_id=test_agreement.organization_id)
+
+    resolver.assert_called_once()
+    fake_provider.download_signed_document.assert_awaited_once_with("env-regression-1")
+    assert test_agreement.sealed_document_key == (
+        f"agreements/{test_agreement.organization_id}/{test_agreement.id}/"
+        f"signed_env-regression-1.pdf"
+    )
+    assert test_agreement.sealed_at is not None
+    assert isinstance(test_agreement.sealed_at, datetime)

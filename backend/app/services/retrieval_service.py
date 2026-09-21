@@ -1,9 +1,16 @@
 """Contract intelligence retrieval (spec 2.10).
 
 - Legal-aware chunking of agreement text.
-- Embeddings computed with a deterministic hashing-based tokenizer
-  (pure Python, no numpy/pgvector required). In production this is where a
-  real embedding model / pgvector would plug in; the interface is the same.
+- Embeddings come from the configured provider (``app/services/embedding_provider.py``):
+  OpenAI ``text-embedding-3-small`` (1536-dim) in production, deterministic
+  hashing fallback in dev/test. The model is recorded per chunk
+  (``embedding_model``) so model changes are detectable and re-indexable.
+- Storage: on PostgreSQL the embedding column is native pgvector
+  ``vector(1536)`` and retrieval orders by SQL ``<=>`` cosine distance
+  (HNSW index); on other dialects (SQLite test suite) vectors are stored as
+  JSON and similarity is computed in Python. Both paths apply the same
+  permission / temporal filters and the same hybrid scoring, so callers see
+  one interface.
 - Permission-filtered retrieval: every chunk is filtered by organization
   and agreement access before it can be returned, and temporal scope
   (as-of date / version) is honored.
@@ -25,9 +32,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agreement import Agreement
-from app.models.knowledge import KnowledgeChunk
+from app.models.knowledge import EMBEDDING_DIM, KnowledgeChunk
+from app.services.embedding_provider import (
+    EmbeddingProviderError,
+    get_embedding_provider,
+)
 
-EMBEDDING_DIM = 256
+# Deprecated: legacy hashing embedding width. Kept only so older imports
+# do not break; the active dimension is EMBEDDING_DIM (models/knowledge.py).
+EMBEDDING_DIM_LEGACY = 256
 
 
 # ---------------------------------------------------------------------------
@@ -66,32 +79,16 @@ def chunk_text(text: str, *, max_chars: int = 1500, overlap: int = 100) -> list[
 
 
 # ---------------------------------------------------------------------------
-# Embeddings (pure Python fallback — pluggable for pgvector)
+# Embeddings (provider-backed; deterministic helpers kept for tests)
 # ---------------------------------------------------------------------------
 
 def _tokenize(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]{2,}", text.lower())
 
 
-def _embed(tokens: Iterable[str], dim: int = EMBEDDING_DIM) -> list[float]:
-    """Deterministic hashing-based bag-of-words embedding.
-
-    Each token contributes to dim/2 buckets via two hash functions so the
-    vector is sparse-but-stable for cosine similarity. Good enough for
-    dev/test; swap for a real model in production.
-    """
-    vec = [0.0] * dim
-    for tok in tokens:
-        h1 = int(hashlib.md5(f"a:{tok}".encode()).hexdigest(), 16) % dim
-        h2 = int(hashlib.md5(f"b:{tok}".encode()).hexdigest(), 16) % dim
-        vec[h1] += 1.0
-        vec[h2] += 0.5
-    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-    return [v / norm for v in vec]
-
-
 def embed_text(text: str) -> list[float]:
-    return _embed(_tokenize(text))
+    """Embed a single text via the configured provider."""
+    return get_embedding_provider().embed([text])[0]
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -101,6 +98,11 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     na = math.sqrt(sum(x * x for x in a)) or 1.0
     nb = math.sqrt(sum(y * y for y in b)) or 1.0
     return dot / (na * nb)
+
+
+def _hybrid_score(cosine_sim: float, keyword_overlap: float) -> float:
+    """Blend semantic similarity with a keyword-overlap boost (2.10.13)."""
+    return cosine_sim * 0.8 + keyword_overlap * 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -119,24 +121,60 @@ async def index_agreement_version(
     party_ids: list[uuid.UUID] | None = None,
     jurisdiction: str | None = None,
     classification: str = "internal",
-    embedding_model: str = "hash-bow-256",
+    embedding_model: str | None = None,
     effective_from: date | None = None,
     effective_to: date | None = None,
 ) -> list[KnowledgeChunk]:
     """Replace the index for a version with fresh chunks."""
-    # Mark old chunks superseded.
-    old_result = await db.execute(
-        select(KnowledgeChunk).where(
+    chunks = chunk_text(content)
+
+    # Delete the previous index pass for this exact version. Chunks are
+    # derived data (the version text itself is immutable); keeping the old
+    # rows would violate uq_knowledge_chunk_agreement_version_index on
+    # re-insert and block re-indexing (e.g. after an embedding-model change).
+    if not chunks:
+        old_result = await db.execute(
+            select(KnowledgeChunk.id).where(
+                KnowledgeChunk.agreement_id == agreement_id,
+                KnowledgeChunk.version_id == version_id,
+            )
+        )
+        if old_result.first() is not None:
+            await db.execute(
+                KnowledgeChunk.__table__.delete().where(
+                    KnowledgeChunk.agreement_id == agreement_id,
+                    KnowledgeChunk.version_id == version_id,
+                )
+            )
+            await db.flush()
+        return []
+
+    from sqlalchemy import delete as _delete
+
+    await db.execute(
+        _delete(KnowledgeChunk).where(
             KnowledgeChunk.agreement_id == agreement_id,
             KnowledgeChunk.version_id == version_id,
         )
     )
-    for old in old_result.scalars().all():
-        old.is_current = False
-        old.superseded_at = datetime.now()
+
+    # One batched provider call per version keeps indexing cheap. Provider
+    # resolution and embedding are both allowed to fail without blocking
+    # ingestion: text is indexed unembedded and keyword retrieval still
+    # works; vectors are backfilled by re-indexing.
+    vectors: list | None = None
+    try:
+        provider = get_embedding_provider()
+        vectors = provider.embed(chunks)
+        if embedding_model is None:
+            embedding_model = provider.name
+    except EmbeddingProviderError:
+        vectors = None
+    if embedding_model is None:
+        embedding_model = "unknown"
 
     created: list[KnowledgeChunk] = []
-    for i, chunk in enumerate(chunk_text(content)):
+    for i, chunk in enumerate(chunks):
         chunk_hash = hashlib.sha256(chunk.encode()).hexdigest()
         row = KnowledgeChunk(
             organization_id=organization_id,
@@ -147,7 +185,7 @@ async def index_agreement_version(
             chunk_index=i,
             content=chunk,
             content_hash=chunk_hash,
-            embedding=embed_text(chunk),
+            embedding=(vectors[i] if vectors and i < len(vectors) else None),
             embedding_model=embedding_model,
             party_ids=[str(p) for p in (party_ids or [])],
             effective_from=effective_from,
@@ -196,6 +234,121 @@ class RetrievalHit:
         }
 
 
+def _base_chunk_query(
+    *,
+    organization_id: uuid.UUID,
+    accessible_agreement_ids: list[uuid.UUID],
+    agreement_id: uuid.UUID | None,
+    scope: RetrievalScope | None,
+):
+    """Filters shared by both search strategies (spec 2.10.11)."""
+    query = select(KnowledgeChunk).where(
+        KnowledgeChunk.organization_id == organization_id,
+        KnowledgeChunk.agreement_id.in_(accessible_agreement_ids or [uuid.uuid4()]),
+    )
+    if agreement_id is not None:
+        query = query.where(KnowledgeChunk.agreement_id == agreement_id)
+    if scope is not None:
+        if scope.version_id is not None:
+            query = query.where(KnowledgeChunk.version_id == scope.version_id)
+        elif scope.as_of is not None:
+            query = query.where(
+                (KnowledgeChunk.effective_from.is_(None) | (KnowledgeChunk.effective_from <= scope.as_of.date())),
+                (KnowledgeChunk.effective_to.is_(None) | (KnowledgeChunk.effective_to >= scope.as_of.date())),
+            )
+    return query
+
+
+async def _retrieve_python(
+    db: AsyncSession,
+    *,
+    query,
+    question: str,
+    limit: int,
+    min_score: float,
+) -> list[RetrievalHit]:
+    """Python-side scoring (non-PostgreSQL dialects / JSON vectors)."""
+    result = await db.execute(query)
+    chunks = result.scalars().all()
+
+    q_vec = embed_text(question)
+    q_tokens = set(_tokenize(question))
+
+    scored: list[RetrievalHit] = []
+    for chunk in chunks:
+        sim = cosine_similarity(q_vec, chunk.embedding or [])
+        chunk_tokens = set(_tokenize(chunk.content))
+        overlap = len(q_tokens & chunk_tokens) / max(len(q_tokens), 1)
+        score = _hybrid_score(sim, overlap)
+        if score < min_score:
+            continue
+        scored.append(_model_for_hit(chunk, score))
+
+    scored.sort(key=lambda h: h.score, reverse=True)
+    return scored[:limit]
+
+
+def _model_for_hit(chunk: KnowledgeChunk, score: float) -> RetrievalHit:
+    return RetrievalHit(
+        chunk_id=chunk.id,
+        agreement_id=chunk.agreement_id,
+        version_id=chunk.version_id,
+        clause_id=chunk.clause_id,
+        content=chunk.content,
+        score=score,
+        is_current=chunk.is_current,
+    )
+
+
+async def _retrieve_pgvector(
+    db: AsyncSession,
+    *,
+    query,
+    question: str,
+    limit: int,
+    min_score: float,
+) -> list[RetrievalHit]:
+    """pgvector cosine search (PostgreSQL).
+
+    Rows are ordered by SQL ``embedding <=> :query`` (HNSW-assisted) and the
+    keyword boost is applied to the candidate set in Python. Chunks without
+    an embedding (provider failure / legacy rows) still participate via the
+    keyword score only.
+    """
+    from sqlalchemy import literal
+
+    # Oversample so the Python-side re-ranking (keyword boost) still has a
+    # meaningful candidate set after ordering by vector distance alone.
+    fetch = max(limit * 8, 50)
+
+    sql = (
+        query.add_columns(KnowledgeChunk.embedding.cosine_distance(
+            literal(embed_text(question), KnowledgeChunk.embedding.type)
+        ).label("distance"))
+        .order_by("distance")
+        .limit(fetch)
+    )
+    result = await db.execute(sql)
+    rows = result.all()
+
+    q_tokens = set(_tokenize(question))
+    scored: list[RetrievalHit] = []
+    for chunk, distance in rows:
+        if distance is not None:
+            sim = max(0.0, min(1.0, 1.0 - float(distance)))
+        else:
+            sim = 0.0
+        chunk_tokens = set(_tokenize(chunk.content))
+        overlap = len(q_tokens & chunk_tokens) / max(len(q_tokens), 1)
+        score = _hybrid_score(sim, overlap)
+        if score < min_score:
+            continue
+        scored.append(_model_for_hit(chunk, score))
+
+    scored.sort(key=lambda h: h.score, reverse=True)
+    return scored[:limit]
+
+
 async def retrieve(
     db: AsyncSession,
     *,
@@ -213,49 +366,38 @@ async def retrieve(
     optional temporal scope. Scores = cosine(embedding) boosted by keyword
     overlap. Never returns chunks from inaccessible agreements.
     """
-    query = select(KnowledgeChunk).where(
-        KnowledgeChunk.organization_id == organization_id,
-        KnowledgeChunk.agreement_id.in_(accessible_agreement_ids or [uuid.uuid4()]),
+    query = _base_chunk_query(
+        organization_id=organization_id,
+        accessible_agreement_ids=accessible_agreement_ids,
+        agreement_id=agreement_id,
+        scope=scope,
     )
-    if agreement_id is not None:
-        query = query.where(KnowledgeChunk.agreement_id == agreement_id)
-    if scope is not None:
-        if scope.version_id is not None:
-            query = query.where(KnowledgeChunk.version_id == scope.version_id)
-        elif scope.as_of is not None:
-            query = query.where(
-                (KnowledgeChunk.effective_from.is_(None) | (KnowledgeChunk.effective_from <= scope.as_of.date())),
-                (KnowledgeChunk.effective_to.is_(None) | (KnowledgeChunk.effective_to >= scope.as_of.date())),
+
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        try:
+            return await _retrieve_pgvector(
+                db,
+                query=query,
+                question=question,
+                limit=limit,
+                min_score=min_score,
+            )
+        except Exception:
+            # pgvector unavailable (extension missing / type mismatch):
+            # degrade to Python scoring rather than failing the answer path.
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "pgvector retrieval failed; falling back to Python scoring"
             )
 
-    result = await db.execute(query)
-    chunks = result.scalars().all()
-
-    q_vec = embed_text(question)
-    q_tokens = set(_tokenize(question))
-
-    scored: list[RetrievalHit] = []
-    for chunk in chunks:
-        sim = cosine_similarity(q_vec, chunk.embedding or [])
-        chunk_tokens = set(_tokenize(chunk.content))
-        overlap = len(q_tokens & chunk_tokens) / max(len(q_tokens), 1)
-        score = sim * 0.8 + overlap * 0.2
-        if score < min_score:
-            continue
-        scored.append(
-            RetrievalHit(
-                chunk_id=chunk.id,
-                agreement_id=chunk.agreement_id,
-                version_id=chunk.version_id,
-                clause_id=chunk.clause_id,
-                content=chunk.content,
-                score=score,
-                is_current=chunk.is_current,
-            )
-        )
-
-    scored.sort(key=lambda h: h.score, reverse=True)
-    return scored[:limit]
+    return await _retrieve_python(
+        db,
+        query=query,
+        question=question,
+        limit=limit,
+        min_score=min_score,
+    )
 
 
 # ---------------------------------------------------------------------------

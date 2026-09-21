@@ -186,8 +186,11 @@ class TestEscalationIncidents:
         )
         ok = service.acknowledge_incident(incident.id, by="admin@co.com")
         assert ok is True
-        assert incident.status == EscalationStatus.ACKNOWLEDGED
-        assert incident.acknowledged_at is not None
+        # Incidents live in the shared store — re-fetch to see the update.
+        stored = service.get_incident(incident.id)
+        assert stored is not None
+        assert stored.status == EscalationStatus.ACKNOWLEDGED
+        assert stored.acknowledged_at is not None
 
     def test_resolve_incident(self, service, org_id):
         service.ensure_default_policies(org_id)
@@ -199,8 +202,11 @@ class TestEscalationIncidents:
         )
         ok = service.resolve_incident(incident.id, by="admin@co.com")
         assert ok is True
-        assert incident.status == EscalationStatus.RESOLVED
-        assert incident.resolved_at is not None
+        # Incidents live in the shared store — re-fetch to see the update.
+        stored = service.get_incident(incident.id)
+        assert stored is not None
+        assert stored.status == EscalationStatus.RESOLVED
+        assert stored.resolved_at is not None
 
     def test_acknowledge_nonexistent(self, service):
         assert service.acknowledge_incident("nope") is False

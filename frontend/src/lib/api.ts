@@ -884,6 +884,15 @@ export async function listParties(
 }
 
 // AI Analysis
+export interface AnalysisCoverage {
+  characters_total: number;
+  chunks: number;
+  chunks_analyzed: number;
+  chunks_failed: number;
+  truncated: boolean;
+  note?: string | null;
+}
+
 export async function analyzeContract(
   token: string,
   agreementId: string
@@ -900,6 +909,7 @@ export async function analyzeContract(
       confidence: number;
     }>;
     confidence: number;
+    coverage?: AnalysisCoverage | null;
   }>(`/agreements/${agreementId}/analyze`, { method: "POST", token });
 }
 
@@ -964,6 +974,7 @@ export async function compareVersions(
     changes_detected: number;
     risk_changes: Array<unknown>;
     detailed_changes: Array<unknown>;
+    coverage?: AnalysisCoverage | null;
   }>(
     `/agreements/${agreementId}/compare?base_version=${baseVersion}&compared_version=${comparedVersion}`,
     { method: "POST", token }
@@ -3647,4 +3658,57 @@ export async function giveRenewalNotice(token: string, id: string): Promise<Rene
   });
   if (!res.ok) throw new Error("Failed to give non-renewal notice");
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Admin — audit batch sealing + external timestamp anchoring (spec 1.20.15-16)
+// ---------------------------------------------------------------------------
+
+export interface AuditBatchInfo {
+  id: string;
+  root_hash: string;
+  leaf_count: number;
+  first_sequence: number;
+  last_sequence: number;
+  anchor_status: string; // 'externally_anchored' | 'internal_only' | 'anchor_failed'
+  anchored_at: string | null;
+}
+
+export interface AuditBatchVerifyResult {
+  status: string;
+  batch_id: string;
+  merkle: {
+    valid: boolean;
+    root_hash?: string;
+    anchor_status?: string;
+    anchored_at?: string | null;
+    leaf_count?: number;
+    reason?: string;
+  };
+  anchor: {
+    valid: boolean;
+    gen_time: string | null;
+    reason: string | null;
+  } | null;
+}
+
+export async function adminSealAuditBatch(
+  token: string,
+  data: { from_sequence: number; to_sequence: number; tenant_id?: string }
+): Promise<{ status: string; batch: AuditBatchInfo }> {
+  return apiRequest("/admin/audit/batches/seal", {
+    method: "POST",
+    body: data,
+    token,
+  });
+}
+
+export async function adminVerifyAuditBatch(
+  token: string,
+  batchId: string
+): Promise<AuditBatchVerifyResult> {
+  return apiRequest(`/admin/audit/batches/${batchId}/verify`, {
+    method: "POST",
+    token,
+  });
 }

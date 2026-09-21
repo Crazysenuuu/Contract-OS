@@ -95,6 +95,27 @@ app.include_router(external_party_router)
 app.include_router(websocket_router)
 
 
+@app.on_event("startup")
+async def _start_ws_fanout():
+    """Cross-process WebSocket fanout (spec 1.14.21-22).
+
+    Subscribes this API process to Redis ``notify:*`` channels so pushes
+    published by the outbox dispatcher (Celery worker) or by other API
+    replicas reach the browsers connected to *this* process. No-op without
+    Redis; a subscriber error reconnects with backoff.
+    """
+    from app.services.ws_fanout import start_fanout
+
+    start_fanout()
+
+
+@app.on_event("shutdown")
+async def _stop_ws_fanout():
+    from app.services.ws_fanout import stop_fanout
+
+    await stop_fanout()
+
+
 @app.middleware("http")
 async def session_heartbeat_middleware(request, call_next):
     response = await call_next(request)

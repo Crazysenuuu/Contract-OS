@@ -500,3 +500,137 @@ async def admin_delete_backup(name: str, admin: User = Depends(get_current_admin
     except backup_service.BackupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"status": "ok"}
+
+
+# --- Audit batch sealing + external timestamp anchor (spec 1.20.15-16) ------
+
+
+@router.post("/audit/batches/seal")
+async def admin_seal_audit_batch(
+    body: dict,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Seal a range of the tenant's audit chain into a Merkle batch.
+
+    Body: {"from_sequence": int, "to_sequence": int, "tenant_id": "<uuid>",
+    optional}. When TSA_URL is configured the root is additionally anchored
+    with an RFC 3161 token; otherwise the batch records anchor_status=
+    internal_only (honest: no external witnessing claimed).
+    """
+    import uuid as uuid_mod
+
+    from app.models.audit import AuditBatch, AuditEvent
+    from app.services.audit_batching import AuditBatchService
+
+    try:
+        from_seq = int(body["from_sequence"])
+        to_seq = int(body["to_sequence"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="from_sequence and to_sequence (ints) are required",
+        )
+    if from_seq <= 0 or to_seq < from_seq or to_seq - from_seq > 100_000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid sequence range",
+        )
+
+    tenant_raw = body.get("tenant_id")
+    if tenant_raw:
+        try:
+            tenant_id = uuid_mod.UUID(str(tenant_raw))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="tenant_id must be a UUID",
+            )
+    else:
+        # Default to the admin's own organization scope.
+        tenant_id = admin.organization_id
+
+    exists = await db.execute(
+        select(AuditEvent.id)
+        .where(
+            AuditEvent.tenant_id == tenant_id,
+            AuditEvent.sequence_number.between(from_seq, to_seq),
+        )
+        .limit(1)
+    )
+    if exists.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no audit events in the requested range",
+        )
+
+    service = AuditBatchService(db)
+    try:
+        batch = await service.seal_batch(
+            tenant_id=tenant_id,
+            from_sequence=from_seq,
+            to_sequence=to_seq,
+            actor_id=admin.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        )
+    await db.commit()
+    return {
+        "status": "ok",
+        "batch": {
+            "id": str(batch.id),
+            "root_hash": batch.root_hash,
+            "leaf_count": batch.leaf_count,
+            "first_sequence": batch.first_sequence,
+            "last_sequence": batch.last_sequence,
+            "anchor_status": batch.anchor_status,
+            "anchored_at": (
+                batch.anchored_at.isoformat() if batch.anchored_at else None
+            ),
+        },
+    }
+
+
+@router.post("/audit/batches/{batch_id}/verify")
+async def admin_verify_audit_batch(
+    batch_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recompute a batch's Merkle root from live events and verify the
+    stored RFC 3161 anchor token attests that root (admin-only)."""
+    import uuid as uuid_mod
+
+    from app.models.audit import AuditBatch
+    from app.services.audit_batching import AuditBatchService
+    from app.services.rfc3161_tsa import verify_anchor_token
+
+    try:
+        batch_uuid = uuid_mod.UUID(batch_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid batch id"
+        )
+
+    result = await db.execute(
+        select(AuditBatch).where(AuditBatch.id == batch_uuid)
+    )
+    batch = result.scalar_one_or_none()
+    if batch is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="batch not found"
+        )
+
+    merkle = await AuditBatchService(db).verify_batch(batch_uuid)
+    anchor = None
+    if batch.anchor_token:
+        anchor = verify_anchor_token(batch.anchor_token, batch.root_hash)
+
+    return {
+        "status": "ok",
+        "batch_id": batch_id,
+        "merkle": merkle,
+        "anchor": anchor,
+    }

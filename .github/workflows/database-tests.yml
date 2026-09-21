@@ -24,7 +24,7 @@ jobs:
     
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: cs
           POSTGRES_PASSWORD: password
@@ -115,7 +115,7 @@ jobs:
     
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: cs
           POSTGRES_PASSWORD: password
