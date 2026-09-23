@@ -349,12 +349,15 @@ class NLCreationService:
         # Spec §70: everything pulled out of the prompt is EXTRACTED, not a
         # confirmed fact; the wizard asks the user to confirm before sending.
         from app.domain.answer_provenance import AnswerSource, tag_answers
+        from app.services.agreement_numbering import next_agreement_number
 
         answers = intent["answers"] or {}
         agreement = Agreement(
             organization_id=org_id,
             agreement_type_id=atype.id,
             agreement_type_version=atype.version,
+            # Spec 2.01 §46: server-generated reference, same transaction.
+            agreement_number=await next_agreement_number(self.db, org_id),
             title=intent["title"],
             governing_law=intent["governing_law"],
             created_by=current_user.id,

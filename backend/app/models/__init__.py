@@ -135,6 +135,8 @@ from app.models.amendment import (
 from app.models.termination import (
     AgreementTermination,
     PostTerminationObligation,
+    TerminationSettlement,
+    TerminationSettlementItem,
 )
 from app.models.audit import (
     AuditEvent,
@@ -323,6 +325,8 @@ __all__ = [
     "AmendmentChange",
     "AgreementTermination",
     "PostTerminationObligation",
+    "TerminationSettlement",
+    "TerminationSettlementItem",
     "AuditEvent",
     "AuditChainRoot",
     "AuditEvidence",

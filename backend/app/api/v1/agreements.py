@@ -241,10 +241,15 @@ async def create_agreement(
             detail="Synthetic / test agreements cannot be created in production",
         )
 
+    # Spec 2.01 §46: server-generated business reference, allocated in the
+    # same transaction as the insert so it commits atomically with the row.
+    from app.services.agreement_numbering import next_agreement_number
+
     agreement = Agreement(
         organization_id=org_id,
         agreement_type_id=data.agreement_type_id,
         agreement_type_version=atype.version,
+        agreement_number=await next_agreement_number(db, org_id),
         title=data.title,
         governing_law=data.governing_law,
         effective_date=data.effective_date,

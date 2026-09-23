@@ -28,6 +28,8 @@ class AgreementResponse(BaseModel):
     agreement_type_id: UUID
     agreement_type_version: int | None
     parent_agreement_id: UUID | None
+    # Spec 2.01 §46: server-generated business reference (display/search only).
+    agreement_number: str | None = None
     title: str
     status: str
     governing_law: str | None

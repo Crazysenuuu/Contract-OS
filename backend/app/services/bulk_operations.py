@@ -282,10 +282,22 @@ class BulkOperationsService:
             agreement_type_id = default_result.scalar_one_or_none()
 
         now = datetime.utcnow()
+        from app.services.agreement_numbering import next_agreement_number
+
+        # Spec 2.01 §46: imported agreements get the same server-generated
+        # reference as created ones. organization_id arrives as a string from
+        # the import pipeline but BulkJob may hold it as a UUID.
+        org_uuid = (
+            organization_id
+            if isinstance(organization_id, UUID)
+            else UUID(str(organization_id))
+        )
+        agreement_number = await next_agreement_number(self.db, org_uuid)
         agreement = Agreement(
             title=data.get("title", "Imported Agreement"),
             agreement_type_id=agreement_type_id,
             organization_id=organization_id,
+            agreement_number=agreement_number,
             created_by=created_by,
             status=data.get("status", "draft"),
             data=data.get("metadata") or {},

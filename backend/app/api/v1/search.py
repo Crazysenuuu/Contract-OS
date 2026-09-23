@@ -107,6 +107,9 @@ def _search_text_condition(q: str, dialect: str):
                 Agreement.title,
                 " ",
                 func.coalesce(Agreement.governing_law, ""),
+                " ",
+                # Business reference (spec 2.01 §46) is searchable verbatim.
+                func.coalesce(Agreement.agreement_number, ""),
             ),
         )
         text_match = vector.op("@@")(func.websearch_to_tsquery("simple", q))
@@ -115,6 +118,8 @@ def _search_text_condition(q: str, dialect: str):
         text_match = or_(
             Agreement.title.ilike(like),
             func.coalesce(Agreement.governing_law, "").ilike(like),
+            # Exact-ish match on the reference, e.g. "AGR-A1B2C3D4-00001".
+            func.coalesce(Agreement.agreement_number, "").ilike(like),
         )
 
     # Party display names are the primary label; legal entity names enrich.

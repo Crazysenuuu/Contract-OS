@@ -48,6 +48,8 @@ class AgreementContextBuilder:
         context = {
             "agreement": {
                 "id": str(agreement.id),
+                # Business reference (spec 2.01 §46); templates may render it.
+                "agreement_number": getattr(agreement, "agreement_number", None),
                 "title": agreement.title,
                 "effective_date": (
                     agreement.effective_date.isoformat()

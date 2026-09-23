@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
@@ -73,6 +74,15 @@ class Agreement(
         "Agreement",
         remote_side="Agreement.id",
         back_populates="child_agreements",
+    )
+
+    # Server-generated human-readable business reference (spec 2.01 §46):
+    # ``AGR-<org prefix>-<seq>``. The UUID primary key stays the database
+    # identity; this is display/search only and unique per organization.
+    # Assigned by next_agreement_number() at every creation site.
+    agreement_number: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
     )
 
     title: Mapped[str] = mapped_column(
@@ -247,3 +257,12 @@ class AgreementVersion(
         "Agreement",
         back_populates="versions",
     )
+
+
+Index(
+    "uq_agreements_org_number",
+    Agreement.organization_id,
+    Agreement.agreement_number,
+    unique=True,
+    postgresql_where=Agreement.agreement_number.isnot(None),
+)

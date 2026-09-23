@@ -13,16 +13,24 @@ from app.dependencies.agreement_access import verify_agreement_access
 from app.dependencies.auth import get_current_user
 from app.dependencies.tenant import get_current_organization_id
 from app.models.agreement import Agreement
-from app.models.termination import AgreementTermination, PostTerminationObligation
+from app.models.termination import (
+    AgreementTermination,
+    PostTerminationObligation,
+    TerminationSettlement,
+    TerminationSettlementItem,
+)
 from app.models.user import User
 from app.dependencies.rbac import require_permission
 from app.services.termination_service import (
     TerminationError,
     cancel_termination,
     complete_termination,
+    generate_settlement,
     initiate_termination,
     issue_notice,
     record_cure,
+    settle_termination,
+    update_settlement_item,
 )
 
 router = APIRouter(
@@ -53,6 +61,63 @@ class CureRequest(BaseModel):
 class CompleteRequest(BaseModel):
     effective_date: str | None = None
     force: bool = False
+
+
+class SettlementItemUpdateRequest(BaseModel):
+    status: str  # 'open' | 'resolved' | 'waived'
+    resolution_note: str | None = None
+
+
+class SettleRequest(BaseModel):
+    notes: str | None = None
+
+
+def _money_out(settlement) -> dict:
+    """Serialize the financial position without floating-point."""
+    minor = settlement.outstanding_amount_minor
+    return {
+        "outstanding_amount_minor": minor,
+        "currency": settlement.currency,
+        "outstanding_amount_display": (
+            f"{(minor // 100)}.{minor % 100:02d}" if minor is not None else None
+        ),
+    }
+
+
+def _settlement_out(settlement) -> dict:
+    return {
+        "id": str(settlement.id),
+        "termination_id": str(settlement.termination_id),
+        **_money_out(settlement),
+        "obligations_remaining": settlement.obligations_remaining,
+        "status": settlement.status,
+        "notes": settlement.notes,
+        "settled_by": (
+            str(settlement.settled_by) if settlement.settled_by else None
+        ),
+        "settled_at": (
+            settlement.settled_at.isoformat() if settlement.settled_at else None
+        ),
+    }
+
+
+def _settlement_item_out(item: TerminationSettlementItem) -> dict:
+    return {
+        "id": str(item.id),
+        "settlement_id": str(item.settlement_id),
+        "item_key": item.item_key,
+        "description": item.description,
+        "category": item.category,
+        # Spec 1.17 §15: required-by-agreement vs recommended operational.
+        "kind": item.kind,
+        "blocks_completion": item.blocks_completion,
+        "source_type": item.source_type,
+        "source_id": item.source_id,
+        "status": item.status,
+        "resolved_by": str(item.resolved_by) if item.resolved_by else None,
+        "resolved_at": item.resolved_at.isoformat() if item.resolved_at else None,
+        "resolution_note": item.resolution_note,
+    }
 
 
 def _termination_out(term: AgreementTermination) -> dict:
@@ -320,3 +385,170 @@ async def _get_term_or_404(
     if term is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Termination not found")
     return term
+
+
+# ===========================================================================
+# Settlement endpoints (spec 1.17 §15-16)
+# ===========================================================================
+
+
+@router.get("/{termination_id}/settlement")
+async def get_settlement(
+    agreement_id: uuid.UUID,
+    termination_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """The settlement with its full checklist for a termination."""
+    await verify_agreement_access(
+        agreement_id=agreement_id,
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+    term = await _get_term_or_404(db, agreement_id, termination_id)
+    settlement_result = await db.execute(
+        select(TerminationSettlement).where(
+            TerminationSettlement.termination_id == termination_id
+        )
+    )
+    settlement = settlement_result.scalar_one_or_none()
+    if settlement is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Settlement not found",
+        )
+    items_result = await db.execute(
+        select(TerminationSettlementItem)
+        .where(TerminationSettlementItem.settlement_id == settlement.id)
+        .order_by(TerminationSettlementItem.position)
+    )
+    items = items_result.scalars().all()
+    return {
+        **_settlement_out(settlement),
+        "items": [_settlement_item_out(i) for i in items],
+    }
+
+
+@router.post("/{termination_id}/settlement/regenerate")
+async def regenerate_settlement(
+    agreement_id: uuid.UUID,
+    termination_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rebuild the checklist from current obligations (keeps item states)."""
+    agreement = await verify_agreement_access(
+        agreement_id=agreement_id,
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+    term = await _get_term_or_404(db, agreement_id, termination_id)
+    if term.status == "effective":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot regenerate the settlement of an effective termination",
+        )
+    try:
+        settlement = await generate_settlement(
+            db,
+            termination=term,
+            agreement=agreement,
+            replace_existing=True,
+        )
+    except TerminationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return _settlement_out(settlement)
+
+
+@router.patch(
+    "/{termination_id}/settlement/items/{item_id}",
+    dependencies=[_perm_agreement_terminate],
+)
+async def update_settlement_item_endpoint(
+    agreement_id: uuid.UUID,
+    termination_id: uuid.UUID,
+    item_id: uuid.UUID,
+    data: SettlementItemUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resolve, waive or re-open a checklist item."""
+    await verify_agreement_access(
+        agreement_id=agreement_id,
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+    term = await _get_term_or_404(db, agreement_id, termination_id)
+    settlement_result = await db.execute(
+        select(TerminationSettlement).where(
+            TerminationSettlement.termination_id == termination_id
+        )
+    )
+    settlement = settlement_result.scalar_one_or_none()
+    if settlement is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Settlement not found",
+        )
+    result = await db.execute(
+        select(TerminationSettlementItem).where(
+            TerminationSettlementItem.id == item_id,
+            TerminationSettlementItem.settlement_id == settlement.id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Settlement item not found",
+        )
+    try:
+        item = await update_settlement_item(
+            db,
+            item=item,
+            actor_id=current_user.id,
+            status=data.status,
+            resolution_note=data.resolution_note,
+        )
+    except TerminationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return _settlement_item_out(item)
+
+
+@router.post(
+    "/{termination_id}/settlement/settle",
+    dependencies=[_perm_agreement_terminate],
+)
+async def settle_termination_endpoint(
+    agreement_id: uuid.UUID,
+    termination_id: uuid.UUID,
+    data: SettleRequest,
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark the settlement settled once no required items remain open."""
+    await verify_agreement_access(
+        agreement_id=agreement_id,
+        current_user=current_user,
+        org_id=org_id,
+        db=db,
+    )
+    term = await _get_term_or_404(db, agreement_id, termination_id)
+    try:
+        settlement = await settle_termination(
+            db,
+            termination=term,
+            actor_id=current_user.id,
+            org_id=org_id,
+            notes=data.notes,
+        )
+    except TerminationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return _settlement_out(settlement)
