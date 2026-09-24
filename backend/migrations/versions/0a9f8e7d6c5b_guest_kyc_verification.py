@@ -1,6 +1,6 @@
 """Guest KYC provider verification (spec 24.4)
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: 0a9f8e7d6c5b
 Revises: f9a0b1c2d3e4
 Create Date: 2026-09-24
 
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
+revision: str = "0a9f8e7d6c5b"
 down_revision: Union[str, Sequence[str], None] = "f9a0b1c2d3e4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

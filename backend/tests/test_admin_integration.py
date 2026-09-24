@@ -190,6 +190,40 @@ class TestAdminUserManagement:
         assert row["status"] == "active"
         assert row["organization"] is not None
 
+    async def test_users_list_never_leaks_credentials(self, admin_headers, regular_user):
+        """Admin user listing must never expose auth secrets (spec 2.6)."""
+        response = await self.client.get(
+            "/api/v1/admin/users", headers=admin_headers
+        )
+        assert response.status_code == 200
+        rows = response.json()
+
+        forbidden = {
+            "password_hash",
+            "verification_token",
+            "mfa_secret",
+            "refresh_token",
+            "token_hash",
+        }
+        allowed_keys = {
+            "user_id",
+            "name",
+            "email",
+            "status",
+            "is_admin",
+            "mfa_enabled",
+            "organization",
+            "created_at",
+        }
+        for row in rows:
+            for key in forbidden:
+                assert key not in row, (
+                    f"credential field '{key}' leaked in admin users list"
+                )
+            assert set(row.keys()) <= allowed_keys, (
+                f"unexpected field(s) {set(row.keys()) - allowed_keys} in admin users list"
+            )
+
     async def test_promote_then_demote(self, admin_headers, regular_user):
         promote = await self.client.post(
             f"/api/v1/admin/users/{regular_user.id}/promote",

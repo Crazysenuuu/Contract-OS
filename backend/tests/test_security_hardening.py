@@ -175,6 +175,38 @@ class TestRateLimiting:
         assert len(attempts) == 1
         assert attempts[0].success is False
 
+    async def test_guest_review_routes_get_tight_rate_budget(self):
+        """Guest /review/{token}* endpoints resolve to a tight per-IP budget.
+
+        The token-based external-party surface carries no Authorization
+        header, so each request is keyed by client IP (spec 3.20 brute-force
+        resistance). It must not fall through to the 240/min default.
+        """
+        from app.core import rate_limit as rl
+
+        for path in [
+            "/review/TOKEN",
+            "/review/TOKEN/verify-id/start",
+            "/review/TOKEN/verify-id/kyc/complete",
+            "/review/TOKEN/accept",
+            "/review/TOKEN/sign",
+        ]:
+            path_class, (window, limit) = rl._rule_for(path)
+            assert path_class == "/review/"
+            assert limit < rl._DEFAULT_RULE[1], (
+                f"{path} must be tighter than the default budget"
+            )
+
+        # The sliding window refuses once the per-identity budget is spent.
+        path_class, (window, limit) = rl._rule_for("/review/TOKEN/verify-id/start")
+        win = rl._Window()
+        for _ in range(limit):
+            allowed, _ = win.hit("ip:10.0.0.1", window, limit)
+            assert allowed is True
+        blocked, retry_after = win.hit("ip:10.0.0.1", window, limit)
+        assert blocked is False
+        assert retry_after > 0
+
 
 class TestSecurityHeaders:
     async def test_security_headers_present(self, client, auth_headers):

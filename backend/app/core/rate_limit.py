@@ -49,6 +49,14 @@ _RULES: list[tuple[str, tuple[int, int]]] = [
         "/api/v1/repository/download",
         (60, _env_int("RATE_LIMIT_DOWNLOAD_PER_MIN", 30)),
     ),
+    # Guest (token-based) verification & counter-signing surface. These
+    # routes sit outside /api/v1 and carry no Authorization header, so the
+    # identity is the client IP — keep brute-force attempts on
+    # /review/{token}/verify-id*, accept/reject/sign tight (spec 3.20).
+    (
+        "/review/",
+        (60, _env_int("RATE_LIMIT_REVIEW_PER_MIN", 30)),
+    ),
 ]
 _DEFAULT_RULE = (60, _env_int("RATE_LIMIT_DEFAULT_PER_MIN", 240))
 
