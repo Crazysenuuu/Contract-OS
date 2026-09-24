@@ -2,7 +2,8 @@
 
 Conversation memory, user feedback, evaluation dataset, and the
 model/prompt version registries that make every AI answer traceable to
-the exact configuration that produced it.
+the exact configuration that produced it. Also hosts the precedent model
+(spec 2.10.26–28) for cross-contract precedent retrieval.
 
 Security boundaries enforced here and in the service layer:
   - Conversation history never resurrects access (2.10.37): every query
@@ -503,6 +504,114 @@ class IntelligenceAccessCheck(
     )
 
 
+class AgreementPrecedent(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """A precedent link surfaced by cross-contract retrieval (2.10.26-28).
+
+    Records that a clause/version of one agreement has been used as a
+    precedent for another — either explicitly pinned by a user or
+    suggested by the retrieval engine and then accepted. Precedent rows
+    are data, not authority: they never bypass the permission filters of
+    the underlying knowledge chunks (2.10.28).
+    """
+
+    __tablename__ = "agreement_precedents"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # The agreement whose clause is cited as precedent (the source).
+    source_agreement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agreements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    source_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+        # Soft reference (mirror KnowledgeChunk): a version row may be
+        # purged independently; provenance stays useful without it.
+    )
+
+    source_chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_chunks.id", ondelete="SET NULL"),
+        nullable=True,
+        # The exact indexed passage used; access is re-checked per query.
+    )
+
+    # The agreement (and optionally clause) that drew on the precedent.
+    target_agreement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agreements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    target_clause_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
+    # 'pinned' (explicit user action) | 'suggested' (retrieval engine) |
+    # 'accepted' (a suggestion the user acted on)
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="suggested",
+    )
+
+    origin: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="retrieval",
+        # 'retrieval' | 'user' | 'negotiation'
+    )
+
+    score: Mapped[float | None] = mapped_column(
+        nullable=True,
+        # Retrieval score at suggestion time (explanability, 2.09.26 spirit).
+    )
+
+    note: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # One precedent link per (source passage, target clause, origin).
+    __table_args__ = (
+        UniqueConstraint(
+            "source_agreement_id",
+            "source_chunk_id",
+            "target_agreement_id",
+            "target_clause_id",
+            "origin",
+            name="uq_agreement_precedent_link",
+        ),
+        Index(
+            "ix_agreement_precedents_target",
+            "target_agreement_id",
+            "status",
+        ),
+    )
+
+
 # Latency metric for evaluation runs (used by the evaluation pipeline).
 LATENCY_METRIC = "latency_p50_ms"
 
@@ -519,6 +628,7 @@ __all__ = [
     "IntelligencePromptVersion",
     "IntelligenceEvaluationRun",
     "IntelligenceAccessCheck",
+    "AgreementPrecedent",
     "FEEDBACK_RATINGS",
     "MESSAGE_ROLES",
     "LATENCY_METRIC",

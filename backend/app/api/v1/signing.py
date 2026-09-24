@@ -22,7 +22,11 @@ from app.models.signature import InternalSignature
 from app.models.user import User
 from app.services.agreement_versioning import get_latest_version
 from app.services.audit_service import record_event
-from app.services.alerting_service import AlertSeverity, get_alerting_service
+from app.services.alerting_service import (
+    Alert,
+    AlertSeverity,
+    get_alerting_service,
+)
 from app.services.escalation_service import EscalationLevel, get_escalation_service
 from app.services.lifecycle_service import (
     TransitionNotAllowed,
@@ -134,17 +138,19 @@ def _send_esign_alert(
         message = f"{actor} {action} agreement {agreement_id[:8]}..."
 
     alerting.send_alert(
-        title=title,
-        message=message,
-        severity=severity,
-        source="contractos-esignature",
-        category="esignature",
-        details={
-            "agreement_id": agreement_id,
-            "action": action,
-            "actor": actor,
-            "executed": executed,
-        },
+        Alert(
+            title=title,
+            message=message,
+            severity=severity,
+            source="contractos-esignature",
+            category="esignature",
+            details={
+                "agreement_id": agreement_id,
+                "action": action,
+                "actor": actor,
+                "executed": executed,
+            },
+        )
     )
 
     if severity in (AlertSeverity.WARNING, AlertSeverity.CRITICAL):

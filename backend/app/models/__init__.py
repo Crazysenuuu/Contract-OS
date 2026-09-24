@@ -254,6 +254,7 @@ from app.models.intelligence_governance import (
     IntelligencePromptVersion,
     IntelligenceEvaluationRun,
     IntelligenceAccessCheck,
+    AgreementPrecedent,
 )
 
 __all__ = [
@@ -405,6 +406,7 @@ __all__ = [
     "IntelligencePromptVersion",
     "IntelligenceEvaluationRun",
     "IntelligenceAccessCheck",
+    "AgreementPrecedent",
     "APIKey",
 ]
 from app.models.stored_object import StoredObject

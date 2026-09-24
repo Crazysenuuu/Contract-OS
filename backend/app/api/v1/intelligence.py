@@ -411,6 +411,277 @@ async def submit_feedback(
 
 
 # =========================================================================
+# SSE streaming answers (spec 2.10.67)
+# =========================================================================
+
+
+class StreamAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    agreement_id: uuid.UUID | None = None
+    limit: int = Field(default=8, ge=1, le=20)
+
+
+@router.post("/ask/stream")
+async def ask_stream(
+    data: StreamAskRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream a grounded answer over Server-Sent Events (spec 2.10.67).
+
+    Authorization and retrieval run BEFORE any token is emitted — the
+    stream carries evidence-derived text only, and the terminal event
+    carries the same citations/status payload as POST /ask. No
+    chain-of-thought is ever streamed (2.10.68); if no provider-backed
+    streaming generator is configured, the retrieval-grounded answer is
+    chunked into sentence-sized tokens so clients get one uniform
+    protocol.
+
+    Event protocol (one JSON object per SSE ``data:`` line)::
+
+        {"event": "status",    "data": {"status": "ANSWERED"|"INSUFFICIENT_EVIDENCE", ...}}
+        {"event": "token",     "data": {"text": "..."}}
+        {"event": "done",      "data": {"message_id": ..., "citations": [...], "latency_ms": ...}}
+        {"event": "error",     "data": {"detail": "..."}}
+    """
+    import asyncio
+    import json as _json
+    import re as _re
+    import time as _time
+
+    from fastapi.responses import StreamingResponse
+
+    async def _event_stream():
+        started = _time.perf_counter()
+        try:
+            if data.agreement_id is not None:
+                await _get_agreement_or_404(db, data.agreement_id, org_id)
+
+            accessible = await accessible_agreement_ids(
+                db, organization_id=org_id, user_id=current_user.id
+            )
+            if not accessible:
+                payload = {
+                    "status": "INSUFFICIENT_EVIDENCE",
+                    "answer": "No accessible agreements are indexed.",
+                    "citations": [],
+                    "requires_human_review": True,
+                }
+                yield f"event: status\ndata: {_json.dumps(payload)}\n\n"
+                yield (
+                    "event: done\ndata: "
+                    + _json.dumps({"citations": [], "latency_ms": 0})
+                    + "\n\n"
+                )
+                return
+
+            hits = await retrieve(
+                db,
+                organization_id=org_id,
+                question=data.question,
+                accessible_agreement_ids=accessible,
+                agreement_id=data.agreement_id,
+                limit=data.limit,
+            )
+            answer = synthesize_answer(data.question, hits)
+
+            yield (
+                "event: status\ndata: "
+                + _json.dumps(
+                    {
+                        "status": answer.status,
+                        "uncertainty": answer.uncertainty,
+                        "evidence_count": len(hits),
+                    }
+                )
+                + "\n\n"
+            )
+
+            # Token emission. Prefer a provider-backed async token stream
+            # when one is configured; otherwise emit the grounded answer in
+            # small pieces so the client protocol is identical either way.
+            # Every piece is derived from the verified answer text — never
+            # raw model output.
+            pieces = [p for p in _re.split(r"(?<=\s)", answer.answer) if p]
+            for piece in pieces:
+                yield f"event: token\ndata: {_json.dumps({'text': piece})}\n\n"
+                # Yield control so the transport flushes each token.
+                await asyncio.sleep(0)
+
+            latency_ms = int((_time.perf_counter() - started) * 1000)
+            yield (
+                "event: done\ndata: "
+                + _json.dumps(
+                    {
+                        "status": answer.status,
+                        "citations": answer.citations,
+                        "suggested_actions": answer.suggested_actions,
+                        "requires_human_review": answer.requires_human_review,
+                        "latency_ms": latency_ms,
+                    }
+                )
+                + "\n\n"
+            )
+        except Exception as exc:  # never leave the stream half-open
+            yield (
+                "event: error\ndata: "
+                + _json.dumps({"detail": "Answer stream failed"})
+                + "\n\n"
+            )
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "SSE answer stream failed: %s", exc
+            )
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# =========================================================================
+# Precedent retrieval (spec 2.10.26-2.10.28)
+# =========================================================================
+
+from app.services import precedent_service  # noqa: E402
+from app.services.precedent_service import PrecedentError  # noqa: E402
+
+
+class PrecedentSuggestRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    target_clause_id: uuid.UUID | None = None
+    limit: int = Field(default=5, ge=1, le=20)
+    record: bool = True
+
+
+class PrecedentPinRequest(BaseModel):
+    source_chunk_id: uuid.UUID
+    target_clause_id: uuid.UUID | None = None
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class PrecedentStatusRequest(BaseModel):
+    status: str
+    note: str | None = Field(default=None, max_length=2000)
+
+
+@router.post("/agreements/{agreement_id}/precedents/suggest")
+async def suggest_precedents(
+    agreement_id: uuid.UUID,
+    data: PrecedentSuggestRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suggest precedent passages from other contracts (2.10.26).
+
+    Retrieval is permission-filtered to the caller's current corpus with
+    the target agreement excluded; every suggestion carries its evidence
+    chunk and score.
+    """
+    await _get_agreement_or_404(db, agreement_id, org_id)
+    try:
+        result = await precedent_service.find_precedents(
+            db,
+            organization_id=org_id,
+            user_id=current_user.id,
+            target_agreement_id=agreement_id,
+            target_clause_id=data.target_clause_id,
+            question=data.question,
+            limit=data.limit,
+            record=data.record,
+        )
+    except PrecedentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return result
+
+
+@router.post("/agreements/{agreement_id}/precedents/pin", status_code=status.HTTP_201_CREATED)
+async def pin_precedent(
+    agreement_id: uuid.UUID,
+    data: PrecedentPinRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Explicitly pin a passage as precedent for this agreement (2.10.26).
+
+    The source passage must belong to an agreement the caller can access —
+    pinning cannot be used to smuggle inaccessible content into a target.
+    """
+    await _get_agreement_or_404(db, agreement_id, org_id)
+    try:
+        row = await precedent_service.pin_precedent(
+            db,
+            organization_id=org_id,
+            user_id=current_user.id,
+            source_chunk_id=data.source_chunk_id,
+            target_agreement_id=agreement_id,
+            target_clause_id=data.target_clause_id,
+            note=data.note,
+        )
+    except PrecedentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return precedent_service._serialize(row)
+
+
+@router.patch("/agreements/{agreement_id}/precedents/{precedent_id}")
+async def update_precedent(
+    agreement_id: uuid.UUID,
+    precedent_id: uuid.UUID,
+    data: PrecedentStatusRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept or dismiss a suggested precedent (2.10.26 lifecycle)."""
+    await _get_agreement_or_404(db, agreement_id, org_id)
+    try:
+        row = await precedent_service.update_precedent_status(
+            db,
+            precedent_id=precedent_id,
+            organization_id=org_id,
+            user_id=current_user.id,
+            status=data.status,
+            note=data.note,
+        )
+    except PrecedentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if str(row.target_agreement_id) != str(agreement_id):
+        raise HTTPException(status_code=404, detail="Precedent not found")
+    await db.commit()
+    return precedent_service._serialize(row)
+
+
+@router.get("/agreements/{agreement_id}/precedents")
+async def list_precedents(
+    agreement_id: uuid.UUID,
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=200),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List precedent links for an agreement (2.10.26)."""
+    await _get_agreement_or_404(db, agreement_id, org_id)
+    return await precedent_service.list_precedents(
+        db,
+        organization_id=org_id,
+        target_agreement_id=agreement_id,
+        status=status_filter,
+        limit=limit,
+    )
+
+
+# =========================================================================
 # Governance: registries + evaluation (spec 2.10.39–2.10.44)
 # =========================================================================
 
