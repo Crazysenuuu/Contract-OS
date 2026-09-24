@@ -78,6 +78,17 @@ celery_app.conf.beat_schedule = {
         'task': 'app.tasks.scheduler.process_workflow_timers',
         'schedule': crontab(minute='*'),
     },
+    # Every 5 minutes (offset): obligation monitoring sweep — run due
+    # monitorings and pause stale-source-version rules (spec 3.15.31-33).
+    'run-monitoring-sweep': {
+        'task': 'app.monitoring.tasks.run_monitoring_sweep',
+        'schedule': crontab(minute='*/5'),
+    },
+    # Hourly: pause monitorings whose source agreement version was superseded.
+    'detect-stale-monitorings': {
+        'task': 'app.monitoring.tasks.detect_stale_monitorings_task',
+        'schedule': crontab(minute=30),
+    },
 }
 
 

@@ -332,6 +332,16 @@ def _notification_type(event_type: str) -> str:
         "approval.required": "approval_request",
         "obligation.reminder": "obligation_reminder",
         "compliance.violation": "compliance_violation",
+        # Monitoring (spec 3.15): external-source evaluation alerts. The
+        # notification_type drives Preference toggles + filtering; these map
+        # into the existing compliance_violation family so workspace-level
+        # "monitoring alert" preferences continue working out of the box.
+        "monitoring.evaluation_failed": "compliance_violation",
+        "monitoring.evaluation_passed": "compliance_violation",
+        "monitoring.source_unavailable": "compliance_violation",
+        "monitoring.recovered": "compliance_violation",
+        "monitoring.stale_version": "compliance_violation",
+        "monitoring.paused": "compliance_violation",
     }
     return mapping.get(event_type, "workflow_transition")
 

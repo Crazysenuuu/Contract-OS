@@ -65,6 +65,11 @@ PERMISSION_KEYS: frozenset[str] = frozenset(
         "workflow.manage",
         "workflow.execute",
         "workflow.resolve_incident",
+        # Contract obligation intelligence / monitoring (spec 3.15)
+        "monitoring.manage",
+        "monitoring.manage_rules",
+        "monitoring.view",
+        "monitoring.view_data",
     }
 )
 

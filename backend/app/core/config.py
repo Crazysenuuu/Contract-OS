@@ -175,6 +175,18 @@ class Settings(BaseSettings):
     sms_sender_id: str = "ContractOS"
     sms_timeout_seconds: float = 10.0
 
+    # Contract obligation monitoring (spec 3.15). External source connectors
+    # resolve credentials from env/secret bindings at fetch time; these
+    # settings only bound the monitoring engine's own parameters.
+    monitoring_sweep_batch_size: int = 50
+    monitoring_default_timeout_seconds: float = 15.0
+    monitoring_webhook_max_skew_seconds: int = 300
+    # Fallback HMAC-SHA256 secret for inbound monitoring webhooks when an
+    # integration does not declare one via configuration.webhook_secret.
+    # When unset AND the integration has no configured secret, webhook
+    # deliveries are rejected (fail closed), mirroring the billing webhook.
+    monitoring_webhook_secret: SecretStr | None = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

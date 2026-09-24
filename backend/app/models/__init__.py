@@ -416,3 +416,25 @@ from app.models.signer_evidence import SignerEvidence
 from app.models.special_form import SpecialFormRecord
 __all__.append('SignerEvidence')
 __all__.append('SpecialFormRecord')
+from app.monitoring.models import (
+    IntegrationConnection,
+    IntegrationCredential,
+    IntegrationHealth,
+    ObligationMonitoring,
+    ExternalObservationRecord,
+    MonitoringEvaluation,
+    MonitoringException,
+    MonitoringRun,
+    MonitoringWebhookEvent,
+)
+__all__ += [
+    "IntegrationConnection",
+    "IntegrationCredential",
+    "IntegrationHealth",
+    "ObligationMonitoring",
+    "ExternalObservationRecord",
+    "MonitoringEvaluation",
+    "MonitoringException",
+    "MonitoringRun",
+    "MonitoringWebhookEvent",
+]

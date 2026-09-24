@@ -1919,6 +1919,10 @@ PERMISSION_CATALOG = [
     {"key": "workflow.manage", "description": "Create, edit, validate, publish and disable workflow definitions"},
     {"key": "workflow.execute", "description": "Dispatch workflow events and complete tasks"},
     {"key": "workflow.resolve_incident", "description": "Resolve workflow incidents"},
+    {"key": "monitoring.manage", "description": "Configure monitoring integrations and credentials"},
+    {"key": "monitoring.manage_rules", "description": "Create, edit, pause and delete obligation monitoring rules"},
+    {"key": "monitoring.view", "description": "View monitoring definitions, health and evaluation history"},
+    {"key": "monitoring.view_data", "description": "View external observations and evidence attached to monitorings"},
 ]
 
 
