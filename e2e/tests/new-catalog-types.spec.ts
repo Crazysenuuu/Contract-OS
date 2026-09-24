@@ -100,31 +100,89 @@ test.describe("New catalog types through the wizard", () => {
         .waitFor({ state: "visible", timeout: 8000 })
         .catch(() => {});
 
-      // 3. Fill every visible control (retry until a fill actually sticks —
-      //    pre-hydration fills silently leave React state empty).
-      const firstDate = page.locator("input[type='date']:visible").first();
-      for (let attempt = 0; attempt < 10; attempt++) {
-        await fillVisibleControls(page);
-        const stuck = await firstDate
-          .inputValue()
-          .then((v) => v === "2026-06-01")
-          .catch(() => false);
-        if (stuck) break;
-        await page.waitForTimeout(400);
-      }
+      // 3+4. Fill every visible control and walk sections with Next until
+      //    "Create Agreement" appears.
+      //
+      // Each wizard view is hydrated fresh after a step change: its React
+      // controlled inputs silently ignore programmatic fills until the
+      // onChange handlers attach. Filling once and clicking Next therefore
+      // races the remount — answers land empty and the save/validate calls
+      // report "Missing required field" for every question of the view that
+      // was skipped.
+      //
+      // The probe must target a control INSIDE the section panel (class
+      // "bg-white shadow rounded-lg"): the Agreement Title input sits
+      // outside every view, is always hydrated, and would report "stuck"
+      // while the view's own controls are still dead. Under a cold dev
+      // server this race is the difference between a 1-minute and a
+      // 7-minute suite. Per-kind predicates: text fills are numbered
+      // globally, so any "E2E Test Value <n>" proves the handler attached;
+      // a dropped select fill leaves the empty placeholder selected.
+      const SECTION_PANEL = "div.bg-white.shadow.rounded-lg";
+      const currentViewProbe = () =>
+        page
+          .locator(
+            `${SECTION_PANEL} input[type='text']:visible, ${SECTION_PANEL} input[type='date']:visible, ${SECTION_PANEL} input[type='number']:visible, ${SECTION_PANEL} textarea:visible, ${SECTION_PANEL} select:visible`
+          )
+          .first();
 
-      // 4. Walk sections with Next until "Create Agreement" appears.
+      const fillUntilStuck = async () => {
+        const probe = currentViewProbe();
+        if (!(await probe.isVisible().catch(() => false))) return;
+        const kind = await probe.evaluate((el) =>
+          el.tagName === "INPUT"
+            ? (el as HTMLInputElement).type
+            : el.tagName === "SELECT"
+              ? "select"
+              : "textarea"
+        );
+        for (let attempt = 0; attempt < 10; attempt++) {
+          await fillVisibleControls(page);
+          const stuck = await probe
+            .inputValue()
+            .then((v) =>
+              kind === "date"
+                ? v === "2026-06-01"
+                : kind === "number"
+                  ? v === "12"
+                  : kind === "textarea"
+                    ? v === "E2E test purpose"
+                    : kind === "select"
+                      ? v !== ""
+                      : /^E2E Test Value \d+$/.test(v)
+            )
+            .catch(() => false);
+          if (stuck) return;
+          await page.waitForTimeout(400);
+        }
+      };
+
+      // First view: fill until hydration confirms.
+      await fillUntilStuck();
+
+      // Walk the remaining views. handleNext saves before advancing, so the
+      // button label flips to "Saving..." (disabled) mid-round-trip. Matching
+      // both labels lets Playwright auto-wait for the re-enabled "Next"
+      // instead of the loop mistaking the transient save state for the last
+      // step (whose button reads "Create Agreement").
       let guard = 0;
       while (guard < 8) {
-        await fillVisibleControls(page);
-        const nextBtn = page.locator("button:has-text('Next')").first();
-        if (await nextBtn.isVisible().catch(() => false)) {
-          await nextBtn.click();
-          guard += 1;
-          await page.waitForTimeout(300);
-          continue;
+        const nextBtn = page
+          .locator("button:has-text('Next'), button:has-text('Saving')")
+          .first();
+        if (!(await nextBtn.isVisible().catch(() => false))) break;
+        await nextBtn.click();
+        guard += 1;
+        // The freshly mounted view needs its own fill-verification before
+        // the next click; bail out if we've reached the final step.
+        await fillUntilStuck();
+        if (!(await page
+          .locator("button:has-text('Next'), button:has-text('Saving')")
+          .first()
+          .isVisible()
+          .catch(() => false))) {
+          break;
         }
-        break;
       }
 
       // 5. Submit: "Create Agreement" triggers handleFinish — create draft,

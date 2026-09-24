@@ -127,6 +127,57 @@ async def _seed_user(
         await db.commit()
 
 
+async def seed_legal_entities() -> None:
+    """Seed two legal entities owned by the shared e2e org.
+
+    The creation wizard's Party A / Party B selects list legal entities of
+    the caller's org; without any, the wizard specs (critical-flow,
+    new-catalog-types) cannot complete intake. Idempotent: skips when the
+    org already owns entities.
+    """
+    from sqlalchemy import func, select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.legal_entity import LegalEntity
+    from app.models.organization import Organization
+
+    async with AsyncSessionLocal() as db:
+        org = (
+            await db.execute(
+                select(Organization).where(Organization.slug == "e2e-test-org")
+            )
+        ).scalar_one_or_none()
+        if org is None:
+            print("  ⚠️  org e2e-test-org missing; users must be seeded first")
+            return
+        count = await db.scalar(
+            select(func.count())
+            .select_from(LegalEntity)
+            .where(LegalEntity.organization_id == org.id)
+        )
+        if count:
+            print(f"  ⏭️  Legal entities already exist ({count})")
+            return
+        db.add_all(
+            [
+                LegalEntity(
+                    organization_id=org.id,
+                    legal_name="E2E Test Corp (Pvt) Ltd",
+                    country="US",
+                    entity_type="corporation",
+                ),
+                LegalEntity(
+                    organization_id=org.id,
+                    legal_name="E2E Counterparty LLC",
+                    country="US",
+                    entity_type="llc",
+                ),
+            ]
+        )
+        await db.commit()
+        print("  created 2 legal entities in e2e-test-org")
+
+
 async def main() -> int:
     # Spec §72: fixture users / demo data must never land in production.
     from app.core.config import get_settings_lazy
@@ -138,6 +189,7 @@ async def main() -> int:
     print("Seeding e2e fixtures...")
     await seed_login_user()
     await seed_admin_user()
+    await seed_legal_entities()
 
     # Reference data the UI flows browse: agreement types, jurisdictions,
     # lifecycle states and transition rules.

@@ -58,6 +58,32 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 BACKEND_URL="http://localhost:${BACKEND_PORT}"
 BACKEND_PID=""
 BACKEND_LOG=""
+FAKE_SMS_PID=""
+
+# The sms-channel specs require the fake SMS gateway on 127.0.0.1:9911
+# (see e2e/tests/sms-channel.spec.ts prerequisites) and the backend must
+# point at it. Started here so `test.sh e2e` remains a one-command target.
+start_fake_sms_gateway() {
+    if curl -sf -m 2 http://127.0.0.1:9911/health > /dev/null 2>&1; then
+        echo "📡 Fake SMS gateway already running on :9911"
+        return 0
+    fi
+    (
+        cd "$ROOT_DIR/backend"
+        "$PY" scripts/fake_sms_gateway.py
+    ) > /tmp/contractos-fake-sms.log 2>&1 &
+    FAKE_SMS_PID=$!
+    for _ in $(seq 1 10); do
+        if curl -sf -m 2 http://127.0.0.1:9911/health > /dev/null 2>&1; then
+            echo "📡 Fake SMS gateway started (pid $FAKE_SMS_PID)"
+            return 0
+        fi
+        sleep 0.5
+    done
+    echo "❌ Fake SMS gateway failed to start. Log tail:"
+    tail -n 10 /tmp/contractos-fake-sms.log || true
+    return 1
+}
 
 backend_healthy() {
     curl -sf -m 3 "${BACKEND_URL}/api/v1/health" > /dev/null 2>&1
@@ -75,6 +101,9 @@ wait_backend_healthy() {
 }
 
 cleanup() {
+    if [ -n "$FAKE_SMS_PID" ]; then
+        kill "$FAKE_SMS_PID" 2>/dev/null || true
+    fi
     if [ -n "$BACKEND_PID" ]; then
         echo ""
         echo "🧹 Stopping backend (pid $BACKEND_PID)..."
@@ -106,6 +135,9 @@ run_e2e_tests() {
             fi
             (
                 cd "$ROOT_DIR/backend"
+                # Point the SMS channel at the fake gateway (sms-channel specs).
+                export SMS_API_BASE_URL="http://127.0.0.1:9911"
+                export SMS_API_KEY="test-gateway-key-123"
                 exec "$PY" -m uvicorn app.main:app --host 0.0.0.0 --port "$BACKEND_PORT"
             ) > "$BACKEND_LOG" 2>&1 &
             BACKEND_PID=$!
@@ -120,7 +152,10 @@ run_e2e_tests() {
         fi
     else
         echo "⏭️  SKIP_BACKEND_BOOT=1 — assuming backend already on :${BACKEND_PORT}."
+        echo "⚠️  sms-channel specs need that backend started with SMS_API_BASE_URL=http://127.0.0.1:9911 and SMS_API_KEY=test-gateway-key-123"
     fi
+
+    start_fake_sms_gateway || exit 1
 
     echo "🌱 Seeding e2e fixtures..."
     (

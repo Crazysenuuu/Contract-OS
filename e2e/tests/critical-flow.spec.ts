@@ -114,23 +114,80 @@ test.describe("Critical Path", () => {
         }
       };
 
-      const firstDate = page.locator("input[type='date']:visible").first();
-      for (let attempt = 0; attempt < 10; attempt++) {
-        await fillVisibleControls();
-        const stuck = await firstDate
-          .inputValue()
-          .then((v) => v === "2026-06-01")
-          .catch(() => false);
-        if (stuck) break;
-        await page.waitForTimeout(400);
-      }
+      // Per-view hydration probe (same contract as new-catalog-types):
+      // each wizard view remounts with fresh React state after a step
+      // change, so fills must be re-verified against the CURRENT view's
+      // first fillable control before the next click — otherwise the loop
+      // can race the remount, leave that view's answers empty, and the
+      // save/validate calls report "Missing required field" for every
+      // question of the skipped view.
+      //
+      // The probe targets a control INSIDE the section panel: the
+      // Agreement Title input sits outside every view, is always
+      // hydrated, and would report "stuck" while the view's own controls
+      // are still dead under a cold dev server.
+      const SECTION_PANEL = "div.bg-white.shadow.rounded-lg";
+      const currentViewProbe = () =>
+        page
+          .locator(
+            `${SECTION_PANEL} input[type='text']:visible, ${SECTION_PANEL} input[type='date']:visible, ${SECTION_PANEL} input[type='number']:visible, ${SECTION_PANEL} textarea:visible, ${SECTION_PANEL} select:visible`
+          )
+          .first();
 
+      const fillUntilStuck = async () => {
+        const probe = currentViewProbe();
+        if (!(await probe.isVisible().catch(() => false))) return;
+        const kind = await probe.evaluate((el) =>
+          el.tagName === "INPUT"
+            ? (el as HTMLInputElement).type
+            : el.tagName === "SELECT"
+              ? "select"
+              : "textarea"
+        );
+        for (let attempt = 0; attempt < 10; attempt++) {
+          await fillVisibleControls();
+          const stuck = await probe
+            .inputValue()
+            .then((v) =>
+              kind === "date"
+                ? v === "2026-06-01"
+                : kind === "number"
+                  ? v === "12"
+                  : kind === "textarea"
+                    ? v === "E2E test purpose"
+                    : kind === "select"
+                      ? v !== ""
+                      : /^E2E Test Value \d+$/.test(v)
+            )
+            .catch(() => false);
+          if (stuck) return;
+          await page.waitForTimeout(400);
+        }
+      };
+
+      // First view: fill until hydration confirms.
+      await fillUntilStuck();
+
+      // Walk the remaining views. handleNext disables and relabels the
+      // button to "Saving..." while saving; matching both lets Playwright
+      // auto-wait for the re-enabled "Next" instead of mistaking the
+      // transient save state for the final step ("Create Agreement").
       let clickedNext = true;
       let guard = 0;
       while (clickedNext && guard < 8) {
-        await fillVisibleControls();
-        clickedNext = await clickIfVisible(page, "button:has-text('Next')");
+        clickedNext = await clickIfVisible(
+          page,
+          "button:has-text('Next'), button:has-text('Saving')"
+        );
         guard += 1;
+        if (!clickedNext) break;
+        // Fill-verify the freshly mounted view before the next click.
+        await fillUntilStuck();
+        clickedNext = await page
+          .locator("button:has-text('Next'), button:has-text('Saving')")
+          .first()
+          .isVisible()
+          .catch(() => false);
       }
       await fillVisibleControls();
       // Single-section templates show "Create Agreement" directly; re-fill
