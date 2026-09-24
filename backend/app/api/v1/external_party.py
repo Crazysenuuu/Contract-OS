@@ -5,6 +5,7 @@ No account required for the other party.
 """
 
 import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 from uuid import UUID
@@ -28,10 +29,13 @@ from app.models.external_party import ExternalParty
 from app.models.user import User
 from app.services.agreement_versioning import get_latest_version, list_versions
 from app.services.external_party_service import (
+    KYCFlowError,
     accept_agreement,
     add_external_comment,
+    apply_kyc_webhook_event,
     capture_signature,
     complete_id_verification,
+    complete_kyc_verification,
     create_external_party,
     get_external_parties_for_agreement,
     get_external_party_comments,
@@ -39,6 +43,11 @@ from app.services.external_party_service import (
     reject_agreement,
     start_id_verification,
     validate_access_token,
+)
+from app.services.kyc_provider import (
+    KYCProviderError,
+    kyc_webhook_secret,
+    verify_stripe_signature,
 )
 from app.services.lifecycle_service import TransitionNotAllowed
 from app.services.signing_completion import ExecutionBlocked, check_and_execute
@@ -370,14 +379,28 @@ async def list_comments_external(
 
 
 class IDVerificationStartResponse(BaseModel):
-    challenge_id: str
-    expires_at: str
+    # 'otp_email' or 'kyc_provider' — guests get one or the other depending
+    # on the party's verification policy (spec 24.3 vs 24.4).
+    method: str = "otp_email"
+    challenge_id: str | None = None
+    expires_at: str | None = None
     debug_code: str | None = None  # dev/log path only, same as native signing
+    # KYC flow fields
+    provider: str | None = None
+    session_id: str | None = None
+    status: str | None = None
+    url: str | None = None  # hosted verification page to redirect the guest to
 
 
 class IDVerificationCompleteRequest(BaseModel):
     challenge_id: str
     code: str
+
+
+class KYCCompleteRequest(BaseModel):
+    # Mock provider completion code (dev/test). Real providers ignore this;
+    # their outcome is polled from the session or delivered via webhook.
+    code: str | None = None
 
 
 @router.post(
@@ -386,9 +409,15 @@ class IDVerificationCompleteRequest(BaseModel):
 )
 async def start_id_verification_endpoint(
     token: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Begin guest ID verification: email an OTP to the signatory."""
+    """Begin guest ID verification.
+
+    Returns an OTP challenge by default; when the party is flagged for full
+    KYC (spec 24.4), returns a provider verification session with the hosted
+    URL the guest must complete before accepting/signing.
+    """
     external_party = await validate_access_token(db, token)
     if external_party is None:
         raise HTTPException(
@@ -396,15 +425,39 @@ async def start_id_verification_endpoint(
             detail="Invalid or expired access link",
         )
 
+    return_url = str(request.query_params.get("return_url") or "") or None
+
     try:
-        challenge = await start_id_verification(db, external_party)
+        challenge = await start_id_verification(db, external_party, return_url=return_url)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+    except KYCProviderError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Identity verification provider unavailable: {e}",
+        )
     await db.commit()
-    return challenge
+
+    if challenge.get("method") == "kyc_provider":
+        return IDVerificationStartResponse(
+            method="kyc_provider",
+            provider=challenge.get("provider"),
+            session_id=challenge.get("session_id"),
+            status=challenge.get("status"),
+            url=challenge.get("url"),
+            expires_at=challenge.get("expires_at"),
+            debug_code=challenge.get("debug_code"),
+        )
+    return IDVerificationStartResponse(
+        method="otp_email",
+        challenge_id=challenge.get("challenge_id"),
+        expires_at=challenge.get("expires_at"),
+        debug_code=challenge.get("debug_code"),
+    )
 
 
 @router.post("/review/{token}/verify-id/complete")
@@ -447,6 +500,146 @@ async def complete_id_verification_endpoint(
         raise
     await db.commit()
     return {"verified": True, "method": "otp_email"}
+
+
+@router.post("/review/{token}/verify-id/kyc/complete")
+async def complete_kyc_verification_endpoint(
+    token: str,
+    data: KYCCompleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Resolve a guest's provider verification session (spec 24.4).
+
+    Mock provider: ``code`` is the completion code returned by /start.
+    Real providers: the body may be empty — the session state is polled and
+    only a provider-confirmed ``verified`` outcome marks the party.
+    """
+    external_party = await validate_access_token(db, token)
+    if external_party is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid or expired access link",
+        )
+
+    try:
+        result = await complete_kyc_verification(
+            db,
+            external_party,
+            submitted_code=data.code,
+        )
+    except KYCFlowError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except KYCProviderError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Identity verification provider unavailable: {e}",
+        )
+    await db.commit()
+    return result
+
+
+@router.post("/kyc/webhook/{token}")
+async def kyc_webhook_endpoint(
+    token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Provider callback for guest verification outcomes (spec 24.4).
+
+    Accepts Stripe Identity-style event payloads::
+
+        {"type": "identity.verification_session.verified",
+         "data": {"object": {"id": "vs_...", "status": "verified",
+                             "last_error": null}}}
+
+    Authenticated two ways: the per-party URL token (path) OR a valid
+    provider webhook signature (Stripe-Signature header, verified against
+    STRIPE_IDENTITY_WEBHOOK_SECRET). At least one must match. The event id
+    (or a hash of the payload) provides idempotency.
+    """
+    external_party = await validate_access_token(db, token)
+    if external_party is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid or expired access link",
+        )
+
+    raw_body = (await request.body()).decode("utf-8", errors="replace")
+    signature_header = request.headers.get("stripe-signature")
+
+    try:
+        event = json.loads(raw_body or "{}")
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Malformed JSON payload",
+        )
+
+    # --- Authentication: signature OR per-party token -------------------
+    signature_valid = False
+    if signature_header:
+        signature_valid = verify_stripe_signature(
+            raw_body, signature_header, kyc_webhook_secret()
+        )
+        if not signature_valid:
+            # A signature was presented but does not verify: refuse outright
+            # rather than falling back to the URL token.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid webhook signature",
+            )
+
+    obj = (event.get("data") or {}).get("object") or {}
+    session_id = str(obj.get("id") or "")
+    if not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook payload has no session id",
+    )
+
+    if not signature_valid and external_party.kyc_session_id != session_id:
+        # Token-authenticated callers may only report on their own session;
+        # signature-authenticated provider callbacks may target any party.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Event does not match this guest's verification session",
+        )
+
+    event_type = str(event.get("type") or "")
+    if not event_type.startswith("identity.verification_session."):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported event type: {event_type or '(none)'}",
+        )
+
+    status_value = str(obj.get("status") or event_type.rsplit(".", 1)[-1])
+    last_error = obj.get("last_error") or {}
+
+    try:
+        result = await apply_kyc_webhook_event(
+            db,
+            external_party,
+            session_id=session_id,
+            status=status_value,
+            failure_reason=last_error.get("reason") if isinstance(last_error, dict) else None,
+            details={
+                "event_type": event_type,
+                "livemode": bool(obj.get("livemode")),
+            },
+        )
+    except KYCFlowError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    await db.commit()
+    return result
 
 
 @router.post(

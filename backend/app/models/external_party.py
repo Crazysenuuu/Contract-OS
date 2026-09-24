@@ -9,9 +9,11 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     String,
     Text,
 )
@@ -124,8 +126,18 @@ class ExternalParty(
 
     # ID verification (spec 24.3): when enabled, the guest must complete an
     # email OTP challenge before accepting or signing. 'otp_email' today;
-    # a KYC provider integration would add its own method value.
+    # 'kyc_provider' is set by the KYC provider flow (spec 24.4).
     requires_id_verification: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    # Full KYC provider flow (spec 24.4): when set together with
+    # requires_id_verification, verification is delegated to the configured
+    # identity provider (document scan + selfie) instead of the email OTP
+    # challenge. Intended for high-value agreements.
+    requires_kyc: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
@@ -139,7 +151,63 @@ class ExternalParty(
     id_verification_method: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
-        # 'otp_email', 'kyc_provider', 'document_check'
+        # 'otp_email', 'kyc_provider'
+    )
+
+    # KYC provider session (spec 24.4). Set when verification is delegated
+    # to the configured identity provider; cleared never — superseded
+    # sessions stay on KycVerificationAttempt for the audit trail.
+    kyc_provider: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    kyc_session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    kyc_session_status: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+        # 'requires_input', 'processing', 'verified', 'canceled', 'failed'
+    )
+
+    # Spec 24.4 session start career (spec 31/25/26 alignment):
+    # - kyc_session_url is the hosted flow URL the guest is redirected to
+    #   (Stripe hosted page, or the mock's synthetic URL). None when the
+    #   provider is embedded-only.
+    # - kyc_session_expires_at is the host-side session TTL; the party is
+    #   refused sign/accept past this instant (the host flow URL may also
+    #   verify against it on return).
+    # - kyc_session_auth_method records how the guest proved identity so the
+    #   audit ledger can answer "who signed what, with which auth".
+    kyc_session_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    kyc_session_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    kyc_session_auth_method: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        # 'none' | 'otp_email' | 'kyc_provider'
+    )
+
+    # Signature event stream (spec §31). One row per consequential action the
+    # guest performed: accepted / signed. Captures the identity method used
+    # (otp_email | kyc_provider) and the document hash at the time so the
+    # audit ledger can answer "who signed what, when, and with what hash".
+    signature_events = relationship(
+        "SignatureEvent",
+        back_populates="external_party",
+        cascade="all, delete-orphan",
+        order_by="SignatureEvent.created_at",
     )
 
     # Relationships
@@ -157,6 +225,133 @@ class ExternalParty(
     def generate_access_token() -> str:
         """Generate a cryptographically secure access token."""
         return secrets.token_urlsafe(96)
+
+
+class SignatureEvent(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """Audit event for external-party signature actions (spec §31).
+
+    Captures who did what, how they authenticated, and the document hash at
+    the time of the action. No raw identity documents are stored — only
+    coarse evidence for the audit ledger (spec 33).
+    """
+
+    __tablename__ = "external_party_signature_events"
+
+    external_party_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "external_parties.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    agreement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agreements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Action / event type
+    action: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        # 'accepted', 'commented', 'rejected', 'signed'
+    )
+
+    # Identity / authentication evidence (coarse, for audit only)
+    authentication_method: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        # 'none' | 'otp_email' | 'kyc_provider'
+    )
+
+    # Document hash at the time of the action (spec §25).
+    document_hash: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+
+    # Consent disclosure text (spec §31)
+    consent_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Relationships
+    external_party = relationship("ExternalParty")
+    agreement = relationship("Agreement")
+
+
+class KycVerificationAttempt(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """Journal of KYC verification attempts (spec 24.4).
+
+    One row per provider session attempt, preserving the full history of
+    starts, declines and completions for the audit trail. Stores outcomes
+    and coarse check metadata only — never document images or document
+    numbers (provider retains and redacts those; spec 33 data boundary).
+    """
+
+    __tablename__ = "kyc_verification_attempts"
+
+    __table_args__ = (
+        Index("ix_kyc_attempts_party_session", "external_party_id", "session_id"),
+    )
+
+    external_party_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "external_parties.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    provider: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    session_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        # 'requires_input', 'processing', 'verified', 'canceled', 'failed'
+    )
+
+    failure_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Coarse provider metadata (checks performed, livemode, report id...).
+    # Must not contain raw document images or document numbers.
+    details: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    external_party = relationship("ExternalParty")
 
 
 class ExternalPartySession(
@@ -178,6 +373,16 @@ class ExternalPartySession(
             ondelete="CASCADE",
         ),
         nullable=False,
+        index=True,
+    )
+
+    # Spec 31/25/26 alignment: each review session is addressable by a
+    # stable session id so the host can hand the guest a single session key
+    # for the review link, and the host can look up the session (and its
+    # expiry, auth method, last action) from it.
+    user_session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
         index=True,
     )
 

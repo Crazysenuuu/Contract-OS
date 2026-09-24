@@ -97,6 +97,16 @@ class Settings(BaseSettings):
     docusign_webhook_secret: SecretStr | None = None
     adobe_webhook_secret: SecretStr | None = None
 
+    # KYC / identity verification (spec 24.4): 'mock' | 'stripe_identity'.
+    # Governs the guest signatory flow when a party requires full ID
+    # verification (government-ID document scan + selfie) instead of the
+    # default email OTP challenge.
+    kyc_provider: str = "mock"
+    # Required when kyc_provider == 'stripe_identity'
+    stripe_identity_api_key: SecretStr | None = None
+    # Verifies Stripe Identity webhook callbacks (identity.verification_session.verified)
+    stripe_identity_webhook_secret: SecretStr | None = None
+
     # AI provider credentials (spec 17/18/36). Without a key the AI service
     # degrades to its rule-based fallback extractor.
     openai_api_key: SecretStr | None = None

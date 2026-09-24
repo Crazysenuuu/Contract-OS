@@ -51,6 +51,7 @@ from app.models.external_party import (
     ExternalPartySession,
     ExternalPartyComment,
     ExternalPartySignature,
+    KycVerificationAttempt,
 )
 from app.models.legal_workspace import (
     LegalPrivateNote,

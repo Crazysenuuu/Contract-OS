@@ -16,6 +16,7 @@ from app.models.external_party import (
     ExternalPartyComment,
     ExternalPartySession,
     ExternalPartySignature,
+    KycVerificationAttempt,
 )
 from app.services.agreement_versioning import get_latest_version
 
@@ -184,20 +185,53 @@ def ensure_id_verified(external_party: ExternalParty) -> None:
         raise PermissionError("ID verification required before this action")
 
 
+class KYCFlowError(Exception):
+    """Raised when the guest KYC flow is used incorrectly.
+
+    Distinct from :class:`app.services.kyc_provider.KYCProviderError`
+    (provider/network failures) so the API layer can map the two to
+    different HTTP statuses: 400 for caller mistakes, 502 for provider
+    outages.
+    """
+
+
 async def start_id_verification(
     db: AsyncSession,
     external_party: ExternalParty,
+    *,
+    return_url: str | None = None,
 ) -> dict:
-    """Begin ID verification for a guest: issue an email OTP challenge.
+    """Begin ID verification for a guest.
 
-    The OTP infrastructure is keyed to signature requests, so guests get a
-    synthetic request id derived from the external party id — the challenge
-    row only needs a stable FK target, and the code is delivered to the
-    party's signatory email either way.
+    Two flows (spec 24.3 / 24.4):
 
-    Returns the challenge payload (challenge_id + expiry). The raw code is
-    only in the return value for the dev/log path, same as native signing.
+      - Default: email OTP challenge (frictionless, no provider dependency).
+        The OTP infrastructure is keyed to signature requests, so guests get
+        a synthetic request id derived from the external party id — the
+        challenge row only needs a stable FK target, and the code is
+        delivered to the party's signatory email either way.
+
+      - When the tenant enabled a KYC provider (``KYC_PROVIDER`` set to a
+        real provider and the party row flagged ``requires_kyc``), a
+        provider verification session is created instead and the guest is
+        redirected to the hosted document+selfie check. The party is only
+        marked verified when the provider confirms (completion endpoint or
+        webhook), never on session creation.
+
+    Returns the challenge payload:
+
+      - OTP flow: ``{method: 'otp_email', challenge_id, expires_at[, debug_code]}``
+      - KYC flow: ``{method: 'kyc_provider', provider, session_id, url,
+        expires_at, status}``
+
+    The raw OTP code is only in the return value for the dev/log path, same
+    as native signing.
     """
+    if getattr(external_party, "requires_kyc", False):
+        return await start_kyc_verification(
+            db, external_party, return_url=return_url
+        )
+
     from app.services.otp_service import issue_otp
 
     # external_party rows always belong to an agreement with an org; the
@@ -212,13 +246,221 @@ async def start_id_verification(
         raise ValueError("Agreement not found for external party")
 
     synthetic_request_id = external_party.id  # stable per-party key
-    return await issue_otp(
+    challenge = await issue_otp(
         db,
         organization_id=organization_id,
         signature_request_id=synthetic_request_id,
         channel="email",
         email=external_party.signatory_email,
     )
+    return {"method": "otp_email", **challenge}
+
+
+async def start_kyc_verification(
+    db: AsyncSession,
+    external_party: ExternalParty,
+    *,
+    return_url: str | None = None,
+) -> dict:
+    """Start a provider verification session for a guest (spec 24.4).
+
+    Creates the provider session, records a KycVerificationAttempt journal
+    row, and persists the session on the party. Verification itself only
+    happens when the provider reports ``verified`` (completion endpoint or
+    webhook) — never here.
+    """
+    from app.services.kyc_provider import (
+        KYCProviderError,
+        resolve_kyc_provider,
+    )
+
+    provider = resolve_kyc_provider()
+
+    try:
+        result = await provider.create_verification_session(
+            external_party_id=external_party.id,
+            signatory_name=external_party.signatory_name,
+            signatory_email=external_party.signatory_email,
+            return_url=return_url,
+            agreement_id=external_party.agreement_id,
+        )
+    except KYCProviderError:
+        raise
+
+    external_party.kyc_provider = result.provider
+    external_party.kyc_session_id = result.session_id
+    external_party.kyc_session_status = result.status
+    external_party.kyc_session_url = result.url
+    external_party.kyc_session_expires_at = result.expires_at
+
+    db.add(
+        KycVerificationAttempt(
+            external_party_id=external_party.id,
+            provider=result.provider,
+            session_id=result.session_id,
+            status=result.status,
+            details=dict(result.provider_metadata or {}),
+        )
+    )
+    await db.flush()
+
+    return {
+        "method": "kyc_provider",
+        "provider": result.provider,
+        "session_id": result.session_id,
+        "status": result.status,
+        "url": result.url,
+        "expires_at": result.expires_at.isoformat()
+        if result.expires_at
+        else None,
+        # Mock provider only — lets dev/test complete the flow without the
+        # hosted page, same spirit as the OTP debug_code.
+        "debug_code": result.debug_code,
+    }
+
+
+async def complete_kyc_verification(
+    db: AsyncSession,
+    external_party: ExternalParty,
+    *,
+    submitted_code: str | None = None,
+) -> dict:
+    """Resolve a guest's provider verification session.
+
+    Asks the provider for the session outcome (the mock uses
+    ``submitted_code`` as the completion signal; real providers ignore it
+    and report their own state). When the provider reports ``verified`` the
+    party is marked ID-verified with method ``kyc_provider`` and the
+    journal row is closed. Any other outcome leaves the party unverified.
+
+    Returns ``{verified, status, method?, failure_reason?}``.
+    """
+    from app.services.kyc_provider import (
+        KYCProviderError,
+        resolve_kyc_provider,
+    )
+
+    if not external_party.kyc_session_id:
+        raise KYCFlowError(
+            "No provider verification session for this guest; "
+            "start one via /verify-id/start first"
+        )
+
+    provider = resolve_kyc_provider()
+    try:
+        result = await provider.complete_verification(
+            session_id=external_party.kyc_session_id,
+            submitted_code=submitted_code,
+        )
+    except KYCProviderError:
+        raise
+
+    now = datetime.now(timezone.utc)
+
+    attempt = (
+        await db.execute(
+            select(KycVerificationAttempt)
+            .where(
+                KycVerificationAttempt.external_party_id == external_party.id,
+                KycVerificationAttempt.session_id
+                == external_party.kyc_session_id,
+                KycVerificationAttempt.status.notin_(
+                    ["verified", "canceled"]
+                ),
+            )
+            .order_by(KycVerificationAttempt.created_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+
+    external_party.kyc_session_status = result.status
+
+    if attempt is not None:
+        attempt.status = result.status
+        attempt.failure_reason = result.failure_reason
+        attempt.details = result.details or attempt.details
+        if result.verified:
+            attempt.completed_at = now
+
+    if result.verified:
+        external_party.id_verified_at = now
+        external_party.id_verification_method = "kyc_provider"
+        return {
+            "verified": True,
+            "status": result.status,
+            "method": "kyc_provider",
+            "details": result.details,
+        }
+
+    return {
+        "verified": False,
+        "status": result.status,
+        "failure_reason": result.failure_reason,
+    }
+
+
+async def apply_kyc_webhook_event(
+    db: AsyncSession,
+    external_party: ExternalParty,
+    *,
+    session_id: str,
+    status: str,
+    failure_reason: str | None = None,
+    details: dict | None = None,
+) -> dict:
+    """Apply a provider-reported session outcome (webhook path).
+
+    Idempotent: a session already terminal (verified/canceled) ignores
+    further events for the same session id. Only ``verified`` marks the
+    party; ``canceled``/``failed`` are journaled without verdicts.
+    """
+    if external_party.kyc_session_id and external_party.kyc_session_id != session_id:
+        raise KYCFlowError(
+            "Webhook session does not match the party's active session"
+        )
+
+    now = datetime.now(timezone.utc)
+    already_terminal = external_party.kyc_session_status in (
+        "verified",
+        "canceled",
+    )
+
+    if already_terminal:
+        return {"applied": False, "duplicate": True}
+
+    external_party.kyc_session_status = status
+
+    attempt = (
+        await db.execute(
+            select(KycVerificationAttempt)
+            .where(
+                KycVerificationAttempt.external_party_id == external_party.id,
+                KycVerificationAttempt.session_id == session_id,
+                KycVerificationAttempt.status.notin_(
+                    ["verified", "canceled"]
+                ),
+            )
+            .order_by(KycVerificationAttempt.created_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+    if attempt is not None:
+        attempt.status = status
+        attempt.failure_reason = failure_reason
+        if details:
+            attempt.details = details
+        if status == "verified":
+            attempt.completed_at = now
+
+    applied = {}
+    if status == "verified":
+        external_party.id_verified_at = now
+        external_party.id_verification_method = "kyc_provider"
+        applied = {"verified": True, "method": "kyc_provider"}
+    else:
+        applied = {"verified": False, "status": status}
+
+    return {"applied": True, **applied}
 
 
 async def complete_id_verification(
