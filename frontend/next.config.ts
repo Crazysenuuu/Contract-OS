@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   // self-contained server (frontend/Dockerfile copies .next/standalone
   // and runs server.js).
   output: "standalone",
+  // The repo root holds one lockfile and frontend/ another; pin the workspace
+  // root so Turbopack stops warning about the ambiguity on every dev start.
+  turbopack: {
+    root: __dirname,
+  },
   async rewrites() {
     // Proxy API calls to the FastAPI backend. The frontend ships a relative
     // API_BASE ("/api/v1"), so in dev/e2e everything must resolve against the

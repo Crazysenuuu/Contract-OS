@@ -47,7 +47,7 @@ docker-down:
 
 # Development
 dev-backend:
-	cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
+	cd backend && ./venv/bin/python -m uvicorn app.main:app --reload --port 8000
 
 dev-frontend:
 	cd frontend && npm run dev
@@ -87,14 +87,14 @@ deploy-prod:
 
 # Utilities
 migrate:
-	cd backend && source venv/bin/activate && alembic upgrade head
+	cd backend && ./venv/bin/python -m alembic upgrade head
 
 seed:
-	cd backend && source venv/bin/activate && python seed_data.py
+	cd backend && ./venv/bin/python seed_data.py
 
 # Create or promote a platform admin account
 admin:
-	cd backend && source venv/bin/activate && python scripts/create_admin.py $(EMAIL) "$(NAME)"
+	cd backend && ./venv/bin/python scripts/create_admin.py $(EMAIL) "$(NAME)"
 
 clean:
 	rm -rf frontend/.next

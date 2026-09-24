@@ -176,7 +176,7 @@ async def retry_notification(
 
 @router.post("/send-digest")
 async def trigger_digest(
-    frequency: Optional[str] = Query(None, regex="^(daily|weekly)$"),
+    frequency: Optional[str] = Query(None, pattern="^(daily|weekly)$"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

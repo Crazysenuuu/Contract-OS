@@ -322,7 +322,7 @@ async def retry_delivery(
 
 @cron_router.post("/digest/send")
 async def send_digest_cron(
-    frequency: Optional[str] = Query(None, regex="^(daily|weekly)$"),
+    frequency: Optional[str] = Query(None, pattern="^(daily|weekly)$"),
     api_key: str = Query(..., description="Cron API key for authentication"),
     db: AsyncSession = Depends(get_db),
 ):

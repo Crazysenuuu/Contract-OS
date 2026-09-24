@@ -250,8 +250,8 @@ async def complete_termination(
     outstanding = await _outstanding_obligations(db, agreement.id)
     if outstanding and not force:
         raise TerminationError(
-            "Termination cannot be completed while obligations remain "
-            f"outstanding ({len(outstanding)} found)"
+            "Termination cannot be completed while settlement obligations "
+            f"remain outstanding ({len(outstanding)} found)"
         )
 
     # Spec 1.17 §15: the settlement checklist gates completion. Required
@@ -269,10 +269,20 @@ async def complete_termination(
             f"open ({settlement.obligations_remaining} found)"
         )
     if force and settlement.obligations_remaining > 0:
+        # Waive the open blocking items themselves so the checklist stays
+        # consistent with the settlement record's terminal 'waived' state.
+        settlement_items = await _load_settlement_items(db, settlement.id)
+        waived_count = 0
+        for item in settlement_items:
+            if item.blocks_completion and item.status == "open":
+                item.status = "waived"
+                item.resolution_note = "Waived by forced completion"
+                waived_count += 1
+        _recount_blocking(settlement, settlement_items)
         settlement.status = "waived"
         settlement.notes = (
             (settlement.notes + " | " if settlement.notes else "")
-            + f"Completion forced with {settlement.obligations_remaining} "
+            + f"Completion forced with {waived_count} "
             "settlement item(s) open"
         )
         await db.flush()
@@ -496,7 +506,10 @@ async def generate_settlement(
 
     # --- Checklist ---
     open_statuses = {"open", "resolved", "waived"}
-    previous: dict[str, TerminationSettlementItem] = {}
+    # Snapshot the state of still-relevant items BEFORE deleting them: after
+    # the delete flush the ORM instances are detached, so reuse must work
+    # from plain data instead of instance identity.
+    previous: dict[str, dict] = {}
     if replace_existing:
         old_items = await db.execute(
             select(TerminationSettlementItem).where(
@@ -505,22 +518,42 @@ async def generate_settlement(
         )
         for item in old_items.scalars().all():
             if item.status in open_statuses:
-                previous[item.item_key] = item
+                previous[item.item_key] = {
+                    "status": item.status,
+                    "description": item.description,
+                    "category": item.category,
+                    "kind": item.kind,
+                    "blocks_completion": item.blocks_completion,
+                    "source_type": item.source_type,
+                    "source_id": item.source_id,
+                    "resolution_note": item.resolution_note,
+                    "resolved_by": item.resolved_by,
+                    "resolved_at": item.resolved_at,
+                }
             await db.delete(item)
         await db.flush()
 
     items: list[TerminationSettlementItem] = []
     position = 0
 
+    def _apply_state(item: TerminationSettlementItem, key: str) -> None:
+        """Restore resolved/waived state from the previous generation
+        (fresh items keep the 'open' column default)."""
+        state = previous.pop(key, None)
+        if state is not None:
+            item.status = state["status"]
+            item.resolution_note = state["resolution_note"]
+            item.resolved_by = state["resolved_by"]
+            item.resolved_at = state["resolved_at"]
+
     def _upsert(key: str) -> TerminationSettlementItem:
-        """Reuse a still-open item from the previous generation, else new."""
-        reused = previous.pop(key, None)
-        if _is_reusable(reused):
-            return reused
-        return TerminationSettlementItem(
+        """Create the item for `key`, carrying over any previous state."""
+        item = TerminationSettlementItem(
             settlement_id=settlement.id,
             item_key=key,
         )
+        _apply_state(item, key)
+        return item
 
     # 1. Outstanding obligations: required by the agreement, blocking.
     for ob in outstanding:
@@ -565,29 +598,43 @@ async def generate_settlement(
         position += 1
         items.append(item)
 
+    # Leftover snapshot entries are items whose source is no longer part of
+    # the regenerated checklist (e.g. an obligation completed after its
+    # checklist item was resolved). Discharged work (resolved/waived) is
+    # checklist history and must survive regeneration; stale open items
+    # whose source vanished are dropped.
+    for key, state in previous.items():
+        if state["status"] == "open":
+            continue
+        items.append(
+            TerminationSettlementItem(
+                settlement_id=settlement.id,
+                item_key=key,
+                description=state["description"],
+                category=state["category"],
+                kind=state["kind"],
+                blocks_completion=state["blocks_completion"],
+                source_type=state["source_type"],
+                source_id=state["source_id"],
+                status=state["status"],
+                resolution_note=state["resolution_note"],
+                resolved_by=state["resolved_by"],
+                resolved_at=state["resolved_at"],
+                position=position,
+            )
+        )
+        position += 1
+
     for item in items:
         db.add(item)
 
-    _recount_blocking(settlement, items)
+    # Flush first so column defaults (notably status='open') are applied and
+    # persisted; recounting before the flush would miss items whose defaults
+    # are still pending and under-count the blocking work.
     await db.flush()
+
+    _recount_blocking(settlement, items)
     return settlement
-
-
-def _is_reusable(instance: TerminationSettlementItem | None) -> bool:
-    """True when a previous-generation item can be re-added safely.
-
-    Regeneration deletes old items, and re-adding a deleted ORM instance
-    raises InvalidRequestError on flush — only open items loaded from the
-    database before deletion remain reusable (they are never flushed as
-    deleted until the next flush, so we snapshot the reusable set before
-    issuing deletes and rely on instance identity here).
-    """
-    from sqlalchemy import inspect as sa_inspect
-
-    if instance is None:
-        return False
-    state = sa_inspect(instance)
-    return not (state.deleted or state._deleted or state.was_deleted)
 
 
 async def _load_settlement_items(
