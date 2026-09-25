@@ -157,6 +157,8 @@ def _serialize_integration(integration: IntegrationConnection) -> dict:
             "last_success_at": integration.health.last_success_at,
             "last_failure_at": integration.health.last_failure_at,
             "consecutive_failures": integration.health.consecutive_failures,
+            "credential_status": integration.health.credential_status,
+            "circuit_open_until": integration.health.circuit_open_until,
             "last_latency_ms": integration.health.last_latency_ms,
             "last_error_code": integration.health.last_error_code,
             "last_error": integration.health.last_error,
@@ -663,6 +665,102 @@ async def create_rule(
     )
 
 
+def _validate_rule_definitions(data: RuleCreateRequest) -> None:
+    """Eager API-safety validation (spec 3.15.55).
+
+    Unknown evaluator kinds, operators and malformed field paths are rejected
+    at creation time instead of surfacing only when the rule first runs.
+    """
+    from app.monitoring.evaluators.base import ALLOWED_OPERATORS, validate_path_grammar
+    from app.monitoring.exceptions import UnknownField
+
+    evaluation = data.evaluation_definition or {}
+    kind = evaluation.get("kind") or "threshold"
+
+    if kind == "threshold":
+        operator = evaluation.get("operator")
+        if operator is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="threshold evaluation requires 'operator'",
+            )
+        if operator not in ALLOWED_OPERATORS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown evaluation operator: {operator}",
+            )
+        if not evaluation.get("field"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="threshold evaluation requires 'field'",
+            )
+        if operator != "exists":
+            has_expected = "expected_value" in evaluation or isinstance(
+                evaluation.get("value_source"), dict
+            )
+            if not has_expected:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="threshold evaluation requires 'expected_value' or 'value_source'",
+                )
+    elif kind == "freshness":
+        raw = evaluation.get("max_age")
+        if isinstance(raw, dict):
+            unit = str(raw.get("unit") or "").upper()
+            amount = raw.get("amount")
+            if unit not in {"MINUTE", "HOUR", "DAY"}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="freshness max_age.unit must be MINUTE, HOUR or DAY",
+                )
+            if not isinstance(amount, (int, float)) or amount <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="freshness max_age.amount must be a positive number",
+                )
+    elif kind in {"count", "existence"}:
+        minimum = evaluation.get("minimum_count")
+        if minimum is not None and (
+            not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 0
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{kind} evaluation minimum_count must be a non-negative integer",
+            )
+
+    query = data.query_definition or {}
+    for path_key in ("external_id_path", "observed_at_path"):
+        if query.get(path_key):
+            try:
+                validate_path_grammar(str(query[path_key]))
+            except UnknownField as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid query_definition.{path_key}: {exc}",
+                )
+
+    if evaluation.get("field"):
+        try:
+            validate_path_grammar(str(evaluation["field"]))
+        except UnknownField as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid evaluation_definition.field: {exc}",
+            )
+
+    filters = query.get("filters")
+    if isinstance(filters, list):
+        for flt in filters:
+            if isinstance(flt, dict) and flt.get("field"):
+                try:
+                    validate_path_grammar(str(flt["field"]))
+                except UnknownField as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid query_definition filter field: {exc}",
+                    )
+
+
 async def _create_rule(
     db: AsyncSession,
     *,
@@ -673,6 +771,10 @@ async def _create_rule(
 ):
     """Shared rule-creation core used by the canonical and spec-shape routes."""
     from app.models.agreement import AgreementVersion
+
+    _validate_rule_definitions(data)
+
+    _validate_rule_definitions(data)
 
     integration = await _get_integration(db, data.integration_id, org_id)
     version = await db.scalar(
@@ -1445,6 +1547,7 @@ async def monitoring_webhook(
         integration_id=integration_id,
         payload=payload,
         provider_event_id=provider_event_id or None,
+        signature=signature or None,
     )
     await db.flush()
     return WebhookAck(received=True, duplicate=False, observations=observations)

@@ -66,17 +66,14 @@ class EvaluationOutcome:
         return cls(result=EvaluationResult.INCONCLUSIVE, metrics=metrics, reason=reason)
 
 
-def resolve_path(payload: dict | None, path: str) -> Any:
-    """Restricted JSON path traversal from a rule (spec 3.15.19).
+def _parse_path_tokens(path: str) -> list[str | int]:
+    """Whitelisted tokenization for a rule-supplied field path.
 
-    Only ``key``, ``key.subkey`` and ``key.subkey[index]`` are allowed and
-    traversed on a whitelist grammar — no ``__dunder`` keys, no code
-    execution, bounded depth.
+    Only ``key``, ``key.subkey`` and ``key.subkey[index]`` are allowed — no
+    ``__dunder`` keys, no code execution, bounded depth (3.15.19).
     """
     if not path:
         raise UnknownField("Empty field path")
-    if payload is None:
-        raise UnknownField(f"Field '{path}' missing from observation")
 
     tokens: list[str | int] = []
     for part in path.split("."):
@@ -99,6 +96,25 @@ def resolve_path(payload: dict | None, path: str) -> Any:
 
     if len([t for t in tokens if isinstance(t, str)]) > MAX_PATH_DEPTH:
         raise UnknownField(f"Field path exceeds depth limit '{path}'")
+    return tokens
+
+
+def validate_path_grammar(path: str) -> None:
+    """Validate path syntax without a payload (eager rule validation)."""
+    _parse_path_tokens(path)
+
+
+def resolve_path(payload: dict | None, path: str) -> Any:
+    """Restricted JSON path traversal from a rule (spec 3.15.19).
+
+    Only ``key``, ``key.subkey`` and ``key.subkey[index]`` are allowed and
+    traversed on a whitelist grammar — no ``__dunder`` keys, no code
+    execution, bounded depth.
+    """
+    if payload is None:
+        raise UnknownField(f"Field '{path}' missing from observation")
+
+    tokens = _parse_path_tokens(path)
 
     node: Any = payload
     for token in tokens:

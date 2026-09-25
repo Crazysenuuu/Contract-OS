@@ -33,6 +33,7 @@ from app.monitoring.enums import (
 )
 from app.monitoring.evaluators import EvaluationContext, get_evaluator
 from app.monitoring.exceptions import (
+    CircuitOpenError,
     CredentialUnavailable,
     MonitoringError,
     UnsupportedConnector,
@@ -351,6 +352,15 @@ async def _execute(db: AsyncSession, monitoring: ObligationMonitoring, now: date
             f"Integration {monitoring.integration_id} does not exist"
         )
 
+    health = await db.get(IntegrationHealth, integration.id)
+    if health is not None and health.circuit_open_until is not None and health.circuit_open_until > now:
+        # Spec 3.15.62 circuit breaker: source is inside cooldown — skip the
+        # fetch and record INCONCLUSIVE rather than hammering a dead source.
+        raise CircuitOpenError(
+            f"Integration {integration.id} is in a circuit-breaker cooldown "
+            f"until {health.circuit_open_until.isoformat()}"
+        )
+
     credentials = await get_active_credentials(db, integration.id)
     connector = connector_registry.create(
         integration.provider_key,
@@ -428,6 +438,7 @@ async def _record_transport_success(
             last_success_at=now,
             last_latency_ms=latency_ms,
             consecutive_failures=0,
+            credential_status="ACTIVE",
         )
         db.add(health)
     else:
@@ -435,6 +446,11 @@ async def _record_transport_success(
         health.last_error = None
         health.last_error_code = None
         health.last_latency_ms = latency_ms
+        # A healthy fetch closes an open circuit and resets the failure
+        # streak (3.15.62 half-open closure).
+        health.consecutive_failures = 0
+        health.circuit_open_until = None
+        health.credential_status = "ACTIVE"
 
 
 async def _record_source_failure(
@@ -448,9 +464,15 @@ async def _record_source_failure(
     exception_type: str,
 ) -> MonitoringEvaluation:
     integration = await db.get(IntegrationConnection, monitoring.integration_id)
+    is_circuit_open = exception_type == "CircuitOpenError"
 
     if integration is not None:
         integration.status = IntegrationStatus.DEGRADED.value
+        credential_status = (
+            _credential_status_from_reason(reason)
+            if exception_type == "CredentialUnavailable"
+            else None
+        )
         health = await db.get(IntegrationHealth, integration.id)
         if health is None:
             health = IntegrationHealth(
@@ -459,19 +481,28 @@ async def _record_source_failure(
                 consecutive_failures=1,
                 last_error_code=exception_type,
                 last_error=reason[:2000],
+                credential_status=credential_status,
             )
             db.add(health)
         else:
             health.last_failure_at = now
-            health.consecutive_failures += 1
+            # A circuit-open skip is not a new failure — the streak already
+            # hit the breaker threshold when the circuit opened.
+            if not is_circuit_open:
+                health.consecutive_failures += 1
             health.last_error_code = exception_type
             health.last_error = reason[:2000]
+            if credential_status is not None:
+                health.credential_status = credential_status
+        if not is_circuit_open:
+            await _maybe_open_circuit(db, integration_id=integration.id, now=now)
 
     evaluation = MonitoringEvaluation(
         organization_id=monitoring.organization_id,
         monitoring_id=monitoring.id,
         run_id=run_id,
         obligation_instance_id=None,
+        source_version_id=monitoring.source_version_id,
         evaluation_definition_hash=definition_hash,
         result=EvaluationResult.INCONCLUSIVE.value,
         status="COMPLETED",
@@ -487,7 +518,7 @@ async def _record_source_failure(
     db.add(evaluation)
     await db.flush()
 
-    if integration is not None:
+    if integration is not None and not is_circuit_open:
         await _enqueue_monitoring_notification(
             db,
             monitoring=monitoring,
@@ -518,6 +549,58 @@ async def _record_source_failure(
         metadata_json={"exception_type": exception_type, "reason": reason},
     )
     return evaluation
+
+
+def _credential_status_from_reason(reason: str) -> str:
+    """Best-effort credential status derived from a fail-closed reason.
+
+    Spec 3.15.26/3.15.62: an auth failure should surface on the health row so
+    operators distinguish credential rot from a plain source outage.
+    """
+    lowered = reason.lower()
+    if "expir" in lowered:
+        return "EXPIRED"
+    if "revok" in lowered:
+        return "REVOKED"
+    return "INVALID"
+
+
+async def _maybe_open_circuit(
+    db: AsyncSession,
+    *,
+    integration_id: uuid.UUID,
+    now: datetime,
+) -> None:
+    """Open the integration circuit breaker once the configured failure
+    threshold is hit (spec 3.15.62, ``configuration.circuit_breaker``).
+
+        {"circuit_breaker": {"enabled": true, "threshold": 5, "cooldown_minutes": 15}}
+
+    While ``circuit_open_until`` is in the future, ``_execute`` skips the
+    fetch and records INCONCLUSIVE instead of hammering the failing source.
+    The circuit stays open once opened (cooldown is not extended by
+    subsequent failures) and only a healthy fetch closes it.
+    """
+    integration = await db.get(IntegrationConnection, integration_id)
+    if integration is None:
+        return
+    breaker = (integration.configuration or {}).get("circuit_breaker") or {}
+    if not breaker.get("enabled"):
+        return
+    try:
+        threshold = int(breaker.get("threshold") or 0)
+        cooldown = int(breaker.get("cooldown_minutes") or 0)
+    except (TypeError, ValueError):
+        return
+    if threshold <= 0 or cooldown <= 0:
+        return
+
+    health = await db.get(IntegrationHealth, integration_id)
+    if health is None or health.consecutive_failures < threshold:
+        return
+    if health.circuit_open_until is not None and health.circuit_open_until > now:
+        return
+    health.circuit_open_until = now + timedelta(minutes=cooldown)
 
 
 async def _apply_failure_policy(
@@ -613,6 +696,7 @@ async def _record_evaluation(
         monitoring_id=monitoring.id,
         run_id=run_id,
         obligation_instance_id=None,
+        source_version_id=monitoring.source_version_id,
         evaluation_definition_hash=definition_hash,
         result=result,
         status="COMPLETED",
@@ -844,6 +928,7 @@ async def _persist_evidence_records(
             integration_id=monitoring.integration_id,
             monitoring_run_id=run_id,
             obligation_id=monitoring.obligation_id,
+            source_version_id=monitoring.source_version_id,
             evidence_type="SYSTEM_RECORD",
             source=str(source)[:255],
             source_identifier=row.external_id[:500],
@@ -1140,6 +1225,36 @@ async def _enqueue_monitoring_notification(
                 {"user_id": str(member.id), "email": member.email, "role": "workspace"}
             )
 
+    # Workflow participants (spec 3.15.49): any active user explicitly
+    # authorized on the agreement joins the fan-out list. They extend, never
+    # replace, the primary recipients above.
+    if obligation is not None:
+        from app.models.agreement_access import AgreementParticipant
+
+        participants = (
+            await db.execute(
+                select(AgreementParticipant.user_id)
+                .where(
+                    AgreementParticipant.agreement_id == obligation.agreement_id,
+                    AgreementParticipant.status == "active",
+                    AgreementParticipant.can_view.is_(True),
+                )
+                .order_by(AgreementParticipant.id.asc())
+            )
+        ).scalars().all()
+        seen = {str(r["user_id"]) for r in recipients}
+        for participant_id in participants:
+            key = str(participant_id)
+            if key in seen:
+                continue
+            user = await db.get(User, participant_id)
+            if user is None:
+                continue
+            recipients.append(
+                {"user_id": key, "email": user.email, "role": "workflow_participant"}
+            )
+            seen.add(key)
+
     payload = {
         "obligation_id": str(monitoring.obligation_id),
         "monitoring_id": str(monitoring.id),
@@ -1247,6 +1362,7 @@ async def ingest_webhook_observations(
     integration_id: uuid.UUID,
     payload: dict,
     provider_event_id: str | None,
+    signature: str | None = None,
 ) -> int:
     """Apply a verified provider webhook payload to every ACTIVE monitoring
     bound to the integration.
@@ -1280,7 +1396,7 @@ async def ingest_webhook_observations(
         organization_id=integration.organization_id,
         integration_id=integration.id,
         provider_event_id=str(provider_event_id)[:255] if provider_event_id else None,
-        signature=None,
+        signature=str(signature)[:255] if signature else None,
         received_at=now_utc(),
         payload_hash=hash_payload(payload),
         payload=payload,
@@ -1349,6 +1465,7 @@ async def ingest_webhook_observations(
                         integration_id=integration.id,
                         monitoring_run_id=None,
                         obligation_id=monitoring.obligation_id,
+                        source_version_id=monitoring.source_version_id,
                         evidence_type="SYSTEM_RECORD",
                         source=integration.provider_key[:255],
                         source_identifier=row.external_id[:500],

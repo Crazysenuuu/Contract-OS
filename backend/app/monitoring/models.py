@@ -230,6 +230,21 @@ class IntegrationHealth(
         nullable=True,
     )
 
+    # Spec 3.15.26: credential_status is surfaced here so operators see auth
+    # health on the integration row rather than digging into credential table.
+    credential_status: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    # Spec 3.15.62 circuit breaker: while ``circuit_open_until`` is in the
+    # future the source is treated as OPEN and fetches are skipped (the rule
+    # records INCONCLUSIVE) instead of hammering a dead/rate-limited source.
+    circuit_open_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     integration = relationship(
         "IntegrationConnection",
         back_populates="health",
@@ -502,6 +517,16 @@ class MonitoringEvaluation(
         nullable=True,
     )
 
+    # Provenance (3.15.59): the exact immutable contract version the rule
+    # was evaluated against. Denormalized so an evaluation can answer
+    # "which contract version?" without a join back to the obligation.
+    source_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("agreement_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
     evaluation_definition_hash: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
@@ -758,6 +783,15 @@ class MonitoringEvidence(
     obligation_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("obligations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Provenance (3.15.38/3.15.59): which immutable contract version carried
+    # the obligation when this evidence was minted.
+    source_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("agreement_versions.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )

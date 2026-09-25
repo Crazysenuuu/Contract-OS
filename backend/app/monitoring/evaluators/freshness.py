@@ -23,7 +23,11 @@ def _max_age_seconds(definition: dict) -> float:
     total += float(definition.get("max_age_hours") or 0) * 3600
     total += float(definition.get("max_age_days") or 0) * 86400
     raw = definition.get("max_age")
-    if isinstance(raw, (int, float)):
+    if isinstance(raw, dict):
+        unit = str(raw.get("unit") or "").upper()
+        multiplier = {"MINUTE": 60, "HOUR": 3600, "DAY": 86400}.get(unit, 60)
+        total += float(raw.get("amount") or 0) * multiplier
+    elif isinstance(raw, (int, float)):
         total += float(raw)
     return total
 

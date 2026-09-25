@@ -30,6 +30,8 @@ class IntegrationHealthOut(BaseModel):
     last_success_at: datetime | None = None
     last_failure_at: datetime | None = None
     consecutive_failures: int = 0
+    credential_status: str | None = None
+    circuit_open_until: datetime | None = None
     last_latency_ms: int | None = None
     last_error_code: str | None = None
     last_error: str | None = None

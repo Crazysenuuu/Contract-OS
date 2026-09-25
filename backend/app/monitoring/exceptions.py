@@ -53,3 +53,7 @@ class MonitoringNotWritable(MonitoringError):
 
 class CrossWorkspaceError(MonitoringError):
     """A record referenced an object from another workspace."""
+
+
+class CircuitOpenError(MonitoringError):
+    """The source is inside a circuit-breaker cooldown; fetch is skipped."""
