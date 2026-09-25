@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -32,7 +32,7 @@ from app.dependencies.tenant import get_current_organization_id
 from app.monitoring.connectors import connector_registry
 from app.monitoring.connectors.base import get_metadata
 from app.monitoring.credentials import get_active_credentials
-from app.monitoring.enums import AutomationAction, IntegrationStatus, PauseReason
+from app.monitoring.enums import AutomationAction, CredentialStatus, IntegrationStatus, PauseReason
 from app.monitoring.exceptions import MonitoringError, WebhookVerificationError
 from app.monitoring.models import (
     ExternalObservationRecord,
@@ -239,6 +239,18 @@ async def list_integrations(
         .order_by(IntegrationConnection.created_at.desc())
     )
     return [_serialize_integration(i) for i in rows.scalars().all()]
+
+
+@router.get("/integrations/{integration_id}", dependencies=[perm_view])
+async def get_integration(
+    integration_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Single integration detail (spec 3.15.53). Secret values are never
+    returned — only the credential metadata via /credentials."""
+    integration = await _get_integration(db, integration_id, org_id)
+    return _serialize_integration(integration)
 
 
 @router.post("/integrations", status_code=status.HTTP_201_CREATED, dependencies=[perm_manage])
@@ -450,6 +462,78 @@ async def list_credentials(
         }
         for c in rows.scalars().all()
     ]
+
+
+@router.post("/integrations/{integration_id}/rotate-credentials", dependencies=[perm_manage])
+async def rotate_credentials(
+    integration_id: uuid.UUID,
+    data: CredentialCreateRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rotate the integration credential set (spec 3.15.53).
+
+    Previous ACTIVE credentials are REVOKED and replaced by a new ACTIVE
+    credential; the rotation is audited as INTEGRATION_CREDENTIAL_ROTATED
+    (spec 3.15.47). The referenced secret value is never returned.
+    """
+    integration = await _get_integration(db, integration_id, org_id)
+    if not (
+        data.secret_reference.startswith("env://")
+        or data.secret_reference.startswith("secretman://")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="secret_reference must start with 'env://' or 'secretman://'",
+        )
+    now = datetime.now(timezone.utc)
+    previous = (
+        (
+            await db.execute(
+                select(IntegrationCredential).where(
+                    IntegrationCredential.integration_id == integration.id,
+                    IntegrationCredential.status == CredentialStatus.ACTIVE.value,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for cred in previous:
+        cred.status = CredentialStatus.REVOKED.value
+        cred.last_rotated_at = now
+    credential = IntegrationCredential(
+        integration_id=integration.id,
+        secret_reference=data.secret_reference,
+        status=CredentialStatus.ACTIVE.value,
+        expires_at=data.expires_at,
+        last_rotated_at=now,
+    )
+    db.add(credential)
+    await db.flush()
+    await db.refresh(credential)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_INTEGRATION_CREDENTIAL_ROTATED,
+        resource_type="monitoring_integration",
+        resource_id=integration.id,
+        actor_id=current_user.id,
+        metadata_json={
+            "new_credential_id": str(credential.id),
+            "previous_active_revoked": len(previous),
+        },
+    )
+    return {
+        "id": str(credential.id),
+        "integration_id": str(credential.integration_id),
+        "secret_reference": credential.secret_reference,
+        "status": credential.status,
+        "expires_at": credential.expires_at,
+        "last_rotated_at": credential.last_rotated_at,
+        "created_at": credential.created_at,
+    }
 
 
 @router.post("/integrations/{integration_id}/test", dependencies=[perm_manage])
@@ -828,6 +912,34 @@ async def list_evaluations(
     return [_serialize_evaluation(e) for e in rows.scalars().all()]
 
 
+@router.get("/rules/{rule_id}/runs", dependencies=[perm_view])
+async def list_runs(
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Scheduler run history for a rule (spec 3.15.53, 3.15.34)."""
+    rule = await _get_rule(db, rule_id, org_id)
+    rows = await db.execute(
+        select(MonitoringRun)
+        .where(MonitoringRun.monitoring_id == rule.id)
+        .order_by(MonitoringRun.started_at.desc())
+        .limit(200)
+    )
+    return [
+        {
+            "id": str(r.id),
+            "monitoring_id": str(r.monitoring_id),
+            "status": r.status,
+            "scheduled_period": r.scheduled_period,
+            "started_at": r.started_at,
+            "completed_at": r.completed_at,
+            "error": r.error,
+        }
+        for r in rows.scalars().all()
+    ]
+
+
 @router.get("/rules/{rule_id}/observations", dependencies=[perm_view_data])
 async def list_observations(
     rule_id: uuid.UUID,
@@ -998,6 +1110,62 @@ async def monitoring_dashboard(
         "exceptions_open": open_exceptions,
         "last_evaluation_at": getattr(last_evaluation, "evaluated_at", None) if last_evaluation else None,
         "last_evaluation_result": getattr(last_evaluation, "result", None) if last_evaluation else None,
+    }
+
+
+@router.get("/health", dependencies=[perm_view])
+async def monitoring_health(
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Integration + connector health summary (spec 3.15.53, 3.15.40).
+
+    Mirror of the dashboard's "Integration Health" panel: one row per
+    integration with its overall status, health counters, and whether any
+    ACTIVE rule depends on it.
+    """
+    rows = await db.execute(
+        select(IntegrationConnection).where(IntegrationConnection.organization_id == org_id)
+    )
+    integrations = list(rows.scalars().all())
+    rule_counts = dict(
+        (
+            await db.execute(
+                select(ObligationMonitoring.integration_id, func.count())
+                .where(
+                    ObligationMonitoring.organization_id == org_id,
+                    ObligationMonitoring.status == "ACTIVE",
+                )
+                .group_by(ObligationMonitoring.integration_id)
+            )
+        ).all()
+    )
+    return {
+        "integrations": [
+            {
+                "integration_id": str(i.id),
+                "name": i.name,
+                "provider_key": i.provider_key,
+                "status": i.status,
+                "active_rules": int(rule_counts.get(i.id, 0)),
+                "health": {
+                    "last_success_at": i.health.last_success_at if i.health else None,
+                    "last_failure_at": i.health.last_failure_at if i.health else None,
+                    "consecutive_failures": i.health.consecutive_failures if i.health else 0,
+                    "last_latency_ms": i.health.last_latency_ms if i.health else None,
+                    "last_error_code": i.health.last_error_code if i.health else None,
+                    "last_error": i.health.last_error if i.health else None,
+                },
+            }
+            for i in integrations
+        ],
+        "integrations_total": len(integrations),
+        "degraded": sum(
+            1 for i in integrations if i.status == IntegrationStatus.DEGRADED.value
+        ),
+        "disconnected": sum(
+            1 for i in integrations if i.status == IntegrationStatus.DISCONNECTED.value
+        ),
     }
 
 

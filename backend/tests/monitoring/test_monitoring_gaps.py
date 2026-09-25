@@ -970,3 +970,206 @@ async def test_api_rule_rejects_unknown_automation_action(
         headers=auth_headers,
     )
     assert resp.status_code == 400, resp.text
+
+
+# --------------------------------------------------------------------------
+# Read API completeness (3.15.53): GET /integrations/{id}, /health, /runs,
+# rotate-credentials; provenance (3.15.59); auth-failed audit (3.15.47)
+# --------------------------------------------------------------------------
+
+async def test_api_get_single_integration(client, auth_headers, test_org, db_session):
+    created = await client.post(
+        "/api/v1/monitoring/integrations",
+        json={
+            "name": "Single lookup",
+            "integration_type": "REST_API",
+            "provider_key": "rest_api",
+            "configuration": {"base_url": "https://vendor.example.internal"},
+        },
+        headers=auth_headers,
+    )
+    integration_id = created.json()["id"]
+    resp = await client.get(
+        f"/api/v1/monitoring/integrations/{integration_id}", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == integration_id
+    assert body["name"] == "Single lookup"
+    assert body["status"] == "ACTIVE"
+
+
+async def test_api_get_integration_unknown_org_404(client, auth_headers, db_session, test_org):
+    other = uuid.uuid4()
+    resp = await client.get(
+        f"/api/v1/monitoring/integrations/{other}", headers=auth_headers
+    )
+    assert resp.status_code == 404, resp.text
+
+
+async def test_api_monitoring_health_summary(
+    client, auth_headers, test_org, monitoring_integration, active_monitoring
+):
+    resp = await client.get("/api/v1/monitoring/health", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["integrations_total"] == 1
+    assert body["integrations"][0]["integration_id"] == str(monitoring_integration.id)
+    assert body["integrations"][0]["active_rules"] == 1
+    assert body["degraded"] == 0
+
+
+async def test_api_rotate_credentials_audits_and_revokes_previous(
+    client, auth_headers, test_org, db_session
+):
+    from app.monitoring.models import IntegrationConnection, IntegrationCredential
+    from app.monitoring.service import AUDIT_INTEGRATION_CREDENTIAL_ROTATED
+
+    created = await client.post(
+        "/api/v1/monitoring/integrations",
+        json={
+            "name": "Rotate creds",
+            "integration_type": "REST_API",
+            "provider_key": "rest_api",
+            "configuration": {"base_url": "https://vendor.example.internal"},
+        },
+        headers=auth_headers,
+    )
+    integration_id = uuid.UUID(created.json()["id"])
+
+    first = await client.post(
+        f"/api/v1/monitoring/integrations/{integration_id}/credentials",
+        json={"secret_reference": "env://MONITORING_TEST_TOKEN"},
+        headers=auth_headers,
+    )
+    assert first.status_code == 201, first.text
+    old_id = uuid.UUID(first.json()["id"])
+
+    resp = await client.post(
+        f"/api/v1/monitoring/integrations/{integration_id}/rotate-credentials",
+        json={"secret_reference": "env://MONITORING_TEST_TOKEN"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    new_id = uuid.UUID(resp.json()["id"])
+    assert new_id != old_id
+    assert resp.json()["status"] == "ACTIVE"
+
+    old = await db_session.get(IntegrationCredential, old_id)
+    assert old is not None
+    assert old.status == "REVOKED"
+    assert old.last_rotated_at is not None
+    new = await db_session.get(IntegrationCredential, new_id)
+    assert new.status == "ACTIVE"
+
+    actions = await _audit_actions(db_session, test_org.id)
+    assert AUDIT_INTEGRATION_CREDENTIAL_ROTATED in actions
+
+
+async def test_api_rotate_credentials_rejects_bad_secret_reference(
+    client, auth_headers, test_org
+):
+    created = await client.post(
+        "/api/v1/monitoring/integrations",
+        json={
+            "name": "Rotate bad",
+            "integration_type": "REST_API",
+            "provider_key": "rest_api",
+            "configuration": {"base_url": "https://vendor.example.internal"},
+        },
+        headers=auth_headers,
+    )
+    integration_id = created.json()["id"]
+    resp = await client.post(
+        f"/api/v1/monitoring/integrations/{integration_id}/rotate-credentials",
+        json={"secret_reference": "plaintext-credential"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400, resp.text
+
+
+async def test_api_list_runs(db_session, monitoring_integration, active_monitoring, stub_http):
+    from app.monitoring.service import run_obligation_monitoring
+
+    stub_http(
+        _ok_handler([{"id": "c1", "amount": 100, "observed_at": "2026-09-25T12:00:00Z"}])
+    )
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    await run_obligation_monitoring(db_session, monitoring=active_monitoring, run_at=now, now=now)
+    await db_session.flush()
+
+    from app.monitoring.models import MonitoringRun
+
+    rows = (
+        await db_session.execute(
+            select(MonitoringRun).where(
+                MonitoringRun.monitoring_id == active_monitoring.id
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+
+
+async def test_evaluation_stores_evaluator_provenance(
+    db_session, monitoring_integration, active_monitoring, stub_http
+):
+    from app.monitoring.models import MonitoringEvaluation
+    from app.monitoring.service import run_obligation_monitoring
+
+    stub_http(
+        _ok_handler([{"id": "c1", "amount": 150, "observed_at": "2026-09-25T12:00:00Z"}])
+    )
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    await run_obligation_monitoring(db_session, monitoring=active_monitoring, run_at=now, now=now)
+    await db_session.flush()
+
+    rows = (
+        await db_session.execute(
+            select(MonitoringEvaluation).where(
+                MonitoringEvaluation.monitoring_id == active_monitoring.id
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    ev = rows[0]
+    assert ev.metrics.get("evaluator") == active_monitoring.evaluation_definition.get("kind")
+
+
+async def test_runtime_credential_failure_audits_auth_failed(
+    db_session, test_org, test_user, agreement_version, monitoring_obligation
+):
+    from app.monitoring.models import IntegrationConnection, ObligationMonitoring
+    from app.monitoring.service import AUDIT_INTEGRATION_AUTH_FAILED, run_obligation_monitoring
+
+    integration = IntegrationConnection(
+        organization_id=test_org.id,
+        name="Expired cred source",
+        integration_type="REST_API",
+        provider_key="rest_api",
+        status="ACTIVE",
+        configuration={},
+        created_by=test_user.id,
+        created_by_name=test_user.name,
+    )
+    db_session.add(integration)
+    await db_session.flush()
+    rule = ObligationMonitoring(
+        organization_id=test_org.id,
+        obligation_id=monitoring_obligation.id,
+        source_version_id=agreement_version.id,
+        integration_id=integration.id,
+        status="ACTIVE",
+        query_definition={"resource": "deliveries", "fields": ["id"]},
+        evaluation_definition={"kind": "existence", "expected": True},
+        schedule_definition={"recurrence": "interval", "minutes": 60},
+        automation={},
+    )
+    db_session.add(rule)
+    await db_session.commit()
+
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    await run_obligation_monitoring(db_session, monitoring=rule, run_at=now, now=now)
+    await db_session.flush()
+
+    actions = await _audit_actions(db_session, test_org.id)
+    assert AUDIT_INTEGRATION_AUTH_FAILED in actions

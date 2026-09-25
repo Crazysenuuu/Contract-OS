@@ -399,15 +399,17 @@ async def _execute(db: AsyncSession, monitoring: ObligationMonitoring, now: date
         )
 
     context = EvaluationContext(obligation=obligation or None, now=now)
-    evaluator = get_evaluator(
-        (monitoring.evaluation_definition or {}).get("kind") or "threshold"
-    )
+    evaluator_kind = (monitoring.evaluation_definition or {}).get("kind") or "threshold"
+    evaluator = get_evaluator(evaluator_kind)
     outcome: EvaluationOutcome = evaluator.evaluate(
         observations=observations,
         definition=monitoring.evaluation_definition,
         context=context,
     )
     outcome.metrics["_observation_ids"] = created_ids
+    # Provenance (spec 3.15.59): the evaluation must be able to answer
+    # "which evaluator?" — carried into the persisted evaluation metrics.
+    outcome.metrics["evaluator"] = evaluator_kind
     return outcome
 
 
@@ -494,6 +496,19 @@ async def _record_source_failure(
             severity="INCONCLUSIVE",
         )
         await _apply_failure_policy(db, integration_id=integration.id, now=now)
+        if exception_type == "CredentialUnavailable":
+            # Credential expiry/rotation mid-flight is an auth failure
+            # (spec 3.15.47 INTEGRATION_AUTH_FAILED).
+            await record_event(
+                db,
+                tenant_id=monitoring.organization_id,
+                actor_id=monitoring.created_by,
+                actor_type="user",
+                action=AUDIT_INTEGRATION_AUTH_FAILED,
+                resource_type="monitoring_integration",
+                resource_id=integration.id,
+                metadata_json={"exception_type": exception_type, "reason": reason[:1000]},
+            )
     await _audit_event(
         db,
         monitoring,
