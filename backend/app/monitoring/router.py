@@ -649,13 +649,32 @@ async def create_rule(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models.agreement import AgreementVersion
     from app.models.obligation import Obligation
 
-    integration = await _get_integration(db, data.integration_id, org_id)
     obligation = await db.get(Obligation, data.obligation_id)
     if obligation is None or obligation.organization_id != org_id:
         raise _not_found()
+    return await _create_rule(
+        db,
+        org_id=org_id,
+        current_user=current_user,
+        obligation=obligation,
+        data=data,
+    )
+
+
+async def _create_rule(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    current_user,
+    obligation,
+    data: RuleCreateRequest,
+):
+    """Shared rule-creation core used by the canonical and spec-shape routes."""
+    from app.models.agreement import AgreementVersion
+
+    integration = await _get_integration(db, data.integration_id, org_id)
     version = await db.scalar(
         select(AgreementVersion).where(
             AgreementVersion.id == data.source_version_id,
@@ -721,7 +740,7 @@ async def create_rule(
 
     rule = ObligationMonitoring(
         organization_id=org_id,
-        obligation_id=data.obligation_id,
+        obligation_id=obligation.id,
         source_version_id=data.source_version_id,
         integration_id=integration.id,
         status=data.status,
@@ -769,6 +788,16 @@ async def update_rule(
     org_id: uuid.UUID = Depends(get_current_organization_id),
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+):
+    return await _update_rule(db, rule_id=rule_id, org_id=org_id, data=data)
+
+
+async def _update_rule(
+    db: AsyncSession,
+    *,
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID,
+    data: RuleUpdateRequest,
 ):
     rule = await _get_rule(db, rule_id, org_id)
     if rule.status in ("PAUSED", "DISABLED"):
@@ -818,6 +847,18 @@ async def activate_rule(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    return await _activate_rule(
+        db, rule_id=rule_id, org_id=org_id, current_user=current_user
+    )
+
+
+async def _activate_rule(
+    db: AsyncSession,
+    *,
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID,
+    current_user,
+):
     rule = await _get_rule(db, rule_id, org_id)
     if rule.status == "ACTIVE":
         return _serialize_rule(rule)
@@ -853,6 +894,23 @@ async def pause_rule(
     org_id: uuid.UUID = Depends(get_current_organization_id),
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+):
+    return await _pause_rule(
+        db,
+        rule_id=rule_id,
+        pause_reason=pause_reason,
+        org_id=org_id,
+        current_user=current_user,
+    )
+
+
+async def _pause_rule(
+    db: AsyncSession,
+    *,
+    rule_id: uuid.UUID,
+    pause_reason: str | None,
+    org_id: uuid.UUID,
+    current_user,
 ):
     rule = await _get_rule(db, rule_id, org_id)
     if rule.status == "DISABLED":
@@ -932,6 +990,10 @@ async def list_evaluations(
     org_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ):
+    return await _list_evaluations(db, rule_id=rule_id, org_id=org_id)
+
+
+async def _list_evaluations(db: AsyncSession, *, rule_id: uuid.UUID, org_id: uuid.UUID):
     rule = await _get_rule(db, rule_id, org_id)
     rows = await db.execute(
         select(MonitoringEvaluation)
@@ -949,6 +1011,10 @@ async def list_runs(
     db: AsyncSession = Depends(get_db),
 ):
     """Scheduler run history for a rule (spec 3.15.53, 3.15.34)."""
+    return await _list_runs(db, rule_id=rule_id, org_id=org_id)
+
+
+async def _list_runs(db: AsyncSession, *, rule_id: uuid.UUID, org_id: uuid.UUID):
     rule = await _get_rule(db, rule_id, org_id)
     rows = await db.execute(
         select(MonitoringRun)
@@ -976,6 +1042,10 @@ async def list_observations(
     org_id: uuid.UUID = Depends(get_current_organization_id),
     db: AsyncSession = Depends(get_db),
 ):
+    return await _list_observations(db, rule_id=rule_id, org_id=org_id)
+
+
+async def _list_observations(db: AsyncSession, *, rule_id: uuid.UUID, org_id: uuid.UUID):
     rule = await _get_rule(db, rule_id, org_id)
     rows = await db.execute(
         select(ExternalObservationRecord)
@@ -1378,3 +1448,180 @@ async def monitoring_webhook(
     )
     await db.flush()
     return WebhookAck(received=True, duplicate=False, observations=observations)
+
+
+# --------------------------------------------------------------------------
+# Spec-shape aliases (3.15.53) — the API contract's canonical route shapes.
+# These resolve to the same handlers as the /monitoring rules surface so the
+# two address spaces stay in lock-step.
+# --------------------------------------------------------------------------
+
+spec_router = APIRouter(tags=["monitoring"])
+
+
+@spec_router.get("/agreements/{agreement_id}/monitoring", dependencies=[perm_view])
+async def list_agreement_monitoring(
+    agreement_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.obligation import Obligation
+
+    rows = await db.execute(
+        select(ObligationMonitoring)
+        .join(Obligation, Obligation.id == ObligationMonitoring.obligation_id)
+        .where(
+            Obligation.organization_id == org_id,
+            Obligation.agreement_id == agreement_id,
+        )
+        .order_by(ObligationMonitoring.created_at.desc())
+    )
+    return [_serialize_rule(r) for r in rows.scalars().all()]
+
+
+@spec_router.post(
+    "/agreements/{agreement_id}/monitoring",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[perm_rules],
+)
+async def create_agreement_monitoring(
+    agreement_id: uuid.UUID,
+    data: RuleCreateRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.obligation import Obligation
+
+    obligation = await db.get(Obligation, data.obligation_id)
+    if (
+        obligation is None
+        or obligation.organization_id != org_id
+        or obligation.agreement_id != agreement_id
+    ):
+        raise _not_found()
+    return await _create_rule(
+        db,
+        org_id=org_id,
+        current_user=current_user,
+        obligation=obligation,
+        data=data,
+    )
+
+
+@spec_router.get("/obligations/{obligation_id}/monitoring", dependencies=[perm_view])
+async def list_obligation_monitoring(
+    obligation_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.obligation import Obligation
+
+    obligation = await db.get(Obligation, obligation_id)
+    if obligation is None or obligation.organization_id != org_id:
+        raise _not_found()
+    rows = await db.execute(
+        select(ObligationMonitoring)
+        .where(ObligationMonitoring.obligation_id == obligation_id)
+        .order_by(ObligationMonitoring.created_at.desc())
+    )
+    return [_serialize_rule(r) for r in rows.scalars().all()]
+
+
+@spec_router.post(
+    "/obligations/{obligation_id}/monitoring",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[perm_rules],
+)
+async def create_obligation_monitoring(
+    obligation_id: uuid.UUID,
+    data: RuleCreateRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.obligation import Obligation
+
+    obligation = await db.get(Obligation, obligation_id)
+    if obligation is None or obligation.organization_id != org_id:
+        raise _not_found()
+    data = data.model_copy(update={"obligation_id": obligation_id})
+    return await _create_rule(
+        db,
+        org_id=org_id,
+        current_user=current_user,
+        obligation=obligation,
+        data=data,
+    )
+
+
+@spec_router.patch("/obligation-monitoring/{rule_id}", dependencies=[perm_rules])
+async def update_obligation_monitoring(
+    rule_id: uuid.UUID,
+    data: RuleUpdateRequest,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _update_rule(db, rule_id=rule_id, org_id=org_id, data=data)
+
+
+@spec_router.post(
+    "/obligation-monitoring/{rule_id}/activate", dependencies=[perm_rules]
+)
+async def activate_obligation_monitoring(
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _activate_rule(
+        db, rule_id=rule_id, org_id=org_id, current_user=current_user
+    )
+
+
+@spec_router.post("/obligation-monitoring/{rule_id}/pause", dependencies=[perm_rules])
+async def pause_obligation_monitoring(
+    rule_id: uuid.UUID,
+    pause_reason: str | None = None,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _pause_rule(
+        db,
+        rule_id=rule_id,
+        pause_reason=pause_reason,
+        org_id=org_id,
+        current_user=current_user,
+    )
+
+
+@spec_router.get("/obligation-monitoring/{rule_id}/runs", dependencies=[perm_view])
+async def list_obligation_monitoring_runs(
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _list_runs(db, rule_id=rule_id, org_id=org_id)
+
+
+@spec_router.get(
+    "/obligation-monitoring/{rule_id}/observations", dependencies=[perm_view_data]
+)
+async def list_obligation_monitoring_observations(
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _list_observations(db, rule_id=rule_id, org_id=org_id)
+
+
+@spec_router.get(
+    "/obligation-monitoring/{rule_id}/evaluations", dependencies=[perm_view]
+)
+async def list_obligation_monitoring_evaluations(
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _list_evaluations(db, rule_id=rule_id, org_id=org_id)

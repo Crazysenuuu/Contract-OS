@@ -95,6 +95,7 @@ from app.api.v1.orchestration import events_router as orchestration_events_route
 from app.api.v1.evidence import router as evidence_router
 from app.monitoring.router import router as monitoring_router
 from app.monitoring.router import webhook_router as monitoring_webhook_router
+from app.monitoring.router import spec_router as monitoring_spec_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -177,6 +178,7 @@ api_router.include_router(security_monitoring_router)
 api_router.include_router(api_keys_router)
 api_router.include_router(evidence_router)
 api_router.include_router(monitoring_router)
+api_router.include_router(monitoring_spec_router)
 api_router.include_router(monitoring_webhook_router)
 api_router.include_router(orchestration_workflows_router)
 api_router.include_router(orchestration_instances_router)

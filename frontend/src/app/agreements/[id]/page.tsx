@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import QualityCheckPanel from "@/components/QualityCheckPanel";
 import AgreementLifecyclePanel from "@/components/AgreementLifecyclePanel";
+import AgreementMonitoringPanel from "@/components/monitoring/AgreementMonitoringPanel";
 import {
   getAgreement,
   getWorkflowState,
@@ -708,11 +709,18 @@ export default function AgreementDetailPage() {
                   </div>
                 </div>
               </div>
-            )}
+)}
           </div>
 
-          {/* External Parties */}
-          <div className="bg-white shadow rounded-lg p-6">
+        {/* Monitoring (spec 3.15.39) */}
+        {token && (
+          <div className="mt-6">
+            <AgreementMonitoringPanel agreementId={id as string} token={token} />
+          </div>
+        )}
+
+        {/* External Parties */}
+        <div className="bg-white shadow rounded-lg p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-medium text-gray-900">
                 External Parties

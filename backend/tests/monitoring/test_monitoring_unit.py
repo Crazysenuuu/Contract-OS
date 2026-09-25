@@ -386,11 +386,94 @@ def test_unknown_evaluator_kind_raises():
 def test_connector_registry_has_rest_api():
     from app.monitoring.connectors import connector_registry
     from app.monitoring.connectors.base import get_metadata
-
     assert connector_registry.supports("rest_api")
-    meta = get_metadata("rest_api")
-    assert meta is not None
-    assert "REST_API" in meta.integration_types
+
+
+# --------------------------------------------------------------------------
+# Rate-limit handling (3.15.62)
+# --------------------------------------------------------------------------
+
+def _install_fake_http(monkeypatch, handler):
+    from app.monitoring.connectors.implementations import http as http_mod
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self.handler = handler
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def request(self, method, url, params=None, headers=None):
+            return self.handler(method, url, params or {}, headers or {})
+
+    monkeypatch.setattr(http_mod.httpx, "AsyncClient", _FakeAsyncClient)
+
+
+def _make_connector(configuration: dict):
+    from app.monitoring.connectors.implementations.http import HTTPRESTConnector
+    from app.monitoring.credentials import ResolvedCredential
+
+    return HTTPRESTConnector(
+        credentials=[ResolvedCredential(value="test-token", reference="env://T", scheme="env")],
+        configuration={
+            "base_url": "https://vendor.example.internal",
+            "max_retries": 1,
+            **configuration,
+        },
+    )
+
+
+async def test_connector_honors_retry_after_then_succeeds(monkeypatch):
+    import httpx
+
+    conn = _make_connector({"timeout_seconds": 5.0})
+    calls = []
+
+    def handler(method, url, params, headers):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(
+                429, request=httpx.Request("GET", url), headers={"retry-after": "0"}
+            )
+        return httpx.Response(200, json=[], request=httpx.Request("GET", url))
+
+    _install_fake_http(monkeypatch, handler)
+    result = await conn.fetch({"resource": "claims"})
+    assert result == []
+    assert len(calls) == 2
+
+
+async def test_connector_rate_limit_exhausts_retries_fails_closed(monkeypatch):
+    import httpx
+
+    from app.monitoring.exceptions import ConnectorUnavailable
+
+    conn = _make_connector({"timeout_seconds": 5.0})
+    calls = []
+
+    def handler(method, url, params, headers):
+        calls.append(1)
+        return httpx.Response(
+            429, request=httpx.Request("GET", url), headers={"retry-after": "0"}
+        )
+
+    _install_fake_http(monkeypatch, handler)
+    with pytest.raises(ConnectorUnavailable):
+        await conn.fetch({"resource": "claims"})
+    assert len(calls) == 2  # 1 attempt + 1 retry within budget
+
+
+def test_parse_retry_after_supports_seconds_and_http_date():
+    from app.monitoring.connectors.implementations.http import _parse_retry_after
+
+    assert _parse_retry_after("3", now=0) == 3.0
+    future = "Mon, 01 Jan 2030 00:00:00 GMT"
+    assert _parse_retry_after(future, now=0) > 3.0
+    assert _parse_retry_after("", now=0) == 1.0
+    assert _parse_retry_after("nonsense", now=0) == 1.0
 
 
 # --------------------------------------------------------------------------

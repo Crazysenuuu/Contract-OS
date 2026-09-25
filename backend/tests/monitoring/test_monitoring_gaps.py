@@ -1559,3 +1559,180 @@ async def test_monitoring_tables_declare_org_scoped_constraints():
             assert len(col_names) == 2
             ref_names = [e.column.name for e in constraint.elements]
             assert ref_names == ["organization_id", "id"], (name, ref_names)
+
+
+# --------------------------------------------------------------------------
+# Spec-shape route aliases (3.15.53): /agreements/{id}/monitoring,
+# /obligations/{id}/monitoring, /obligation-monitoring/{id}[...]
+# --------------------------------------------------------------------------
+
+async def _make_second_obligation(db_session, agreement_id, test_org):
+    from app.models.obligation import Obligation
+
+    obligation = Obligation(
+        organization_id=test_org.id,
+        agreement_id=agreement_id,
+        title="File quarterly compliance attestation",
+        owner_party="Vendor Ltd",
+        description="Attest compliance quarterly.",
+        obligation_type="reporting",
+        status="OPEN",
+        criticality="MEDIUM",
+        evidence_status="REQUIRED",
+    )
+    db_session.add(obligation)
+    await db_session.commit()
+    await db_session.refresh(obligation)
+    return obligation
+
+
+async def test_spec_agreement_monitoring_list_and_create(
+    client, auth_headers, test_org, test_user, test_agreement,
+    active_monitoring, agreement_version, monitoring_integration, db_session,
+):
+    from app.models.agreement import Agreement, AgreementVersion
+    from app.models.obligation import Obligation
+
+    target = (
+        await db_session.execute(
+            select(Obligation).where(Obligation.id == active_monitoring.obligation_id)
+        )
+    ).scalar_one()
+    target_agreement_id = target.agreement_id
+
+    # GET scoped to the agreement returns the active rule.
+    resp = await client.get(
+        f"/api/v1/agreements/{target_agreement_id}/monitoring", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert [r["id"] for r in resp.json()] == [str(active_monitoring.id)]
+
+    # POST creates a rule against a second obligation in the same agreement.
+    second = await _make_second_obligation(db_session, target_agreement_id, test_org)
+    created = await client.post(
+        f"/api/v1/agreements/{target_agreement_id}/monitoring",
+        json={
+            "obligation_id": str(second.id),
+            "integration_id": str(monitoring_integration.id),
+            "source_version_id": str(agreement_version.id),
+            "query_definition": {"resource": "attestations"},
+            "evaluation_definition": {"kind": "existence", "expected": True},
+            "schedule_definition": {"recurrence": "interval", "minutes": 30},
+            "status": "ACTIVE",
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["obligation_id"] == str(second.id)
+
+    # POST referencing an obligation of a *different* agreement → 404.
+    other = Agreement(
+        organization_id=test_org.id,
+        agreement_type_id=test_agreement.agreement_type_id,
+        title="Other NDA Agreement",
+        status="draft",
+        created_by=test_user.id,
+        data={},
+    )
+    db_session.add(other)
+    await db_session.commit()
+    await db_session.refresh(other)
+    other_version = AgreementVersion(
+        agreement_id=other.id,
+        version_number=1,
+        content="x",
+        content_hash="other-v1",
+        status="ACTIVE",
+        created_by=test_user.id,
+        data={},
+    )
+    db_session.add(other_version)
+    await db_session.commit()
+    foreign = Obligation(
+        organization_id=test_org.id,
+        agreement_id=other.id,
+        title="Other agreement obligation",
+        owner_party="Vendor Ltd",
+        description="x",
+        obligation_type="reporting",
+        status="OPEN",
+        criticality="HIGH",
+        evidence_status="REQUIRED",
+    )
+    db_session.add(foreign)
+    await db_session.commit()
+    rejected = await client.post(
+        f"/api/v1/agreements/{target_agreement_id}/monitoring",
+        json={
+            "obligation_id": str(foreign.id),
+            "integration_id": str(monitoring_integration.id),
+            "source_version_id": str(agreement_version.id),
+            "query_definition": {"resource": "claims"},
+            "evaluation_definition": {"kind": "existence", "expected": True},
+            "schedule_definition": {"recurrence": "interval", "minutes": 30},
+        },
+        headers=auth_headers,
+    )
+    assert rejected.status_code == 404, rejected.text
+
+
+async def test_spec_obligation_monitoring_alias_routes(
+    client, auth_headers, test_org, monitoring_integration, agreement_version,
+    monitoring_obligation, db_session,
+):
+    # POST /obligations/{id}/monitoring creates a rule bound to the path id.
+    created = await client.post(
+        f"/api/v1/obligations/{monitoring_obligation.id}/monitoring",
+        json={
+            "obligation_id": str(monitoring_obligation.id),
+            "integration_id": str(monitoring_integration.id),
+            "source_version_id": str(agreement_version.id),
+            "query_definition": {"resource": "claims"},
+            "evaluation_definition": {"kind": "existence", "expected": True},
+            "schedule_definition": {"recurrence": "interval", "minutes": 30},
+            "status": "ACTIVE",
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    rule_id = created.json()["id"]
+    assert created.json()["obligation_id"] == str(monitoring_obligation.id)
+
+    # GET /obligations/{id}/monitoring lists the rule.
+    listed = await client.get(
+        f"/api/v1/obligations/{monitoring_obligation.id}/monitoring",
+        headers=auth_headers,
+    )
+    assert listed.status_code == 200
+    assert any(r["id"] == rule_id for r in listed.json())
+
+    # PATCH /obligation-monitoring/{id}
+    patched = await client.patch(
+        f"/api/v1/obligation-monitoring/{rule_id}",
+        json={"query_definition": {"resource": "claims", "extra": True}},
+        headers=auth_headers,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["id"] == rule_id
+    assert patched.json()["query_definition"] == {"resource": "claims", "extra": True}
+
+    # activate / pause
+    act = await client.post(
+        f"/api/v1/obligation-monitoring/{rule_id}/activate", headers=auth_headers
+    )
+    assert act.status_code == 200
+    assert act.json()["status"] == "ACTIVE"
+    paused = await client.post(
+        f"/api/v1/obligation-monitoring/{rule_id}/pause", headers=auth_headers
+    )
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "PAUSED"
+
+    # runs / observations / evaluations are reachable and empty.
+    for suffix in ("runs", "observations", "evaluations"):
+        resp = await client.get(
+            f"/api/v1/obligation-monitoring/{rule_id}/{suffix}",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, (suffix, resp.text)
+        assert resp.json() == []

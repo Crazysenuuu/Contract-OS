@@ -3955,3 +3955,85 @@ export async function listMonitoringIntegrations(
 ): Promise<MonitoringIntegrationRow[]> {
   return apiRequest<MonitoringIntegrationRow[]>("/monitoring/integrations", { token });
 }
+
+export async function listAgreementMonitoring(
+  token: string,
+  agreementId: string
+): Promise<MonitoringRuleRow[]> {
+  return apiRequest<MonitoringRuleRow[]>(
+    `/agreements/${agreementId}/monitoring`,
+    { token }
+  );
+}
+
+export interface MonitoringRuleCreate {
+  obligation_id: string;
+  integration_id: string;
+  source_version_id: string;
+  query_definition?: Record<string, unknown>;
+  evaluation_definition?: Record<string, unknown>;
+  schedule_definition?: Record<string, unknown>;
+  automation?: Record<string, unknown> | null;
+  status?: string;
+}
+
+export async function createMonitoringRule(
+  token: string,
+  data: MonitoringRuleCreate
+): Promise<MonitoringRuleRow> {
+  return apiRequest<MonitoringRuleRow>("/monitoring/rules", {
+    method: "POST",
+    token,
+    body: JSON.stringify({ ...data, status: data.status ?? "DRAFT" }),
+  });
+}
+
+export async function setMonitoringRuleActive(
+  token: string,
+  ruleId: string
+): Promise<MonitoringRuleRow> {
+  return apiRequest<MonitoringRuleRow>(`/monitoring/rules/${ruleId}/activate`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function setMonitoringRulePaused(
+  token: string,
+  ruleId: string
+): Promise<MonitoringRuleRow> {
+  return apiRequest<MonitoringRuleRow>(`/monitoring/rules/${ruleId}/pause`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function testMonitoringIntegration(
+  token: string,
+  integrationId: string
+): Promise<{ ok: boolean; integration_id: string; message?: string }> {
+  return apiRequest<{ ok: boolean; integration_id: string; message?: string }>(
+    `/monitoring/integrations/${integrationId}/test`,
+    { method: "POST", token }
+  );
+}
+
+export async function disconnectMonitoringIntegration(
+  token: string,
+  integrationId: string
+): Promise<{ ok: boolean }> {
+  return apiRequest<{ ok: boolean }>(
+    `/monitoring/integrations/${integrationId}/disconnect`,
+    { method: "POST", token }
+  );
+}
+
+export async function rotateMonitoringCredentials(
+  token: string,
+  integrationId: string
+): Promise<{ ok: boolean; expires_at?: string | null }> {
+  return apiRequest<{ ok: boolean; expires_at?: string | null }>(
+    `/monitoring/integrations/${integrationId}/rotate-credentials`,
+    { method: "POST", token }
+  );
+}

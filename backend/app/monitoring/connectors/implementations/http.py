@@ -14,7 +14,10 @@ Fails closed: transport/timeout/5xx → ``ConnectorUnavailable``; 401/403 →
 
 from __future__ import annotations
 
+import asyncio
+import email.utils
 import time
+from datetime import timezone
 from typing import Any
 
 import httpx
@@ -23,6 +26,30 @@ from app.monitoring.connectors.base import Connector, ExternalObservation
 from app.monitoring.credentials import credential_header_token
 from app.monitoring.exceptions import ConnectorAuthError, ConnectorUnavailable
 from app.monitoring.observations import ensure_aware_utc
+
+# Cap how long a provider's Retry-After may stall the worker. A hostile or
+# misconfigured provider must not be able to freeze the sweep indefinitely.
+_RATE_LIMIT_MAX_WAIT = 5.0
+_RATE_LIMIT_DEFAULT_WAIT = 1.0
+
+
+def _parse_retry_after(raw: str | None, now: float | None = None) -> float:
+    """Seconds to wait from ``Retry-After`` (delta-seconds or RFC 7231 date)."""
+    if not raw:
+        return _RATE_LIMIT_DEFAULT_WAIT
+    raw = raw.strip()
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    try:
+        parsed = email.utils.parsedate_to_datetime(raw)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        now = now if now is not None else time.time()
+        return max(0.0, parsed.timestamp() - now)
+    except Exception:  # noqa: BLE001 - unparseable header falls back to default
+        return _RATE_LIMIT_DEFAULT_WAIT
 
 
 class HTTPRESTConnector(Connector):
@@ -77,6 +104,20 @@ class HTTPRESTConnector(Connector):
                 raise ConnectorAuthError(
                     f"REST source rejected credentials (HTTP {response.status_code})"
                 )
+            if response.status_code == 429:
+                # Rate-limit handling (spec 3.15.62): honor Retry-After and
+                # retry within the retry budget; expiring the budget fails
+                # closed as ConnectorUnavailable (INCONCLUSIVE upstream) —
+                # a rate-limited source is not silently treated as healthy.
+                last_exc = ConnectorUnavailable("REST source rate limited (HTTP 429)")
+                if attempt > self.max_retries:
+                    raise last_exc
+                wait = min(
+                    _parse_retry_after(response.headers.get("retry-after")),
+                    _RATE_LIMIT_MAX_WAIT,
+                )
+                await asyncio.sleep(wait)
+                continue
             if response.status_code == 404:
                 return response
             if response.status_code >= 500:
