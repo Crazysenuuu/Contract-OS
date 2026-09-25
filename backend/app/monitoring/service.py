@@ -42,6 +42,7 @@ from app.monitoring.models import (
     IntegrationConnection,
     IntegrationHealth,
     MonitoringEvaluation,
+    MonitoringEvidence,
     MonitoringException,
     MonitoringRun,
     ObligationMonitoring,
@@ -57,6 +58,32 @@ EVENT_EVALUATION_FAILED = "monitoring.evaluation_failed"
 EVENT_SOURCE_UNAVAILABLE = "monitoring.source_unavailable"
 EVENT_RECOVERED = "monitoring.recovered"
 EVENT_STALE_VERSION = "monitoring.stale_version"
+EVENT_OBLIGATION_AUTOMATION_TRIGGERED = "obligation.automation_triggered"
+
+# Lifecycle audit tokens (spec 3.15.47) — all flow through the 3.11 hash chain.
+AUDIT_INTEGRATION_CREATED = "INTEGRATION_CREATED"
+AUDIT_INTEGRATION_UPDATED = "INTEGRATION_UPDATED"
+AUDIT_INTEGRATION_CONNECTED = "INTEGRATION_CONNECTED"
+AUDIT_INTEGRATION_DISCONNECTED = "INTEGRATION_DISCONNECTED"
+AUDIT_INTEGRATION_CREDENTIAL_ROTATED = "INTEGRATION_CREDENTIAL_ROTATED"
+AUDIT_INTEGRATION_AUTH_FAILED = "INTEGRATION_AUTH_FAILED"
+AUDIT_MONITORING_CREATED = "MONITORING_CREATED"
+AUDIT_MONITORING_ACTIVATED = "MONITORING_ACTIVATED"
+AUDIT_MONITORING_PAUSED = "MONITORING_PAUSED"
+AUDIT_MONITORING_DISABLED = "MONITORING_DISABLED"
+AUDIT_RUN_STARTED = "MONITORING_RUN_STARTED"
+AUDIT_RUN_COMPLETED = "MONITORING_RUN_COMPLETED"
+AUDIT_RUN_FAILED = "MONITORING_RUN_FAILED"
+AUDIT_OBSERVATION_RECEIVED = "EXTERNAL_OBSERVATION_RECEIVED"
+AUDIT_OBSERVATION_REJECTED = "EXTERNAL_OBSERVATION_REJECTED"
+AUDIT_EVALUATION_COMPLETED = "MONITORING_EVALUATION_COMPLETED"
+AUDIT_EXCEPTION_OPENED = "MONITORING_EXCEPTION_OPENED"
+AUDIT_EXCEPTION_RESOLVED = "MONITORING_EXCEPTION_RESOLVED"
+AUDIT_AUTOMATION_TRIGGERED = "OBLIGATION_AUTOMATION_TRIGGERED"
+
+# Conservative automation actions (spec 3.15.36).
+_AUTOMATION_ACTIONS = ("NO_ACTION", "MARK_TASK_READY", "ATTACH_EVIDENCE", "COMPLETE_TASK")
+_DEFAULT_RISK_THRESHOLD = 3
 
 
 def now_utc() -> datetime:
@@ -177,6 +204,15 @@ async def run_obligation_monitoring(
         )
         if existing is not None:
             return existing
+    else:
+        await _audit_event(
+            db,
+            monitoring,
+            action=AUDIT_RUN_STARTED,
+            resource_id=run.id,
+            resource_type="monitoring_run",
+            metadata_json={"run_id": str(run.id), "scheduled_period": run.scheduled_period},
+        )
 
     definition_hash = hash_definition(monitoring)
 
@@ -192,7 +228,16 @@ async def run_obligation_monitoring(
             reason=str(exc),
             exception_type=type(exc).__name__,
         )
-        return _finalize_run(db, run, monitoring, evaluation, now, outcome=None)
+        _finalize_run(db, run, monitoring, evaluation, now, outcome=None)
+        await _audit_event(
+            db,
+            monitoring,
+            action=AUDIT_RUN_FAILED,
+            resource_id=run.id,
+            resource_type="monitoring_run",
+            metadata_json={"run_id": str(run.id), "exception_type": type(exc).__name__},
+        )
+        return evaluation
 
     evaluation = await _record_evaluation(
         db,
@@ -203,7 +248,16 @@ async def run_obligation_monitoring(
         observation_ids=outcome.metrics.get("_observation_ids", []),
         now=now,
     )
-    return _finalize_run(db, run, monitoring, evaluation, now, outcome=outcome)
+    _finalize_run(db, run, monitoring, evaluation, now, outcome=outcome)
+    await _audit_event(
+        db,
+        monitoring,
+        action=AUDIT_RUN_COMPLETED,
+        resource_id=run.id,
+        resource_type="monitoring_run",
+        metadata_json={"run_id": str(run.id), "result": evaluation.result},
+    )
+    return evaluation
 
 
 def _finalize_run(
@@ -468,12 +522,20 @@ async def _record_evaluation(
         result=result,
         status="COMPLETED",
         metrics={k: v for k, v in outcome.metrics.items() if k != "_observation_ids"},
-        observation_ids=observation_ids,
+        observation_ids=[str(x) for x in observation_ids if x is not None],
         evaluated_at=now,
         details={"reason": outcome.reason},
     )
     db.add(evaluation)
     await db.flush()
+
+    evidence_rows = await _persist_evidence_records(
+        db,
+        monitoring=monitoring,
+        run_id=run_id,
+        observation_ids=observation_ids,
+        now=now,
+    )
 
     if result == EvaluationResult.FAIL.name:
         await _open_exception(
@@ -491,6 +553,7 @@ async def _record_evaluation(
             notification_type="monitoring_alert",
             severity="FAIL",
         )
+        await _maybe_raise_risk_finding(db, monitoring=monitoring, now=now)
     elif result == EvaluationResult.PASS.name:
         notify = (monitoring.evaluation_definition or {}).get("notify_on_pass", False)
         if notify:
@@ -502,9 +565,25 @@ async def _record_evaluation(
                 notification_type="monitoring_summary",
                 severity="PASS",
             )
+        action = _automation_action(monitoring)
+        if action != "NO_ACTION":
+            await _apply_automation(
+                db,
+                monitoring=monitoring,
+                action=action,
+                evidence=evidence_rows,
+                now=now,
+            )
     else:
         await _mark_inconclusive_health(db, monitoring.integration_id)
 
+    await _audit_event(
+        db,
+        monitoring,
+        action=AUDIT_EVALUATION_COMPLETED,
+        resource_id=monitoring.id,
+        metadata_json={"result": result, "reason": outcome.reason},
+    )
     await _audit_event(
         db,
         monitoring,
@@ -562,6 +641,295 @@ async def _open_exception(
         )
     )
     await db.flush()
+    await _audit_event(
+        db,
+        monitoring,
+        action=AUDIT_EXCEPTION_OPENED,
+        resource_id=monitoring.id,
+        resource_type="monitoring_exception",
+        metadata_json={"evaluation_id": str(evaluation.id), "reason": reason[:4000]},
+    )
+
+
+def _automation_action(monitoring: ObligationMonitoring) -> str:
+    automation = (monitoring.automation or {}).get("on_pass")
+    action = (automation or "NO_ACTION").upper()
+    return action if action in _AUTOMATION_ACTIONS else "NO_ACTION"
+
+
+async def _persist_evidence_records(
+    db: AsyncSession,
+    *,
+    monitoring: ObligationMonitoring,
+    run_id: uuid.UUID,
+    observation_ids: list,
+    now: datetime,
+) -> list[MonitoringEvidence]:
+    """Materialise one evidence record per newly stored observation (3.15.37).
+
+    Each record makes the run reconstructable: source, source identifier,
+    observed_at, received_at, payload hash, integration ID and monitoring run
+    ID (3.15.38). Deduplication is inherent — a persisted observation has a
+    stable id and observations were already deduped on insert.
+    """
+    from app.monitoring.connectors.base import (
+        ExternalObservation,
+    )  # noqa: F401  (kept import crisp for error surfacing)
+
+    from app.monitoring.models import ExternalObservationRecord
+
+    if not observation_ids:
+        return []
+
+    integration = await db.get(IntegrationConnection, monitoring.integration_id)
+    source = integration.provider_key if integration is not None else str(monitoring.integration_id)
+
+    records = (
+        (await db.execute(
+            select(ExternalObservationRecord).where(
+                ExternalObservationRecord.id.in_(observation_ids)
+            )
+        ))
+        .scalars()
+        .all()
+    )
+
+    created: list[MonitoringEvidence] = []
+    for row in records:
+        evidence = MonitoringEvidence(
+            organization_id=monitoring.organization_id,
+            monitoring_id=monitoring.id,
+            integration_id=monitoring.integration_id,
+            monitoring_run_id=run_id,
+            obligation_id=monitoring.obligation_id,
+            evidence_type="SYSTEM_RECORD",
+            source=str(source)[:255],
+            source_identifier=row.external_id[:500],
+            observed_at=ensure_aware_utc(row.observed_at),
+            received_at=now,
+            payload_hash=row.payload_hash,
+            value={
+                "integration_id": str(row.integration_id),
+                "external_id": row.external_id,
+                "observation_id": str(row.id),
+                "payload_hash": row.payload_hash,
+            },
+            attached_to_obligation=False,
+        )
+        db.add(evidence)
+        created.append(evidence)
+    if created:
+        await db.flush()
+        await _audit_event(
+            db,
+            monitoring,
+            action=AUDIT_OBSERVATION_RECEIVED,
+            resource_id=monitoring.id,
+            metadata_json={
+                "count": len(created),
+                "run_id": str(run_id) if run_id else None,
+            },
+        )
+    return created
+
+
+async def _apply_automation(
+    db: AsyncSession,
+    *,
+    monitoring: ObligationMonitoring,
+    action: str,
+    evidence: list[MonitoringEvidence],
+    now: datetime,
+) -> None:
+    """Conservative automatic task advancement on PASS (3.15.36).
+
+    A PASS may only advance a task when the workspace explicitly configured
+    the rule to do so — never a universal auto-complete of the obligation
+    itself (3.15.36, 3.15.43). COMPLETE_TASK completes the obligation's
+    workflow task rows, NOT the obligation record.
+    """
+    from app.models.obligation import Obligation, ObligationEvidence
+    from app.models.user_task import UserTask
+
+    obligation = await db.get(Obligation, monitoring.obligation_id)
+    applied = False
+
+    if action in ("MARK_TASK_READY", "COMPLETE_TASK") and obligation is not None:
+        tasks = (
+            (await db.execute(
+                select(UserTask).where(
+                    UserTask.organization_id == monitoring.organization_id,
+                    UserTask.agreement_id == obligation.agreement_id,
+                    UserTask.task_type.in_(["obligation", "review", "compliance"]),
+                    UserTask.status.in_(["pending", "in_progress"]),
+                )
+            ))
+            .scalars()
+            .all()
+        )
+        for task in tasks:
+            if action == "MARK_TASK_READY" and task.status == "pending":
+                task.status = "in_progress"
+                applied = True
+            elif action == "COMPLETE_TASK":
+                task.status = "completed"
+                task.completed_at = now
+                applied = True
+
+    if action == "ATTACH_EVIDENCE":
+        integration = await db.get(IntegrationConnection, monitoring.integration_id)
+        submitted_by = integration.created_by if integration is not None else None
+        attached = 0
+        for ev in evidence:
+            ev.attached_to_obligation = True
+            attached += 1
+        if (
+            attached
+            and submitted_by is not None
+            and obligation is not None
+        ):
+            db.add(
+                ObligationEvidence(
+                    obligation_id=obligation.id,
+                    document_id=None,
+                    description=(
+                        f"System evidence from monitoring rule {monitoring.id}: "
+                        f"{attached} external record(s)"
+                    ),
+                    submitted_by=submitted_by,
+                    status="SUBMITTED",
+                    submitted_at=now,
+                )
+            )
+        applied = True
+        await db.flush()
+
+    if applied:
+        await _enqueue_monitoring_notification(
+            db,
+            monitoring=monitoring,
+            event_type=EVENT_OBLIGATION_AUTOMATION_TRIGGERED,
+            title_reason=f"Automation {action} applied after PASS",
+            notification_type="monitoring_summary",
+            severity="PASS",
+        )
+        await _audit_event(
+            db,
+            monitoring,
+            action=AUDIT_AUTOMATION_TRIGGERED,
+            resource_id=monitoring.id,
+            metadata_json={
+                "obligation_id": str(monitoring.obligation_id),
+                "automation": action,
+            },
+        )
+
+
+async def _maybe_raise_risk_finding(
+    db: AsyncSession,
+    *,
+    monitoring: ObligationMonitoring,
+    now: datetime,
+):
+    """Escalate repeated FAIL into a monitoring-derived risk (3.15.50-51).
+
+    Once the number of consecutive FAIL evaluations reaches the rule's
+    ``risk_threshold`` (default 3), a RiskFinding is minted whose evidence
+    metadata traces back to obligation, monitoring and the exact evaluation
+    ids — the risk engine can pull the underlying monitoring evidence.
+    A pending/accepted finding for the same monitoring suppresses duplicates.
+    """
+    from app.models.ai_analysis import RiskFinding
+    from app.models.obligation import Obligation
+
+    obligation = await db.get(Obligation, monitoring.obligation_id)
+    if obligation is None:
+        return None
+
+    threshold = int(
+        (monitoring.evaluation_definition or {}).get("risk_threshold", _DEFAULT_RISK_THRESHOLD)
+        or _DEFAULT_RISK_THRESHOLD
+    )
+    threshold = max(1, threshold)
+
+    recent = (
+        (await db.execute(
+            select(MonitoringEvaluation)
+            .where(MonitoringEvaluation.monitoring_id == monitoring.id)
+            .order_by(MonitoringEvaluation.evaluated_at.desc())
+            .limit(threshold)
+        ))
+        .scalars()
+        .all()
+    )
+    consecutive = 0
+    for evaluation in recent:
+        if evaluation.result == EvaluationResult.FAIL.value:
+            consecutive += 1
+        else:
+            break
+    if consecutive < threshold:
+        return None
+
+    existing = (
+        (await db.execute(
+            select(RiskFinding).where(RiskFinding.agreement_id == obligation.agreement_id)
+        ))
+        .scalars()
+        .all()
+    )
+    for finding in existing:
+        meta = finding.evidence or {}
+        if (
+            meta.get("source_type") == "OBLIGATION_ANALYSIS"
+            and str(meta.get("monitoring_id", "")) == str(monitoring.id)
+            and finding.reviewer_status in ("pending", "accepted")
+        ):
+            return None
+
+    version_id = obligation.source_version_id or monitoring.source_version_id
+    if version_id is None:
+        return None
+
+    failed_ids = (
+        (await db.execute(
+            select(MonitoringEvaluation.id)
+            .where(
+                MonitoringEvaluation.monitoring_id == monitoring.id,
+                MonitoringEvaluation.result == EvaluationResult.FAIL.value,
+            )
+            .order_by(MonitoringEvaluation.evaluated_at.desc())
+            .limit(threshold)
+        ))
+        .scalars()
+        .all()
+    )
+
+    finding = RiskFinding(
+        agreement_id=obligation.agreement_id,
+        version_id=version_id,
+        category="monitoring",
+        severity="HIGH",
+        finding="Repeated external monitoring failures",
+        explanation=(
+            f"The monitoring rule {monitoring.id} produced {len(failed_ids)} consecutive "
+            f"FAIL evaluations for obligation {obligation.id}."
+        ),
+        recommendation=(
+            "Review the external source data and the obligation's operational performance."
+        ),
+        evidence={
+            "source_type": "OBLIGATION_ANALYSIS",
+            "obligation_id": str(obligation.id),
+            "monitoring_id": str(monitoring.id),
+            "evaluation_ids": [str(eid) for eid in failed_ids],
+        },
+        confidence=0.9,
+        reviewer_status="pending",
+    )
+    db.add(finding)
+    await db.flush()
+    return finding
 
 
 async def _enqueue_monitoring_notification(
@@ -575,24 +943,60 @@ async def _enqueue_monitoring_notification(
 ) -> None:
     """Best-effort operator notification via the domain outbox.
 
-    Recipients: active organization members (any user who can log into the
-    workspace). dispatch_event later mints the Notification row / WebSocket /
-    push/SMS deliveries from the same event.
+    Recipient resolution (spec 3.15.49), in priority order:
+      1. obligation owner — the obligation's primary assignee user
+      2. integration owner — the workspace member who created the integration
+      3. workspace notification policy — any active organization member
+    All resolved recipients are reported in ``recipients`` so the delivery
+    layer can fan out; the first keeps the legacy single-recipient fields
+    (``recipient_email`` / ``recipient_user_id``) compatible.
     """
-    from app.models.organization import Organization
+    from app.models.obligation import Obligation, ObligationAssignee
     from app.models.rbac import OrganizationMember
     from app.models.user import User
 
-    member = await db.scalar(
-        select(User)
-        .join(OrganizationMember, OrganizationMember.user_id == User.id)
-        .where(
-            OrganizationMember.organization_id == monitoring.organization_id,
-            OrganizationMember.status == "active",
+    recipients: list[dict] = []
+
+    async def _with_user(user_id: uuid.UUID, role: str) -> None:
+        user = await db.get(User, user_id)
+        if user is not None:
+            recipients.append({"user_id": str(user.id), "email": user.email, "role": role})
+
+    obligation = await db.get(Obligation, monitoring.obligation_id)
+    if obligation is not None:
+        assignee = await db.scalar(
+            select(ObligationAssignee)
+            .where(
+                ObligationAssignee.obligation_id == obligation.id,
+                ObligationAssignee.member_id.is_not(None),
+                ObligationAssignee.primary_assignee.is_(True),
+            )
+            .order_by(ObligationAssignee.responsibility_type.asc())
+            .limit(1)
         )
-        .order_by(OrganizationMember.id.asc())
-        .limit(1)
-    )
+        if assignee is not None and assignee.member_id is not None:
+            await _with_user(assignee.member_id, "obligation_owner")
+
+    if not recipients:
+        integration = await db.get(IntegrationConnection, monitoring.integration_id)
+        if integration is not None and integration.created_by is not None:
+            await _with_user(integration.created_by, "integration_owner")
+
+    if not recipients:
+        member = await db.scalar(
+            select(User)
+            .join(OrganizationMember, OrganizationMember.user_id == User.id)
+            .where(
+                OrganizationMember.organization_id == monitoring.organization_id,
+                OrganizationMember.status == "active",
+            )
+            .order_by(OrganizationMember.id.asc())
+            .limit(1)
+        )
+        if member is not None:
+            recipients.append(
+                {"user_id": str(member.id), "email": member.email, "role": "workspace"}
+            )
 
     payload = {
         "obligation_id": str(monitoring.obligation_id),
@@ -600,10 +1004,11 @@ async def _enqueue_monitoring_notification(
         "subject": f"Monitoring alert: obligation {monitoring.obligation_id}",
         "reason": title_reason,
         "severity": severity,
+        "recipients": recipients,
     }
-    if member is not None:
-        payload["recipient_email"] = member.email
-        payload["recipient_user_id"] = str(member.id)
+    if recipients:
+        payload["recipient_email"] = recipients[0]["email"]
+        payload["recipient_user_id"] = recipients[0]["user_id"]
 
     await enqueue_event(
         db,
@@ -622,17 +1027,22 @@ async def _audit_event(
     action: str,
     resource_id: uuid.UUID,
     metadata_json: dict,
+    resource_type: str = "monitoring_evaluation",
+    actor_id: uuid.UUID | None = None,
+    actor_type: str = "system",
 ) -> None:
     try:
+        meta = dict(metadata_json)
         await record_event(
             db,
             tenant_id=monitoring.organization_id,
-            actor_id=None,
-            actor_type="system",
+            agreement_id=meta.pop("agreement_id", None),
+            actor_id=actor_id,
+            actor_type=actor_type,
             action=action,
-            resource_type="monitoring_evaluation",
+            resource_type=resource_type,
             resource_id=resource_id,
-            metadata_json=metadata_json,
+            metadata_json=meta,
         )
     except Exception:  # noqa: BLE001 — audit must never break the monitoring run
         _log.warning("audit record failed for monitoring %s: %s", monitoring.id, action)
@@ -705,7 +1115,11 @@ async def ingest_webhook_observations(
     """
     from app.monitoring.connectors.base import ExternalObservation
     from app.monitoring.evaluators.base import resolve_path
-    from app.monitoring.models import MonitoringWebhookEvent, ObligationMonitoring
+    from app.monitoring.models import (
+        ExternalObservationRecord,
+        MonitoringWebhookEvent,
+        ObligationMonitoring,
+    )
 
     integration = await db.get(IntegrationConnection, integration_id)
     if integration is None:
@@ -769,6 +1183,51 @@ async def ingest_webhook_observations(
             monitoring_id=monitoring.id,
             observations=observations,
         )
+        if created:
+            # Evidence records with source/source-id/observed_at/received_at/
+            # payload_hash/integration_id; no monitoring_run_id here because a
+            # webhook does not mint a run (3.15.38).
+            records = (
+                (
+                    await db.execute(
+                        select(ExternalObservationRecord).where(
+                            ExternalObservationRecord.id.in_(created)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in records:
+                db.add(
+                    MonitoringEvidence(
+                        organization_id=monitoring.organization_id,
+                        monitoring_id=monitoring.id,
+                        integration_id=integration.id,
+                        monitoring_run_id=None,
+                        obligation_id=monitoring.obligation_id,
+                        evidence_type="SYSTEM_RECORD",
+                        source=integration.provider_key[:255],
+                        source_identifier=row.external_id[:500],
+                        observed_at=ensure_aware_utc(row.observed_at),
+                        received_at=now_utc(),
+                        payload_hash=row.payload_hash,
+                        value={
+                            "integration_id": str(integration.id),
+                            "external_id": row.external_id,
+                            "observation_id": str(row.id),
+                            "payload_hash": row.payload_hash,
+                        },
+                        attached_to_obligation=False,
+                    )
+                )
+            await _audit_event(
+                db,
+                monitoring,
+                action=AUDIT_OBSERVATION_RECEIVED,
+                resource_id=monitoring.id,
+                metadata_json={"count": len(created), "webhook_event_id": str(event_row.id)},
+            )
         total += len(created)
     await db.flush()
     return total

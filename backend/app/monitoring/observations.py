@@ -91,7 +91,7 @@ async def persist_observations(
     """
     from app.monitoring.models import ExternalObservationRecord
 
-    created: list[uuid.UUID] = []
+    created: list[ExternalObservationRecord] = []
     for obs in observations:
         payload = dict(obs.payload) if isinstance(obs.payload, dict) else {}
         digest = hash_payload(payload)
@@ -122,11 +122,11 @@ async def persist_observations(
             status=ObservationStatus.VALIDATED.value,
         )
         db.add(row)
-        created.append(row.id)
+        created.append(row)
 
     if created:
         await db.flush()
-    return created
+    return [row.id for row in created]
 
 
 async def verify_webhook_time_delivery(

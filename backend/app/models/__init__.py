@@ -425,6 +425,7 @@ from app.monitoring.models import (
     MonitoringEvaluation,
     MonitoringException,
     MonitoringRun,
+    MonitoringEvidence,
     MonitoringWebhookEvent,
 )
 __all__ += [
@@ -436,5 +437,6 @@ __all__ += [
     "MonitoringEvaluation",
     "MonitoringException",
     "MonitoringRun",
+    "MonitoringEvidence",
     "MonitoringWebhookEvent",
 ]

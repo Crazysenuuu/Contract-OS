@@ -6,10 +6,11 @@ Tables:
   - integration_health           connector health counters
   - obligation_monitoring        monitoring rule bound to an obligation
   - external_observations        normalized, hashed external observations
-  - monitoring_evaluations       immutable evaluation history
-  - monitoring_exceptions        operational exceptions (not contract breaches)
-  - monitoring_runs              idempotent scheduler runs
-  - monitoring_webhook_events    raw verified webhook events (replay-protected)
+- monitoring_evaluations       immutable evaluation history
+   - monitoring_exceptions        operational exceptions (not contract breaches)
+   - monitoring_runs              idempotent scheduler runs
+   - monitoring_evidence          traceable evidence records (spec 3.15.37-38)
+   - monitoring_webhook_events    raw verified webhook events (replay-protected)
 
 Credentials are referenced via ``secret_reference`` (which points at a real
 secret manager / env binding) and are never returned by the API (3.15.6).
@@ -639,6 +640,118 @@ class MonitoringRun(
     )
 
 
+class MonitoringEvidence(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """Traceable evidence derived from real external observations (3.15.37).
+
+    Every evaluation is backed by evidence records so the chain
+    ``External Observation → Evidence Record → Obligation`` is reconstructable:
+
+      - source / source_identifier   which provider + external record
+      - observed_at / received_at    when the source saw it vs when we got it
+      - payload_hash (+value.payload_hash)  tamper-evident digest (3.15.38)
+      - integration_id / monitoring_run_id  full provenance back to a run
+
+    ``obligation_id`` anchors the evidence to the obligation the monitoring is
+    bound to (the obligation operates as the instance surrogate until the
+    3.13 ``obligation_instances`` table lands; the column is nullable so the
+    schema stays forward compatible). Webhook-ingested evidence has no
+    ``monitoring_run_id`` because a webhook does not mint a run.
+    """
+
+    __tablename__ = "monitoring_evidence"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    monitoring_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("obligation_monitoring.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    integration_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("integration_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    monitoring_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("monitoring_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    obligation_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("obligations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    evidence_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="SYSTEM_RECORD",
+    )
+
+    source: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    source_identifier: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    payload_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    value: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+
+    attached_to_obligation: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_monitoring_evidence_lookup",
+            "organization_id",
+            "monitoring_id",
+            "received_at",
+        ),
+    )
+
+
 class MonitoringWebhookEvent(
     UUIDPrimaryKeyMixin,
     TimestampMixin,
@@ -717,5 +830,6 @@ __all__ = [
     "MonitoringEvaluation",
     "MonitoringException",
     "MonitoringRun",
+    "MonitoringEvidence",
     "MonitoringWebhookEvent",
 ]

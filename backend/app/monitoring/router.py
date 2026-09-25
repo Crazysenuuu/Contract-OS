@@ -40,6 +40,7 @@ from app.monitoring.models import (
     IntegrationCredential,
     IntegrationHealth,
     MonitoringEvaluation,
+    MonitoringEvidence,
     MonitoringException,
     MonitoringRun,
     ObligationMonitoring,
@@ -64,6 +65,18 @@ from app.monitoring.schemas import (
     WebhookAck,
 )
 from app.monitoring.service import (
+    AUDIT_INTEGRATION_AUTH_FAILED,
+    AUDIT_INTEGRATION_CONNECTED,
+    AUDIT_INTEGRATION_CREATED,
+    AUDIT_INTEGRATION_CREDENTIAL_ROTATED,
+    AUDIT_INTEGRATION_DISCONNECTED,
+    AUDIT_INTEGRATION_UPDATED,
+    AUDIT_MONITORING_ACTIVATED,
+    AUDIT_MONITORING_CREATED,
+    AUDIT_MONITORING_DISABLED,
+    AUDIT_MONITORING_PAUSED,
+    AUDIT_EXCEPTION_RESOLVED,
+    AUDIT_OBSERVATION_REJECTED,
     compute_next_run,
     ingest_webhook_observations,
     run_obligation_monitoring,
@@ -82,6 +95,35 @@ perm_rules = Depends(require_permission("monitoring.manage_rules"))
 
 def _not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+async def _audit_event(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    action: str,
+    resource_type: str,
+    resource_id: uuid.UUID,
+    actor_id: uuid.UUID | None = None,
+    metadata_json: dict | None = None,
+) -> None:
+    """Append to the tenant audit hash chain (spec 3.15.47). Auditing must
+    never fail the user-facing mutation, so errors are logged and swallowed."""
+    from app.services.audit_service import record_event
+
+    try:
+        await record_event(
+            db,
+            tenant_id=org_id,
+            actor_id=actor_id,
+            actor_type="user" if actor_id is not None else "system",
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            metadata_json=metadata_json or {},
+        )
+    except Exception:  # noqa: BLE001 — audit is best-effort
+        _log.warning("monitoring audit failed for %s: %s", action, resource_id)
 
 
 async def _get_integration(
@@ -237,6 +279,15 @@ async def create_integration(
         )
     await db.flush()
     await db.refresh(integration)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_INTEGRATION_CREATED,
+        resource_type="monitoring_integration",
+        resource_id=integration.id,
+        actor_id=current_user.id,
+        metadata_json={"provider_key": integration.provider_key},
+    )
     return _serialize_integration(integration)
 
 
@@ -257,6 +308,15 @@ async def update_integration(
         integration.status = data.status
     await db.flush()
     await db.refresh(integration)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_INTEGRATION_UPDATED,
+        resource_type="monitoring_integration",
+        resource_id=integration.id,
+        actor_id=current_user.id,
+        metadata_json={"name": integration.name},
+    )
     return _serialize_integration(integration)
 
 
@@ -281,6 +341,15 @@ async def delete_integration(
         )
     await db.delete(integration)
     await db.flush()
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_INTEGRATION_DISCONNECTED,
+        resource_type="monitoring_integration",
+        resource_id=integration.id,
+        actor_id=current_user.id,
+        metadata_json={"name": integration.name},
+    )
     return {"id": str(integration.id), "status": "deleted"}
 
 
@@ -310,6 +379,15 @@ async def add_credential(
     db.add(credential)
     await db.flush()
     await db.refresh(credential)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_INTEGRATION_CREDENTIAL_ROTATED,
+        resource_type="monitoring_integration",
+        resource_id=integration.id,
+        actor_id=current_user.id,
+        metadata_json={"credential_id": str(credential.id), "status": credential.status},
+    )
     return {
         "id": str(credential.id),
         "integration_id": str(credential.integration_id),
@@ -387,6 +465,15 @@ async def test_integration(
             health.last_error = str(exc)
         integration.status = IntegrationStatus.DEGRADED.value
         await db.flush()
+        await _audit_event(
+            db,
+            org_id=org_id,
+            action=AUDIT_INTEGRATION_AUTH_FAILED,
+            resource_type="monitoring_integration",
+            resource_id=integration.id,
+            actor_id=current_user.id,
+            metadata_json={"error": str(exc)[:1000], "error_code": type(exc).__name__},
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Connection test failed: {exc}",
@@ -412,6 +499,15 @@ async def test_integration(
     else:
         integration.status = IntegrationStatus.DEGRADED.value
     await db.flush()
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_INTEGRATION_CONNECTED if ok else AUDIT_INTEGRATION_AUTH_FAILED,
+        resource_type="monitoring_integration",
+        resource_id=integration.id,
+        actor_id=current_user.id,
+        metadata_json={"ok": ok},
+    )
     return {"integration_id": str(integration.id), "ok": ok}
 
 
@@ -488,6 +584,19 @@ async def create_rule(
     db.add(rule)
     await db.flush()
     await db.refresh(rule)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_MONITORING_CREATED,
+        resource_type="monitoring_rule",
+        resource_id=rule.id,
+        actor_id=current_user.id,
+        metadata_json={
+            "obligation_id": str(rule.obligation_id),
+            "integration_id": str(rule.integration_id),
+            "status": rule.status,
+        },
+    )
     return _serialize_rule(rule)
 
 
@@ -555,6 +664,15 @@ async def activate_rule(
     rule.next_run_at = next_run
     await db.flush()
     await db.refresh(rule)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_MONITORING_ACTIVATED,
+        resource_type="monitoring_rule",
+        resource_id=rule.id,
+        actor_id=current_user.id,
+        metadata_json={"obligation_id": str(rule.obligation_id)},
+    )
     return _serialize_rule(rule)
 
 
@@ -577,6 +695,15 @@ async def pause_rule(
     rule.next_run_at = None
     await db.flush()
     await db.refresh(rule)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_MONITORING_PAUSED,
+        resource_type="monitoring_rule",
+        resource_id=rule.id,
+        actor_id=current_user.id,
+        metadata_json={"pause_reason": rule.pause_reason},
+    )
     return _serialize_rule(rule)
 
 
@@ -593,6 +720,15 @@ async def disable_rule(
     rule.next_run_at = None
     await db.flush()
     await db.refresh(rule)
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_MONITORING_DISABLED,
+        resource_type="monitoring_rule",
+        resource_id=rule.id,
+        actor_id=current_user.id,
+        metadata_json={"obligation_id": str(rule.obligation_id)},
+    )
     return _serialize_rule(rule)
 
 
@@ -665,6 +801,44 @@ async def list_observations(
     ]
 
 
+@router.get("/rules/{rule_id}/evidence", dependencies=[perm_view])
+async def list_evidence(
+    rule_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Evidence records backing the rule's evaluations (spec 3.15.37-38).
+
+    Returns integrity metadata + the value reference only — raw observation
+    payloads remain behind the stricter ``monitoring.view_data`` permission.
+    """
+    rule = await _get_rule(db, rule_id, org_id)
+    rows = await db.execute(
+        select(MonitoringEvidence)
+        .where(MonitoringEvidence.monitoring_id == rule.id)
+        .order_by(MonitoringEvidence.received_at.desc())
+        .limit(200)
+    )
+    return [
+        {
+            "id": str(e.id),
+            "monitoring_id": str(e.monitoring_id),
+            "integration_id": str(e.integration_id),
+            "monitoring_run_id": str(e.monitoring_run_id) if e.monitoring_run_id else None,
+            "obligation_id": str(e.obligation_id) if e.obligation_id else None,
+            "evidence_type": e.evidence_type,
+            "source": e.source,
+            "source_identifier": e.source_identifier,
+            "observed_at": e.observed_at,
+            "received_at": e.received_at,
+            "payload_hash": e.payload_hash,
+            "value": e.value,
+            "attached_to_obligation": e.attached_to_obligation,
+        }
+        for e in rows.scalars().all()
+    ]
+
+
 @router.get("/exceptions", dependencies=[perm_view])
 async def list_exceptions(
     open_only: bool = True,
@@ -707,6 +881,15 @@ async def resolve_exception(
     exception.resolved_at = datetime.now(timezone.utc)
     exception.resolution_comment = comment or None
     await db.flush()
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_EXCEPTION_RESOLVED,
+        resource_type="monitoring_exception",
+        resource_id=exception.id,
+        actor_id=current_user.id,
+        metadata_json={"monitoring_id": str(exception.monitoring_id), "comment": comment or None},
+    )
     return {
         "id": str(exception.id),
         "status": exception.status,
@@ -802,6 +985,15 @@ async def monitoring_webhook(
     try:
         payload = json.loads(raw_body)
     except ValueError:
+        await _audit_event(
+            db,
+            org_id=integration_row.organization_id,
+            action=AUDIT_OBSERVATION_REJECTED,
+            resource_type="monitoring_integration",
+            resource_id=integration_row.id,
+            metadata_json={"reason": "malformed_payload"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Malformed webhook payload",
@@ -814,6 +1006,15 @@ async def monitoring_webhook(
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(signature, expected):
+        await _audit_event(
+            db,
+            org_id=integration_row.organization_id,
+            action=AUDIT_OBSERVATION_REJECTED,
+            resource_type="monitoring_integration",
+            resource_id=integration_row.id,
+            metadata_json={"reason": "invalid_signature", "has_signature": bool(signature)},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid webhook signature",
@@ -840,6 +1041,15 @@ async def monitoring_webhook(
             max_skew_seconds=settings.monitoring_webhook_max_skew_seconds,
         )
     except WebhookVerificationError as exc:
+        await _audit_event(
+            db,
+            org_id=integration_row.organization_id,
+            action=AUDIT_OBSERVATION_REJECTED,
+            resource_type="monitoring_integration",
+            resource_id=integration_row.id,
+            metadata_json={"reason": "stale_delivery", "detail": str(exc)[:1000]},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
