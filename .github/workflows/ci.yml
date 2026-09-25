@@ -47,7 +47,10 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # Exact-pinned snapshot (requirements-lock.txt) so CI and local runs
+          # test the identical dependency set. Regenerate after changing
+          # requirements*.txt (see the lock file header).
+          pip install -r requirements-lock.txt
 
       - name: Wait for PostgreSQL
         run: |
@@ -158,12 +161,16 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
+          cache-dependency-path: backend/requirements-lock.txt
 
       - name: Install dependencies
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          # Exact-pinned snapshot (requirements-lock.txt) so CI and local runs
+          # test the identical dependency set. Regenerate after changing
+          # requirements*.txt (see the lock file header).
+          pip install -r requirements-lock.txt
 
       - name: Apply migrations
         working-directory: backend
@@ -273,6 +280,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
+          cache-dependency-path: backend/requirements-lock.txt
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -292,7 +300,10 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # Exact-pinned snapshot (requirements-lock.txt) so CI and local runs
+          # test the identical dependency set. Regenerate after changing
+          # requirements*.txt (see the lock file header).
+          pip install -r requirements-lock.txt
 
       - name: Create database schema
         working-directory: backend

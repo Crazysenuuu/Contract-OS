@@ -28,7 +28,7 @@ AI-powered agreement lifecycle platform: generate, negotiate, approve, sign, and
 ```bash
 cd backend
 python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-lock.txt  # exact-pinned snapshot (incl. test deps) — same set CI tests
 cp .env.example .env               # then edit DATABASE_URL / JWT_SECRET_KEY
 alembic upgrade head               # create schema
 python seed_data.py                # seed jurisdictions, clauses, agreement catalog

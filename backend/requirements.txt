@@ -1,14 +1,29 @@
-fastapi>=0.104.0
+fastapi>=0.104.0,<1
+# FastAPI deliberately stays pre-1.0, where semver permits breaking changes
+# in any minor. <1 costs nothing today (no 1.0 announced) but forces a
+# conscious bump if one ever ships.
 uvicorn[standard]>=0.24.0
-pydantic>=2.5.0
+# Pydantic V3 is officially announced (pydantic#10033): it removes the V1
+# migration helpers (.dict(), parse_obj, @validator, nested `class Config`).
+# Our exposure is 3 .dict() calls + 3 nested Configs (trivial to migrate),
+# but day-one FastAPI compatibility with V3 is unknown — cap until tested.
+pydantic>=2.5.0,<3
 pydantic-settings>=2.1.0
-pydantic[email]>=2.5.0
+pydantic[email]>=2.5.0,<3
 # JSON Schema validation for the agreement authoring studio (module-level
 # import in app/services/agreement_schema_validator.py).
 jsonschema>=4.21.0
-sqlalchemy[asyncio]>=2.0.23
+# Tested against 2.0.x and 2.1.x (2.1 autoflushes pending INSERTs before
+# Core UPDATEs — see obligation_lifecycle.assign_obligation). Upper bound
+# keeps CI from silently adopting an untested major (2.2+).
+sqlalchemy[asyncio]>=2.0.23,<2.2
 asyncpg>=0.29.0
-alembic>=1.13.0
+# Safe unpinned: zero direct asyncpg API usage in app/ (pure SQLAlchemy
+# driver; SQLAlchemy itself is bounded below). Any driver-behavior change
+# surfaces through SQLAlchemy or the test suite.
+# Tested through 1.20.x. 1.19 removed ScriptDirectory.get_branches (the
+# migration-tests workflow uses walk_revisions); 1.21+ is untested.
+alembic>=1.13.0,<1.21
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
@@ -17,7 +32,9 @@ greenlet>=3.0.0
 python-dotenv>=1.0.0
 jinja2>=3.1.0
 pyotp>=2.9.0
-celery>=5.3.0
+# Celery 6.0 (long-teased) will drop Python versions and deprecated task
+# APIs; cap so production Docker builds don't adopt it untested.
+celery>=5.3.0,<6
 docusign_esign>=6.0.0
 # PDF generation (spec 1.23 / 2.07): agreement rendering, PDF export and
 # watermark stamping. WeasyPrint needs the Pango/cairo system libraries

@@ -29,8 +29,7 @@ cd "$ROOT_DIR/backend"
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
-pip install pytest pytest-cov pytest-asyncio
+pip install -r requirements-lock.txt  # exact-pinned snapshot — same set CI tests
 
 # Setup frontend
 echo "🎨 Setting up frontend..."

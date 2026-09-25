@@ -46,7 +46,9 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          pip install -r requirements.txt
+          # Exact-pinned snapshot so CI and local runs test the identical
+          # dependency set (see requirements-lock.txt header).
+          pip install -r requirements-lock.txt
 
       - name: Check migration syntax
         run: |
@@ -157,7 +159,9 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          pip install -r requirements.txt
+          # Exact-pinned snapshot so CI and local runs test the identical
+          # dependency set (see requirements-lock.txt header).
+          pip install -r requirements-lock.txt
 
       - name: Wait for PostgreSQL
         run: |
@@ -248,7 +252,9 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          pip install -r requirements.txt
+          # Exact-pinned snapshot so CI and local runs test the identical
+          # dependency set (see requirements-lock.txt header).
+          pip install -r requirements-lock.txt
 
       - name: Wait for PostgreSQL
         run: |
@@ -357,7 +363,9 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          pip install -r requirements.txt
+          # Exact-pinned snapshot so CI and local runs test the identical
+          # dependency set (see requirements-lock.txt header).
+          pip install -r requirements-lock.txt
 
       - name: Wait for PostgreSQL
         run: |
@@ -455,7 +463,9 @@ jobs:
       - name: Install dependencies
         run: |
           cd backend
-          pip install -r requirements.txt
+          # Exact-pinned snapshot so CI and local runs test the identical
+          # dependency set (see requirements-lock.txt header).
+          pip install -r requirements-lock.txt
 
       - name: Wait for PostgreSQL
         run: |

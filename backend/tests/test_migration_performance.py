@@ -163,7 +163,12 @@ class PerformanceBaseline:
                 return (
                     f"Performance regression detected: {duration:.2f}s "
                     f"vs baseline {avg_duration:.2f}s "
-                    f"({regression * 100:.1f}% slower)"
+                    f"({regression * 100:.1f}% slower). If the slowdown is "
+                    f"expected (e.g. a new migration legitimately added DDL), "
+                    f"delete the stale local baseline to re-seed it: "
+                    f"rm backend/migration_performance_baseline.json "
+                    f"(gitignored; CI runners have no baseline and only "
+                    f"enforce the hard thresholds)."
                 )
 
         return None
