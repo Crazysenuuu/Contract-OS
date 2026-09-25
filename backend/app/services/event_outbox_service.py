@@ -140,6 +140,24 @@ async def dispatch_event(
     """
     payload = event.payload or {}
 
+    # 0. Internal domain handlers — consume domain events inside the outbox
+    #    delivery pass (best-effort, never fails the event itself).
+    if event.event_type == "agreement.version_finalized" and event.tenant_id is not None:
+        try:
+            from app.monitoring.service import pause_stale_monitorings_for_agreement
+
+            agreement_id = payload.get("agreement_id")
+            if agreement_id:
+                await pause_stale_monitorings_for_agreement(
+                    db, agreement_id=uuid.UUID(str(agreement_id))
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning(
+                "agreement.version_finalized stale-monitoring handling failed for event %s: %s",
+                event.id,
+                exc,
+            )
+
     # 1. Create a notification record when the payload carries recipient
     #    info (email or user id). Notification contents are always built
     #    from authorized payload data — never from arbitrary client input.

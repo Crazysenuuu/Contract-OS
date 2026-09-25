@@ -65,6 +65,28 @@ def redact_payload(payload: dict) -> dict:
     }
 
 
+def redact_fields(payload: dict, fields: list[str] | None) -> dict:
+    """Redact declaration-level sensitive fields before stowing (3.15.45).
+
+    Values of the declared fields are replaced with a zero-information marker
+    so sensitive operational data is not retained, while the original payload
+    hash (computed pre-redaction) keeps the record tamper-evident.
+    """
+    if not fields or not isinstance(payload, dict):
+        return payload
+    return {
+        key: "[REDACTED]"
+        if key in fields and value is not None
+        else value
+        for key, value in payload.items()
+    }
+
+
+def redact_payload_fields(payload: dict, fields: list[str] | None) -> dict:
+    """Full storage redaction: credential-shaped + declared fields (3.15.44-45)."""
+    return redact_fields(redact_payload(payload), fields)
+
+
 def ensure_aware_utc(value) -> datetime:
     """Coerce a stored/queried datetime into a tz-aware UTC datetime."""
     if value is None:
@@ -83,11 +105,15 @@ async def persist_observations(
     integration_id: uuid.UUID,
     monitoring_id: uuid.UUID,
     observations: list[ExternalObservation],
+    redact_fields_: list[str] | None = None,
 ) -> list[uuid.UUID]:
     """Idempotently stow external observations (dedup on the 5-part key).
 
     Returns the ids of the newly inserted rows. Duplicates are ignored, so a
-    retried fetch never double counts (3.15.14).
+    retried fetch never double counts (3.15.14). ``redact_fields_`` names
+    declaration-level sensitive fields replaced before storage (3.15.45) —
+    the payload hash is computed over the original payload so the record
+    stays tamper-evident even after redaction.
     """
     from app.monitoring.models import ExternalObservationRecord
 
@@ -116,7 +142,7 @@ async def persist_observations(
             external_id=obs.external_id[:500],
             resource_type=(obs.resource_type or "unknown")[:255],
             observed_at=observed_at,
-            payload=redact_payload(payload),
+            payload=redact_payload_fields(payload, redact_fields_),
             source_reference=dict(obs.source_reference) if isinstance(obs.source_reference, dict) else {},
             payload_hash=digest,
             status=ObservationStatus.VALIDATED.value,

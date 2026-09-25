@@ -1173,3 +1173,389 @@ async def test_runtime_credential_failure_audits_auth_failed(
 
     actions = await _audit_actions(db_session, test_org.id)
     assert AUDIT_INTEGRATION_AUTH_FAILED in actions
+
+# --------------------------------------------------------------------------
+# Outbox-driven version staleness (3.15.57-58)
+# --------------------------------------------------------------------------
+
+async def test_outbox_version_finalized_pauses_stale_rule(
+    db_session, test_org, test_agreement, agreement_version, active_monitoring
+):
+    from app.models.agreement import AgreementVersion
+    from app.models.event_outbox import OutboxEvent
+    from app.monitoring.enums import MonitoringStatus, PauseReason
+    from app.monitoring.models import ObligationMonitoring
+    from app.services.event_outbox_service import dispatch_event
+
+    await db_session.flush()
+    v2 = AgreementVersion(
+        agreement_id=test_agreement.id,
+        version_number=2,
+        content="## Revised terms",
+        content_hash="test-hash-v2",
+        status="ACTIVE",
+        created_by=active_monitoring.created_by,
+        data={},
+    )
+    db_session.add(v2)
+    await db_session.commit()
+
+    event = OutboxEvent(
+        tenant_id=test_org.id,
+        event_type="agreement.version_finalized",
+        aggregate_type="agreement",
+        aggregate_id=test_agreement.id,
+        payload={
+            "agreement_id": str(test_agreement.id),
+            "version_id": str(v2.id),
+            "version_number": 2,
+        },
+    )
+    db_session.add(event)
+    await db_session.commit()
+
+    ok = await dispatch_event(db_session, event)
+    await db_session.commit()
+    assert ok is True
+
+    rule = await db_session.get(ObligationMonitoring, active_monitoring.id)
+    assert rule.status == MonitoringStatus.PAUSED.value
+    assert rule.pause_reason == PauseReason.STALE_VERSION.value
+    assert await _count_events(db_session, "monitoring.stale_version") == 1
+
+
+async def test_outbox_version_finalized_scoped_to_agreement(
+    db_session, test_org, active_monitoring
+):
+    from app.monitoring.enums import MonitoringStatus
+    from app.monitoring.models import ObligationMonitoring
+    from app.monitoring.service import pause_stale_monitorings_for_agreement
+
+    paused = await pause_stale_monitorings_for_agreement(
+        db_session, agreement_id=uuid.uuid4()
+    )
+    await db_session.flush()
+    assert paused == 0
+    rule = await db_session.get(ObligationMonitoring, active_monitoring.id)
+    assert rule.status == MonitoringStatus.ACTIVE.value
+
+
+# --------------------------------------------------------------------------
+# Webhook replay dedup on provider event id (3.15.30)
+# --------------------------------------------------------------------------
+
+async def _make_webhook_rule(
+    db_session, test_org, test_user, monitoring_obligation, agreement_version
+):
+    from app.monitoring.models import (
+        IntegrationConnection,
+        IntegrationCredential,
+        ObligationMonitoring,
+    )
+
+    integration = IntegrationConnection(
+        organization_id=test_org.id,
+        name="Provider webhook",
+        integration_type="WEBHOOK",
+        provider_key="webhook",
+        status="ACTIVE",
+        configuration={"webhook_secret": "env://MONITORING_WEBHOOK_SECRET"},
+        created_by=test_user.id,
+        created_by_name=test_user.name,
+    )
+    db_session.add(integration)
+    await db_session.flush()
+    db_session.add(
+        IntegrationCredential(
+            integration_id=integration.id,
+            secret_reference="env://MONITORING_TEST_TOKEN",
+            status="ACTIVE",
+        )
+    )
+    db_session.add(
+        ObligationMonitoring(
+            organization_id=test_org.id,
+            obligation_id=monitoring_obligation.id,
+            source_version_id=agreement_version.id,
+            integration_id=integration.id,
+            status="ACTIVE",
+            query_definition={"resource": "shipments", "external_id_path": "id"},
+            evaluation_definition={"kind": "existence", "expected": True},
+            schedule_definition={"recurrence": "interval", "minutes": 60},
+            automation={},
+            created_by=test_user.id,
+        )
+    )
+    await db_session.commit()
+    return integration
+
+
+async def test_webhook_resubmitted_event_id_with_changed_body_is_duplicate(
+    client, db_session, test_org, test_user, monitoring_obligation, agreement_version
+):
+    import hashlib
+    import hmac
+
+    integration = await _make_webhook_rule(
+        db_session, test_org, test_user, monitoring_obligation, agreement_version
+    )
+    secret = "test-webhook-secret-456"
+
+    def _send(payload: dict):
+        body = json.dumps(payload).encode("utf-8")
+        sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return client.post(
+            f"/api/v1/integrations/{integration.id}/webhook",
+            content=body,
+            headers={"x-monitoring-signature": sig},
+        )
+
+    first = await _send(
+        {
+            "event_id": "evt-prop-99",
+            "id": "ship-99",
+            "status": "delivered",
+            "observed_at": "2026-09-25T11:58:00Z",
+        }
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["duplicate"] is False
+    assert first.json()["observations"] == 1
+
+    # Same provider event id, different body → still a replay (3.15.30).
+    second = await _send(
+        {
+            "event_id": "evt-prop-99",
+            "id": "ship-99",
+            "status": "rescheduled",
+            "observed_at": "2026-09-25T12:01:00Z",
+        }
+    )
+    assert second.status_code == 200, second.text
+    ack = second.json()
+    assert ack["duplicate"] is True
+    assert ack["observations"] == 0
+
+
+# --------------------------------------------------------------------------
+# Workspace automation policy (3.15.36)
+# --------------------------------------------------------------------------
+
+async def test_workspace_policy_gates_automation_on_create(
+    client,
+    auth_headers,
+    db_session,
+    test_org,
+    monitoring_integration,
+    monitoring_obligation,
+    agreement_version,
+):
+    restrict = await client.put(
+        "/api/v1/monitoring/workspace-policy",
+        json={"allowed_automation_actions": ["NO_ACTION"]},
+        headers=auth_headers,
+    )
+    assert restrict.status_code == 200, restrict.text
+    assert restrict.json()["allowed_automation_actions"] == ["NO_ACTION"]
+
+    base = {
+        "obligation_id": str(monitoring_obligation.id),
+        "integration_id": str(monitoring_integration.id),
+        "source_version_id": str(agreement_version.id),
+        "query_definition": {"resource": "claims"},
+        "evaluation_definition": {"kind": "existence", "expected": True},
+        "schedule_definition": {"recurrence": "interval", "minutes": 60},
+        "automation": {"on_pass": "COMPLETE_TASK"},
+    }
+    denied = await client.post("/api/v1/monitoring/rules", json=base, headers=auth_headers)
+    assert denied.status_code == 400, denied.text
+    assert "policy" in denied.json()["detail"].lower()
+
+    base["automation"] = {"on_pass": "NO_ACTION"}
+    allowed = await client.post("/api/v1/monitoring/rules", json=base, headers=auth_headers)
+    assert allowed.status_code == 201, allowed.text
+
+    view = await client.get("/api/v1/monitoring/workspace-policy", headers=auth_headers)
+    assert view.status_code == 200, view.text
+    assert view.json()["allowed_automation_actions"] == ["NO_ACTION"]
+
+
+async def test_workspace_policy_rejects_unknown_action(
+    client, auth_headers, test_org
+):
+    response = await client.put(
+        "/api/v1/monitoring/workspace-policy",
+        json={"allowed_automation_actions": ["HALT_AND_CATCH_FIRE"]},
+        headers=auth_headers,
+    )
+    assert response.status_code == 400, response.text
+
+
+# --------------------------------------------------------------------------
+# Retention + field redaction (3.15.45)
+# --------------------------------------------------------------------------
+
+async def test_rule_redact_fields_redacts_payload_keeps_hash(
+    db_session, active_monitoring, stub_http
+):
+    from app.monitoring.models import ExternalObservationRecord, ObligationMonitoring
+    from app.monitoring.observations import hash_payload
+    from app.monitoring.service import run_obligation_monitoring
+
+    rule = await db_session.get(ObligationMonitoring, active_monitoring.id)
+    rule.redact_fields = ["amount"]
+    await db_session.flush()
+
+    original = {"id": "c1", "amount": 150, "observed_at": "2026-09-25T12:00:00Z"}
+    stub_http(_ok_handler([original]))
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    await run_obligation_monitoring(db_session, monitoring=rule, run_at=now, now=now)
+    await db_session.flush()
+
+    obs = (
+        await db_session.execute(
+            select(ExternalObservationRecord).where(
+                ExternalObservationRecord.monitoring_id == rule.id
+            )
+        )
+    ).scalar_one()
+    assert obs.payload["amount"] == "[REDACTED]"
+    # Tamper-evident: the hash is over the pre-redaction payload.
+    assert obs.payload_hash == hash_payload(original)
+
+
+async def test_retention_purge_prunes_expired_and_keeps_fresh(
+    db_session, active_monitoring, monitoring_integration
+):
+    from app.monitoring.models import (
+        ExternalObservationRecord,
+        IntegrationConnection,
+        MonitoringWebhookEvent,
+        ObligationMonitoring,
+    )
+    from app.monitoring.service import purge_expired_observations
+
+    rule = await db_session.get(ObligationMonitoring, active_monitoring.id)
+    rule.retention_days = 30
+    integration = await db_session.get(
+        IntegrationConnection,
+        monitoring_integration.id,
+    )
+    integration.configuration = {**(integration.configuration or {}), "retention_days": 30}
+    await db_session.flush()
+
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+
+    def _obs(external_id, observed_at):
+        return ExternalObservationRecord(
+            organization_id=active_monitoring.organization_id,
+            integration_id=active_monitoring.integration_id,
+            monitoring_id=active_monitoring.id,
+            external_id=external_id,
+            resource_type="test",
+            observed_at=observed_at,
+            payload={},
+            payload_hash=f"h-{external_id}",
+            status="VALIDATED",
+        )
+
+    db_session.add(_obs("old", datetime(2020, 1, 1, tzinfo=timezone.utc)))
+    db_session.add(_obs("fresh", now))
+    db_session.add(
+        MonitoringWebhookEvent(
+            organization_id=monitoring_integration.organization_id,
+            integration_id=monitoring_integration.id,
+            provider_event_id="old-evt",
+            received_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            payload_hash="old-hash",
+            payload={},
+            status="ACCEPTED",
+        )
+    )
+    db_session.add(
+        MonitoringWebhookEvent(
+            organization_id=monitoring_integration.organization_id,
+            integration_id=monitoring_integration.id,
+            provider_event_id="fresh-evt",
+            received_at=now,
+            payload_hash="fresh-hash",
+            payload={},
+            status="ACCEPTED",
+        )
+    )
+    await db_session.commit()
+
+    report = await purge_expired_observations(db_session, now=now)
+    await db_session.commit()
+    assert report["observations_purged"] == 1
+    assert report["webhook_events_purged"] == 1
+
+    remaining = (
+        await db_session.execute(
+            select(ExternalObservationRecord).where(
+                ExternalObservationRecord.monitoring_id == active_monitoring.id
+            )
+        )
+    ).scalars().all()
+    assert [r.external_id for r in remaining] == ["fresh"]
+
+    events = (
+        await db_session.execute(
+            select(MonitoringWebhookEvent).where(
+                MonitoringWebhookEvent.integration_id == monitoring_integration.id
+            )
+        )
+    ).scalars().all()
+    assert [e.provider_event_id for e in events] == ["fresh-evt"]
+
+
+# --------------------------------------------------------------------------
+# DB-level tenant constraints (3.15.56)
+# --------------------------------------------------------------------------
+
+async def test_monitoring_tables_declare_org_scoped_constraints():
+    from sqlalchemy import ForeignKeyConstraint, UniqueConstraint
+
+    from app.monitoring.models import (
+        ExternalObservationRecord,
+        IntegrationConnection,
+        MonitoringEvidence,
+        MonitoringEvaluation,
+        MonitoringException,
+        MonitoringRun,
+        MonitoringWebhookEvent,
+        ObligationMonitoring,
+    )
+
+    def _names(table) -> set[str]:
+        return {c.name for c in table.constraints}
+
+    assert "uq_integration_connections_org_id" in _names(IntegrationConnection.__table__)
+    assert "uq_obligation_monitoring_org_id" in _names(ObligationMonitoring.__table__)
+    assert "fk_obligation_monitoring_integration_org" in _names(ObligationMonitoring.__table__)
+
+    child_fks = {
+        ExternalObservationRecord: {"fk_external_observations_integration_org", "fk_external_observations_monitoring_org"},
+        MonitoringEvaluation: {"fk_monitoring_evaluations_monitoring_org"},
+        MonitoringException: {"fk_monitoring_exceptions_monitoring_org"},
+        MonitoringRun: {"fk_monitoring_runs_monitoring_org"},
+        MonitoringEvidence: {"fk_monitoring_evidence_monitoring_org", "fk_monitoring_evidence_integration_org"},
+        MonitoringWebhookEvent: {"fk_monitoring_webhook_events_integration_org"},
+    }
+    for model, expected in child_fks.items():
+        found = {c.name for c in model.__table__.constraints if isinstance(c, ForeignKeyConstraint)}
+        assert expected <= found, (model.__tablename__, expected - found)
+
+    # Every declared composite FK pairs (organization_id, child_fk) →
+    # (organization_id, id) on the referenced table.
+    for model, names in child_fks.items():
+        for name in names:
+            constraint = next(
+                c for c in model.__table__.constraints
+                if isinstance(c, ForeignKeyConstraint) and c.name == name
+            )
+            col_names = [c.name for c in constraint.columns]
+            assert col_names[0] == "organization_id"
+            assert len(col_names) == 2
+            ref_names = [e.column.name for e in constraint.elements]
+            assert ref_names == ["organization_id", "id"], (name, ref_names)

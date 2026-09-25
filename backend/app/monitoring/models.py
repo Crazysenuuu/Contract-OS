@@ -17,12 +17,13 @@ secret manager / env binding) and are never returned by the API (3.15.6).
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -128,6 +129,11 @@ class IntegrationConnection(
             "ix_integration_connections_org_status",
             "organization_id",
             "status",
+        ),
+        UniqueConstraint(
+            "organization_id",
+            "id",
+            name="uq_integration_connections_org_id",
         ),
     )
 
@@ -301,6 +307,19 @@ class ObligationMonitoring(
         nullable=True,
     )
 
+    # External data retention (spec 3.15.45): days raw observations/events
+    # are kept for this rule, and which payload fields are redacted before
+    # storage. None = keep forever / no field redaction (workspace-managed).
+    retention_days: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    redact_fields: Mapped[list | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
     next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -332,6 +351,17 @@ class ObligationMonitoring(
             "ix_obligation_monitoring_obligation",
             "obligation_id",
             "status",
+        ),
+        UniqueConstraint(
+            "organization_id",
+            "id",
+            name="uq_obligation_monitoring_org_id",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "integration_id"],
+            ["integration_connections.organization_id", "integration_connections.id"],
+            name="fk_obligation_monitoring_integration_org",
+            ondelete="RESTRICT",
         ),
     )
 
@@ -420,6 +450,18 @@ class ExternalObservationRecord(
             "payload_hash",
             name="uq_external_observations_dedup",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "integration_id"],
+            ["integration_connections.organization_id", "integration_connections.id"],
+            name="fk_external_observations_integration_org",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "monitoring_id"],
+            ["obligation_monitoring.organization_id", "obligation_monitoring.id"],
+            name="fk_external_observations_monitoring_org",
+            ondelete="RESTRICT",
+        ),
     )
 
 
@@ -506,6 +548,12 @@ class MonitoringEvaluation(
             "monitoring_id",
             "evaluated_at",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "monitoring_id"],
+            ["obligation_monitoring.organization_id", "obligation_monitoring.id"],
+            name="fk_monitoring_evaluations_monitoring_org",
+            ondelete="CASCADE",
+        ),
     )
 
 
@@ -580,6 +628,12 @@ class MonitoringException(
             "status",
             "created_at",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "monitoring_id"],
+            ["obligation_monitoring.organization_id", "obligation_monitoring.id"],
+            name="fk_monitoring_exceptions_monitoring_org",
+            ondelete="CASCADE",
+        ),
     )
 
 
@@ -637,6 +691,15 @@ class MonitoringRun(
     error: Mapped[dict | None] = mapped_column(
         JSONB,
         nullable=True,
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "monitoring_id"],
+            ["obligation_monitoring.organization_id", "obligation_monitoring.id"],
+            name="fk_monitoring_runs_monitoring_org",
+            ondelete="CASCADE",
+        ),
     )
 
 
@@ -749,6 +812,18 @@ class MonitoringEvidence(
             "monitoring_id",
             "received_at",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "monitoring_id"],
+            ["obligation_monitoring.organization_id", "obligation_monitoring.id"],
+            name="fk_monitoring_evidence_monitoring_org",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "integration_id"],
+            ["integration_connections.organization_id", "integration_connections.id"],
+            name="fk_monitoring_evidence_integration_org",
+            ondelete="RESTRICT",
+        ),
     )
 
 
@@ -818,6 +893,43 @@ class MonitoringWebhookEvent(
             "payload_hash",
             name="uq_monitoring_webhook_dedup",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "integration_id"],
+            ["integration_connections.organization_id", "integration_connections.id"],
+            name="fk_monitoring_webhook_events_integration_org",
+            ondelete="CASCADE",
+        ),
+    )
+
+
+class MonitoringWorkspacePolicy(
+    Base,
+):
+    """Workspace-selected automation policy (spec 3.15.36).
+
+    The workspace chooses which ``automation.on_pass`` actions may be used on
+    its monitoring rules (NO_ACTION / MARK_TASK_READY / ATTACH_EVIDENCE /
+    COMPLETE_TASK). With no row configured, every action is permitted — the
+    conservative default is configuration, not a hardcoded policy.
+    """
+
+    __tablename__ = "monitoring_workspace_policies"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    allowed_actions: Mapped[list | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
     )
 
 
@@ -832,4 +944,5 @@ __all__ = [
     "MonitoringRun",
     "MonitoringEvidence",
     "MonitoringWebhookEvent",
+    "MonitoringWorkspacePolicy",
 ]

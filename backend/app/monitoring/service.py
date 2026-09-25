@@ -377,6 +377,7 @@ async def _execute(db: AsyncSession, monitoring: ObligationMonitoring, now: date
         integration_id=integration.id,
         monitoring_id=monitoring.id,
         observations=observations,
+        redact_fields_=monitoring.redact_fields,
     )
 
     if was_degraded:
@@ -749,6 +750,53 @@ def _automation_action(monitoring: ObligationMonitoring) -> str:
     automation = (monitoring.automation or {}).get("on_pass")
     action = (automation or "NO_ACTION").upper()
     return action if action in _AUTOMATION_ACTIONS else "NO_ACTION"
+
+
+async def get_workspace_automation_policy(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+) -> set[str]:
+    """Allowed ``automation.on_pass`` actions for a workspace (3.15.36).
+
+    The workspace chooses the behavior; with no policy configured every
+    action is permitted (the conservative default remains configurable).
+    """
+    from app.monitoring.models import MonitoringWorkspacePolicy
+
+    row = await db.get(MonitoringWorkspacePolicy, organization_id)
+    if row is not None and row.allowed_actions:
+        return {str(action).upper() for action in row.allowed_actions}
+    return set(_AUTOMATION_ACTIONS)
+
+
+async def restrict_workspace_automation_policy(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    allowed_actions: list[str],
+) -> list[str]:
+    """Persist the workspace's allowed automation actions (3.15.36)."""
+    from app.monitoring.models import MonitoringWorkspacePolicy
+
+    values = {str(action).upper() for action in allowed_actions}
+    unknown = values - set(_AUTOMATION_ACTIONS)
+    if unknown:
+        raise ValueError(
+            f"Unknown automation actions: {', '.join(sorted(unknown))}"
+        )
+    row = await db.get(MonitoringWorkspacePolicy, organization_id)
+    if row is None:
+        db.add(
+            MonitoringWorkspacePolicy(
+                organization_id=organization_id,
+                allowed_actions=sorted(values),
+            )
+        )
+    else:
+        row.allowed_actions = sorted(values)
+    await db.flush()
+    return sorted(values)
 
 
 async def _persist_evidence_records(
@@ -1276,6 +1324,7 @@ async def ingest_webhook_observations(
             integration_id=integration.id,
             monitoring_id=monitoring.id,
             observations=observations,
+            redact_fields_=monitoring.redact_fields,
         )
         if created:
             # Evidence records with source/source-id/observed_at/received_at/
@@ -1327,27 +1376,105 @@ async def ingest_webhook_observations(
     return total
 
 
+async def purge_expired_observations(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """Apply rule-level external-data retention (spec 3.15.45).
+
+    Raw observations older than a rule's ``retention_days`` are pruned; raw
+    webhook events on an integration are pruned by the integration's
+    ``configuration.retention_days`` when set. The evidence chain is explicit
+    and denormalized (hash + anchors), so pruning raw bodies does not break
+    it — exactly the retention/redaction split the spec requires.
+    """
+    from app.monitoring.models import (
+        ExternalObservationRecord,
+        IntegrationConnection,
+        MonitoringWebhookEvent,
+        ObligationMonitoring,
+    )
+
+    cutoff = now or now_utc()
+    observations_purged = 0
+    webhook_events_purged = 0
+
+    rules = (
+        await db.execute(
+            select(ObligationMonitoring).where(
+                ObligationMonitoring.retention_days.is_not(None),
+                ObligationMonitoring.status == "ACTIVE",
+            )
+        )
+    ).scalars().all()
+    for rule in rules:
+        age = timedelta(days=int(rule.retention_days))
+        cutoff_at = cutoff - age
+        result = await db.execute(
+            ExternalObservationRecord.__table__.delete().where(
+                ExternalObservationRecord.organization_id == rule.organization_id,
+                ExternalObservationRecord.monitoring_id == rule.id,
+                ExternalObservationRecord.observed_at < cutoff_at,
+            )
+        )
+        observations_purged += result.rowcount or 0
+
+    integrations_with_retention = (
+        await db.execute(
+            select(IntegrationConnection).where(
+                IntegrationConnection.organization_id.is_not(None),
+            )
+        )
+    ).scalars().all()
+    for integration in integrations_with_retention:
+        retention = (integration.configuration or {}).get("retention_days")
+        if not retention or int(retention) <= 0:
+            continue
+        cutoff_at = cutoff - timedelta(days=int(retention))
+        result = await db.execute(
+            MonitoringWebhookEvent.__table__.delete().where(
+                MonitoringWebhookEvent.organization_id == integration.organization_id,
+                MonitoringWebhookEvent.integration_id == integration.id,
+                MonitoringWebhookEvent.status == "ACCEPTED",
+                MonitoringWebhookEvent.received_at < cutoff_at,
+            )
+        )
+        webhook_events_purged += result.rowcount or 0
+
+    await db.flush()
+    return {
+        "observations_purged": observations_purged,
+        "webhook_events_purged": webhook_events_purged,
+    }
+
+
 async def detect_stale_monitorings(
     db: AsyncSession,
     *,
     now: datetime | None = None,
+    agreement_id: uuid.UUID | None = None,
 ) -> int:
     """Pause ACTIVE monitorings whose source agreement was remapped.
 
     A rule that still points at an old AgreementVersion is automatically
     PAUSED with ``pause_reason = STALE_VERSION`` and its owner notified; a
-    human re-activates after remapping (spec 3.15.58).
+    human re-activates after remapping (spec 3.15.58). Passing
+    ``agreement_id`` restricts detection to one agreement so the outbox
+    consumer can act immediately on a finalized version instead of waiting
+    for the next sweep.
     """
     from app.models.agreement import AgreementVersion
     from app.models.obligation import Obligation
 
-    rows = (
-        await db.execute(
-            select(ObligationMonitoring, Obligation)
-            .join(Obligation, Obligation.id == ObligationMonitoring.obligation_id)
-            .where(ObligationMonitoring.status == MonitoringStatus.ACTIVE.value)
-        )
-    ).all()
+    query = (
+        select(ObligationMonitoring, Obligation)
+        .join(Obligation, Obligation.id == ObligationMonitoring.obligation_id)
+        .where(ObligationMonitoring.status == MonitoringStatus.ACTIVE.value)
+    )
+    if agreement_id is not None:
+        query = query.where(Obligation.agreement_id == agreement_id)
+    rows = (await db.execute(query)).all()
 
     paused = 0
     for monitoring, obligation in rows:
@@ -1382,6 +1509,20 @@ async def detect_stale_monitorings(
     if paused:
         await db.flush()
     return paused
+
+
+async def pause_stale_monitorings_for_agreement(
+    db: AsyncSession,
+    *,
+    agreement_id: uuid.UUID,
+) -> int:
+    """Event-driven staleness (spec 3.15.58 outbox consumer).
+
+    Called when an ``agreement.version_finalized`` outbox event is
+    dispatched: pause ACTIVE monitorings bound to the superseded version and
+    notify their owners immediately, in the same delivery pass.
+    """
+    return await detect_stale_monitorings(db, agreement_id=agreement_id)
 
 
 async def detect_expiring_credentials(

@@ -191,6 +191,26 @@ async def promote_version(
     from app.services.approval_engine import cancel_approvals_for_agreement
 
     await cancel_approvals_for_agreement(db, agreement.id)
+
+    # A finalized version also invalidates monitorings bound to the
+    # superseded terms (spec 3.15.58): enqueue the outbox signal so the
+    # consumer pauses stale rules and notifies owners in the event flow
+    # rather than waiting for the next periodic sweep.
+    from app.services.event_service import EventService
+
+    await EventService.publish(
+        db,
+        event_type="agreement.version_finalized",
+        aggregate_type="agreement",
+        aggregate_id=agreement.id,
+        organization_id=agreement.organization_id,
+        payload={
+            "agreement_id": str(agreement.id),
+            "version_id": str(version.id),
+            "version_number": version.version_number,
+        },
+        dedup_key=str(version.id),
+    )
     return version
 
 

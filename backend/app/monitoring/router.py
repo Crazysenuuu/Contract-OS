@@ -63,6 +63,7 @@ from app.monitoring.schemas import (
     RuleUpdateRequest,
     RunRuleResponse,
     WebhookAck,
+    WorkspacePolicyUpdate,
 )
 from app.monitoring.service import (
     AUDIT_INTEGRATION_AUTH_FAILED,
@@ -695,6 +696,17 @@ async def create_rule(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid automation.on_pass action: {on_pass}",
             )
+        from app.monitoring.service import get_workspace_automation_policy
+
+        allowed = await get_workspace_automation_policy(db, organization_id=org_id)
+        if on_pass not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Workspace automation policy disallows on_pass action: "
+                    f"{on_pass} (allowed: {', '.join(sorted(allowed))})"
+                ),
+            )
 
     now = datetime.now(timezone.utc)
     next_run = None
@@ -765,6 +777,24 @@ async def update_rule(
     for field in ("query_definition", "evaluation_definition", "schedule_definition", "automation"):
         value = getattr(data, field)
         if value is not None:
+            if field == "automation" and value.get("on_pass"):
+                from app.monitoring.service import get_workspace_automation_policy
+
+                on_pass = str(value.get("on_pass")).upper()
+                if on_pass not in {a.value for a in AutomationAction}:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid automation.on_pass action: {on_pass}",
+                    )
+                allowed = await get_workspace_automation_policy(db, organization_id=org_id)
+                if on_pass not in allowed:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Workspace automation policy disallows on_pass action: "
+                            f"{on_pass} (allowed: {', '.join(sorted(allowed))})"
+                        ),
+                    )
             setattr(rule, field, value)
             changed = True
     if changed and rule.status == "ACTIVE":
@@ -1007,6 +1037,53 @@ async def list_evidence(
     ]
 
 
+@router.get("/workspace-policy", dependencies=[perm_view])
+async def get_automation_workspace_policy(
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.monitoring.service import get_workspace_automation_policy
+
+    return {
+        "allowed_automation_actions": sorted(
+            await get_workspace_automation_policy(db, organization_id=org_id)
+        )
+    }
+
+
+@router.put("/workspace-policy", dependencies=[perm_manage])
+async def set_automation_workspace_policy(
+    data: WorkspacePolicyUpdate,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.monitoring.service import restrict_workspace_automation_policy
+
+    try:
+        actions = await restrict_workspace_automation_policy(
+            db,
+            organization_id=org_id,
+            allowed_actions=data.allowed_automation_actions,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    await db.flush()
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action="monitoring.workspace_policy_updated",
+        resource_type="monitoring_workspace_policy",
+        resource_id=org_id,
+        actor_id=current_user.id,
+        metadata_json={"allowed_automation_actions": actions},
+    )
+    return {"allowed_automation_actions": actions}
+
+
 @router.get("/exceptions", dependencies=[perm_view])
 async def list_exceptions(
     open_only: bool = True,
@@ -1246,14 +1323,28 @@ async def monitoring_webhook(
 
     provider_event_id = str(payload.get("event_id") or payload.get("id") or "")
     payload_hash = hash_payload(payload)
+
+    # Replay protection (spec 3.15.30): reject a duplicate provider event ID
+    # before accepting anything — a provider may re-deliver the same event
+    # with a re-stamped payload, so hash equality alone is insufficient.
+    # Payload-hash equality remains a fallback for providers without an ID.
     from app.monitoring.models import MonitoringWebhookEvent
 
-    duplicate = await db.scalar(
-        select(MonitoringWebhookEvent.id).where(
-            MonitoringWebhookEvent.integration_id == integration_id,
-            MonitoringWebhookEvent.payload_hash == payload_hash,
+    duplicate = None
+    if provider_event_id:
+        duplicate = await db.scalar(
+            select(MonitoringWebhookEvent.id).where(
+                MonitoringWebhookEvent.integration_id == integration_id,
+                MonitoringWebhookEvent.provider_event_id == provider_event_id,
+            )
         )
-    )
+    if duplicate is None:
+        duplicate = await db.scalar(
+            select(MonitoringWebhookEvent.id).where(
+                MonitoringWebhookEvent.integration_id == integration_id,
+                MonitoringWebhookEvent.payload_hash == payload_hash,
+            )
+        )
     if duplicate is not None:
         return WebhookAck(received=True, duplicate=True)
 

@@ -138,3 +138,13 @@ class WebhookAck(BaseModel):
     received: bool = True
     duplicate: bool = False
     observations: int = 0
+
+
+class WorkspacePolicyUpdate(BaseModel):
+    """Workspace-selected automation actions (spec 3.15.36)."""
+
+    allowed_automation_actions: list[str] = Field(default_factory=list)
+
+
+class WorkspaceAutomationPolicyOut(BaseModel):
+    allowed_automation_actions: list[str]
