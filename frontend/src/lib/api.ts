@@ -3893,3 +3893,65 @@ export async function adminVerifyAuditBatch(
     token,
   });
 }
+
+// ─── Obligation monitoring (spec 3.15) ───────────────────────────────────
+
+export interface MonitoringIntegrationHealth {
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
+  consecutive_failures: number;
+  last_latency_ms?: number | null;
+  last_error_code?: string | null;
+  last_error?: string | null;
+}
+
+export interface MonitoringIntegrationRow {
+  id: string;
+  name: string;
+  integration_type: string;
+  provider_key: string;
+  status: string;
+  configuration: Record<string, unknown>;
+  created_at: string;
+  health?: MonitoringIntegrationHealth | null;
+}
+
+export interface MonitoringRuleRow {
+  id: string;
+  obligation_id: string;
+  integration_id: string;
+  source_version_id: string;
+  status: string;
+  pause_reason?: string | null;
+  query_definition: Record<string, unknown>;
+  evaluation_definition: Record<string, unknown>;
+  schedule_definition: Record<string, unknown>;
+  automation?: Record<string, unknown> | null;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  last_result?: string | null;
+  created_at: string;
+}
+
+export interface MonitoringDashboard {
+  rules_total: number;
+  rules_by_status: Record<string, number>;
+  monitoring_active: number;
+  exceptions_open: boolean;
+  last_evaluation_at?: string | null;
+  last_evaluation_result?: string | null;
+}
+
+export async function getMonitoringDashboard(token: string): Promise<MonitoringDashboard> {
+  return apiRequest<MonitoringDashboard>("/monitoring/dashboard", { token });
+}
+
+export async function listMonitoringRules(token: string): Promise<MonitoringRuleRow[]> {
+  return apiRequest<MonitoringRuleRow[]>("/monitoring/rules", { token });
+}
+
+export async function listMonitoringIntegrations(
+  token: string
+): Promise<MonitoringIntegrationRow[]> {
+  return apiRequest<MonitoringIntegrationRow[]>("/monitoring/integrations", { token });
+}

@@ -181,6 +181,14 @@ export default function DashboardLayout({
                 <span aria-hidden="true">✍️</span> Execution
                 </Link>
                 <Link
+                title="Obligation monitoring"
+                aria-label="Obligation monitoring"
+                href="/monitoring"
+                className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-gray-900"
+              >
+                <span aria-hidden="true">📊</span> Monitor
+                </Link>
+                <Link
                 title="Legal knowledge base"
                 aria-label="Legal knowledge base"
                 href="/legal-knowledge"

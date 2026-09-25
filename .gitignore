@@ -41,6 +41,7 @@ coverage/
 *.lcov
 coverage.xml
 htmlcov/
+.coverage
 
 # Logs
 *.log
