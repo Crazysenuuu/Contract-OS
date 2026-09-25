@@ -12,6 +12,7 @@ import logging
 
 from app.core.database import AsyncSessionLocal
 from app.monitoring.service import (
+    detect_expiring_credentials,
     detect_stale_monitorings,
     schedule_due_monitorings,
 )
@@ -22,11 +23,13 @@ _log = logging.getLogger(__name__)
 async def _run_sweep(db, limit: int) -> dict:
     due = await schedule_due_monitorings(db, limit=limit)
     stale = await detect_stale_monitorings(db)
+    expiring = await detect_expiring_credentials(db)
     await db.commit()
     return {
         "evaluation_ids_due": [str(rid) for rid in due],
         "evaluations_run": len(due),
         "stale_paused": stale,
+        "credentials_expiring": expiring,
     }
 
 

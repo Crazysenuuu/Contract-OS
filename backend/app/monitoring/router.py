@@ -32,7 +32,7 @@ from app.dependencies.tenant import get_current_organization_id
 from app.monitoring.connectors import connector_registry
 from app.monitoring.connectors.base import get_metadata
 from app.monitoring.credentials import get_active_credentials
-from app.monitoring.enums import IntegrationStatus, PauseReason
+from app.monitoring.enums import AutomationAction, IntegrationStatus, PauseReason
 from app.monitoring.exceptions import MonitoringError, WebhookVerificationError
 from app.monitoring.models import (
     ExternalObservationRecord,
@@ -353,6 +353,33 @@ async def delete_integration(
     return {"id": str(integration.id), "status": "deleted"}
 
 
+@router.post("/integrations/{integration_id}/disconnect", dependencies=[perm_manage])
+async def disconnect_integration(
+    integration_id: uuid.UUID,
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark an integration DISCONNECTED without deleting it (spec 3.15.53).
+
+    Rules bound to a disconnected integration keep running and fail closed
+    (INCONCLUSIVE, 3.15.25) — disconnecting never fabricates a verdict.
+    """
+    integration = await _get_integration(db, integration_id, org_id)
+    integration.status = IntegrationStatus.DISCONNECTED.value
+    await db.flush()
+    await _audit_event(
+        db,
+        org_id=org_id,
+        action=AUDIT_INTEGRATION_DISCONNECTED,
+        resource_type="monitoring_integration",
+        resource_id=integration.id,
+        actor_id=current_user.id,
+        metadata_json={"name": integration.name},
+    )
+    return {"id": str(integration.id), "status": "disconnected"}
+
+
 @router.post("/integrations/{integration_id}/credentials", status_code=status.HTTP_201_CREATED, dependencies=[perm_manage])
 async def add_credential(
     integration_id: uuid.UUID,
@@ -555,6 +582,35 @@ async def create_rule(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="source_version_id must reference an agreement version of the obligation's agreement",
         )
+
+    _RETIRED_OBLIGATION_STATUSES = frozenset(
+        {"COMPLETED", "WAIVED", "CANCELLED", "SUPERSEDED"}
+    )
+    if (obligation.status or "").upper() in _RETIRED_OBLIGATION_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot monitor a retired obligation",
+        )
+
+    evaluator_kind = (data.evaluation_definition or {}).get("kind") or "threshold"
+    from app.monitoring.evaluators import get_evaluator
+    from app.monitoring.exceptions import UnsupportedEvaluator
+
+    try:
+        get_evaluator(evaluator_kind)
+    except UnsupportedEvaluator as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid evaluation_definition: {exc}",
+        )
+
+    if data.automation:
+        on_pass = str(data.automation.get("on_pass") or "NO_ACTION").upper()
+        if on_pass not in {a.value for a in AutomationAction}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid automation.on_pass action: {on_pass}",
+            )
 
     now = datetime.now(timezone.utc)
     next_run = None

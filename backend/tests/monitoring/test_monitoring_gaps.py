@@ -712,3 +712,261 @@ async def test_webhook_bad_signature_audits_rejected(
 
     actions = await _audit_actions(db_session, test_org.id)
     assert AUDIT_OBSERVATION_REJECTED in actions
+
+
+# --------------------------------------------------------------------------
+# Failure policy (3.15.27), disconnect (3.15.53), cred expiring (3.15.49),
+# config-time validation (3.15.55)
+# --------------------------------------------------------------------------
+
+async def test_failure_policy_pauses_rules_at_threshold(
+    db_session, test_org, test_user, agreement_version, monitoring_obligation
+):
+    from app.monitoring.enums import PauseReason
+    from app.monitoring.models import IntegrationConnection, ObligationMonitoring
+    from app.monitoring.service import (
+        AUDIT_MONITORING_PAUSED,
+        EVENT_SOURCE_UNAVAILABLE,
+        run_obligation_monitoring,
+    )
+
+    integration = IntegrationConnection(
+        organization_id=test_org.id,
+        name="Flaky source",
+        integration_type="REST_API",
+        provider_key="no_such_connector",
+        status="ACTIVE",
+        configuration={
+            "failure_policy": {"max_consecutive_failures": 2, "action": "PAUSE_MONITORING"}
+        },
+        created_by=test_user.id,
+        created_by_name=test_user.name,
+    )
+    db_session.add(integration)
+    await db_session.flush()
+    rule = ObligationMonitoring(
+        organization_id=test_org.id,
+        obligation_id=monitoring_obligation.id,
+        source_version_id=agreement_version.id,
+        integration_id=integration.id,
+        status="ACTIVE",
+        query_definition={"resource": "claims"},
+        evaluation_definition={"kind": "existence", "expected": True},
+        schedule_definition={"recurrence": "interval", "minutes": 60},
+        automation={},
+    )
+    db_session.add(rule)
+    await db_session.commit()
+
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    await run_obligation_monitoring(db_session, monitoring=rule, run_at=now, now=now)
+    await db_session.flush()
+    assert rule.status == "ACTIVE"
+
+    second_now = now + timedelta(minutes=60)
+    await run_obligation_monitoring(db_session, monitoring=rule, run_at=second_now, now=second_now)
+    await db_session.flush()
+    assert rule.status == "PAUSED"
+    assert rule.pause_reason == PauseReason.FAILURE_POLICY.value
+
+    actions = await _audit_actions(db_session, test_org.id)
+    assert AUDIT_MONITORING_PAUSED in actions
+    assert await _count_events(db_session, EVENT_SOURCE_UNAVAILABLE) == 3
+    pause_payloads = await _event_payloads(db_session, EVENT_SOURCE_UNAVAILABLE)
+    assert any("monitoring paused pending source fix" in str(p.get("reason")) for p in pause_payloads)
+
+
+async def test_failure_policy_below_threshold_keeps_rule_active(
+    db_session, test_org, test_user, agreement_version, monitoring_obligation
+):
+    from app.monitoring.models import IntegrationConnection, ObligationMonitoring
+    from app.monitoring.service import run_obligation_monitoring
+
+    integration = IntegrationConnection(
+        organization_id=test_org.id,
+        name="Flaky source",
+        integration_type="REST_API",
+        provider_key="no_such_connector",
+        status="ACTIVE",
+        configuration={
+            "failure_policy": {"max_consecutive_failures": 5, "action": "PAUSE_MONITORING"}
+        },
+        created_by=test_user.id,
+        created_by_name=test_user.name,
+    )
+    db_session.add(integration)
+    await db_session.flush()
+    rule = ObligationMonitoring(
+        organization_id=test_org.id,
+        obligation_id=monitoring_obligation.id,
+        source_version_id=agreement_version.id,
+        integration_id=integration.id,
+        status="ACTIVE",
+        query_definition={"resource": "claims"},
+        evaluation_definition={"kind": "existence", "expected": True},
+        schedule_definition={"recurrence": "interval", "minutes": 60},
+        automation={},
+    )
+    db_session.add(rule)
+    await db_session.commit()
+
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    await run_obligation_monitoring(db_session, monitoring=rule, run_at=now, now=now)
+    await db_session.flush()
+    assert rule.status == "ACTIVE"
+
+
+async def test_api_integration_disconnect_sets_status_and_audits(
+    client, auth_headers, test_org, db_session
+):
+    from app.monitoring.models import IntegrationConnection
+    from app.monitoring.service import AUDIT_INTEGRATION_DISCONNECTED
+
+    created = await client.post(
+        "/api/v1/monitoring/integrations",
+        json={
+            "name": "Disconnect me",
+            "integration_type": "REST_API",
+            "provider_key": "rest_api",
+            "configuration": {"base_url": "https://vendor.example.internal"},
+        },
+        headers=auth_headers,
+    )
+    integration_id = created.json()["id"]
+    resp = await client.post(
+        f"/api/v1/monitoring/integrations/{integration_id}/disconnect",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "disconnected"
+
+    integration = await db_session.get(IntegrationConnection, uuid.UUID(integration_id))
+    assert integration is not None
+    assert integration.status == "DISCONNECTED"
+    actions = await _audit_actions(db_session, test_org.id)
+    assert AUDIT_INTEGRATION_DISCONNECTED in actions
+
+
+async def test_detect_expiring_credentials_notifies_and_audits(
+    db_session, test_org, test_user
+):
+    from app.monitoring.models import IntegrationConnection, IntegrationCredential
+    from app.monitoring.service import EVENT_CREDENTIAL_EXPIRING, detect_expiring_credentials
+
+    integration = IntegrationConnection(
+        organization_id=test_org.id,
+        name="Credentialed API",
+        integration_type="REST_API",
+        provider_key="rest_api",
+        status="ACTIVE",
+        configuration={},
+        created_by=test_user.id,
+        created_by_name=test_user.name,
+    )
+    db_session.add(integration)
+    await db_session.flush()
+    db_session.add(
+        IntegrationCredential(
+            integration_id=integration.id,
+            secret_reference="env://MONITORING_TEST_TOKEN",
+            status="ACTIVE",
+            expires_at=datetime(2026, 9, 27, 0, 0, tzinfo=timezone.utc),
+        )
+    )
+    db_session.add(
+        IntegrationCredential(
+            integration_id=integration.id,
+            secret_reference="env://MONITORING_TEST_TOKEN",
+            status="ACTIVE",
+            expires_at=datetime(2026, 12, 31, 0, 0, tzinfo=timezone.utc),
+        )
+    )
+    await db_session.commit()
+
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    notified = await detect_expiring_credentials(db_session, now=now, within_days=3)
+    await db_session.commit()
+    assert notified == 1
+
+    payloads = await _event_payloads(db_session, EVENT_CREDENTIAL_EXPIRING)
+    assert len(payloads) == 1
+    assert payloads[0]["integration_id"] == str(integration.id)
+    assert payloads[0]["recipient_email"] == test_user.email
+
+    actions = await _audit_actions(db_session, test_org.id)
+    assert "INTEGRATION_CREDENTIAL_EXPIRING" in actions
+
+
+async def test_api_rule_rejects_unknown_evaluator(client, auth_headers, active_monitoring):
+    resp = await client.post(
+        "/api/v1/monitoring/rules",
+        json={
+            "obligation_id": str(active_monitoring.obligation_id),
+            "source_version_id": str(active_monitoring.source_version_id),
+            "integration_id": str(active_monitoring.integration_id),
+            "query_definition": {"resource": "claims"},
+            "evaluation_definition": {"kind": "crystal_ball", "expected": True},
+            "schedule_definition": {"recurrence": "interval", "minutes": 60},
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400, resp.text
+
+
+async def test_api_rule_rejects_retired_obligation(
+    client,
+    auth_headers,
+    db_session,
+    test_org,
+    test_agreement,
+    agreement_version,
+    monitoring_integration,
+):
+    from app.models.obligation import Obligation
+
+    obligation = Obligation(
+        organization_id=test_org.id,
+        agreement_id=test_agreement.id,
+        title="Already completed",
+        owner_party="Vendor Ltd",
+        description="Terminal obligation",
+        obligation_type="reporting",
+        status="COMPLETED",
+        criticality="LOW",
+        evidence_status="NOT_REQUIRED",
+    )
+    db_session.add(obligation)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/v1/monitoring/rules",
+        json={
+            "obligation_id": str(obligation.id),
+            "source_version_id": str(agreement_version.id),
+            "integration_id": str(monitoring_integration.id),
+            "query_definition": {"resource": "claims"},
+            "evaluation_definition": {"kind": "existence", "expected": True},
+            "schedule_definition": {"recurrence": "interval", "minutes": 60},
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400, resp.text
+
+
+async def test_api_rule_rejects_unknown_automation_action(
+    client, auth_headers, active_monitoring
+):
+    resp = await client.post(
+        "/api/v1/monitoring/rules",
+        json={
+            "obligation_id": str(active_monitoring.obligation_id),
+            "source_version_id": str(active_monitoring.source_version_id),
+            "integration_id": str(active_monitoring.integration_id),
+            "query_definition": {"resource": "claims"},
+            "evaluation_definition": {"kind": "existence", "expected": True},
+            "schedule_definition": {"recurrence": "interval", "minutes": 60},
+            "automation": {"on_pass": "DELETE_EVERYTHING"},
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400, resp.text

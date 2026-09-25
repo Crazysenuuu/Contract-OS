@@ -58,6 +58,7 @@ EVENT_EVALUATION_FAILED = "monitoring.evaluation_failed"
 EVENT_SOURCE_UNAVAILABLE = "monitoring.source_unavailable"
 EVENT_RECOVERED = "monitoring.recovered"
 EVENT_STALE_VERSION = "monitoring.stale_version"
+EVENT_CREDENTIAL_EXPIRING = "integration.credential_expiring"
 EVENT_OBLIGATION_AUTOMATION_TRIGGERED = "obligation.automation_triggered"
 
 # Lifecycle audit tokens (spec 3.15.47) — all flow through the 3.11 hash chain.
@@ -492,6 +493,7 @@ async def _record_source_failure(
             notification_type="monitoring_alert",
             severity="INCONCLUSIVE",
         )
+        await _apply_failure_policy(db, integration_id=integration.id, now=now)
     await _audit_event(
         db,
         monitoring,
@@ -500,6 +502,83 @@ async def _record_source_failure(
         metadata_json={"exception_type": exception_type, "reason": reason},
     )
     return evaluation
+
+
+async def _apply_failure_policy(
+    db: AsyncSession,
+    *,
+    integration_id: uuid.UUID,
+    now: datetime,
+) -> int:
+    """Pause ACTIVE rules whose integration hits the configured failure cap.
+
+    Spec 3.15.27: a connector is NOT disabled after a hardcoded failure count.
+    The workspace controls the policy via ``configuration.failure_policy``:
+
+        {"failure_policy": {"max_consecutive_failures": 5, "action": "PAUSE_MONITORING"}}
+
+    When ``health.consecutive_failures`` reaches the cap, every ACTIVE rule
+    bound to the integration is PAUSED (reason ``FAILURE_POLICY``), the
+    integration owner is notified, and the decision is audited. Rules resume
+    only after a human fixes the source (3.15.62 fail-closed doctrine).
+    """
+    integration = await db.get(IntegrationConnection, integration_id)
+    if integration is None:
+        return 0
+    policy = (integration.configuration or {}).get("failure_policy") or {}
+    action = str(policy.get("action") or "").upper()
+    if action != "PAUSE_MONITORING":
+        return 0
+    try:
+        max_failures = int(policy.get("max_consecutive_failures") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if max_failures <= 0:
+        return 0
+
+    health = await db.get(IntegrationHealth, integration_id)
+    if health is None or health.consecutive_failures < max_failures:
+        return 0
+
+    rules = (
+        (await db.execute(
+            select(ObligationMonitoring).where(
+                ObligationMonitoring.integration_id == integration_id,
+                ObligationMonitoring.status == MonitoringStatus.ACTIVE.value,
+            )
+        ))
+        .scalars()
+        .all()
+    )
+    for rule in rules:
+        rule.status = MonitoringStatus.PAUSED.value
+        rule.pause_reason = PauseReason.FAILURE_POLICY.value
+        await _enqueue_monitoring_notification(
+            db,
+            monitoring=rule,
+            event_type=EVENT_SOURCE_UNAVAILABLE,
+            title_reason=(
+                f"Integration {integration.name} hit "
+                f"{health.consecutive_failures} consecutive failures; "
+                "monitoring paused pending source fix"
+            ),
+            notification_type="monitoring_alert",
+            severity="INCONCLUSIVE",
+        )
+        await _audit_event(
+            db,
+            rule,
+            action=AUDIT_MONITORING_PAUSED,
+            resource_id=rule.id,
+            metadata_json={
+                "pause_reason": PauseReason.FAILURE_POLICY.value,
+                "consecutive_failures": health.consecutive_failures,
+                "max_consecutive_failures": max_failures,
+            },
+        )
+    if rules:
+        await db.flush()
+    return len(rules)
 
 
 async def _record_evaluation(
@@ -1288,3 +1367,103 @@ async def detect_stale_monitorings(
     if paused:
         await db.flush()
     return paused
+
+
+async def detect_expiring_credentials(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    within_days: int = 3,
+) -> int:
+    """Raise INTEGRATION_CREDENTIAL_EXPIRING for credentials nearing expiry.
+
+    Spec 3.15.49: credentials expiring inside the horizon produce an outbox
+    notification (event ``integration.credential_expiring``) addressed to the
+    integration owner (fallback: first active workspace member) plus a
+    system audit record. Pure advisory — credentials past the horizon are
+    resolved as unavailable at run time and fail closed (3.15.62).
+    """
+    from app.models.rbac import OrganizationMember
+    from app.models.user import User
+    from app.monitoring.models import IntegrationCredential
+
+    now = now or now_utc()
+    horizon = now + timedelta(days=within_days)
+
+    rows = (
+        await db.execute(
+            select(IntegrationCredential, IntegrationConnection)
+            .join(
+                IntegrationConnection,
+                IntegrationConnection.id == IntegrationCredential.integration_id,
+            )
+            .where(
+                IntegrationCredential.status == "ACTIVE",
+                IntegrationCredential.expires_at.is_not(None),
+                IntegrationCredential.expires_at > now,
+                IntegrationCredential.expires_at <= horizon,
+            )
+        )
+    ).all()
+
+    notified = 0
+    for credential, integration in rows:
+        recipients: list[dict] = []
+
+        async def _with_user(user_id: uuid.UUID, role: str) -> None:
+            user = await db.get(User, user_id)
+            if user is not None:
+                recipients.append({"user_id": str(user.id), "email": user.email, "role": role})
+
+        if integration.created_by is not None:
+            await _with_user(integration.created_by, "integration_owner")
+        if not recipients:
+            member = await db.scalar(
+                select(User)
+                .join(OrganizationMember, OrganizationMember.user_id == User.id)
+                .where(
+                    OrganizationMember.organization_id == integration.organization_id,
+                    OrganizationMember.status == "active",
+                )
+                .order_by(OrganizationMember.id.asc())
+                .limit(1)
+            )
+            if member is not None:
+                recipients.append(
+                    {"user_id": str(member.id), "email": member.email, "role": "workspace"}
+                )
+
+        payload = {
+            "integration_id": str(integration.id),
+            "credential_id": str(credential.id),
+            "expires_at": credential.expires_at.isoformat() if credential.expires_at else None,
+            "secret_reference": credential.secret_reference,
+            "recipients": recipients,
+        }
+        if recipients:
+            payload["recipient_email"] = recipients[0]["email"]
+            payload["recipient_user_id"] = recipients[0]["user_id"]
+        await enqueue_event(
+            db,
+            tenant_id=integration.organization_id,
+            event_type=EVENT_CREDENTIAL_EXPIRING,
+            aggregate_type="monitoring_integration",
+            aggregate_id=integration.id,
+            payload=payload,
+        )
+        try:
+            await record_event(
+                db,
+                tenant_id=integration.organization_id,
+                actor_type="system",
+                action="INTEGRATION_CREDENTIAL_EXPIRING",
+                resource_type="monitoring_integration",
+                resource_id=integration.id,
+                metadata_json={"credential_id": str(credential.id)},
+            )
+        except Exception:  # noqa: BLE001 — audit is best-effort
+            _log.warning("credential-expiring audit failed for %s", integration.id)
+        notified += 1
+    if notified:
+        await db.flush()
+    return notified
