@@ -9,7 +9,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -17,7 +16,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
@@ -342,7 +341,7 @@ class KycVerificationAttempt(
     # Coarse provider metadata (checks performed, livemode, report id...).
     # Must not contain raw document images or document numbers.
     details: Mapped[dict | None] = mapped_column(
-        JSON,
+        JSONB,
         nullable=True,
     )
 

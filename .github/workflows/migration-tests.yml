@@ -69,12 +69,11 @@ jobs:
           assert len(heads) == 1, f'Expected 1 head, got {len(heads)}: {heads}'
           print(f'✅ Migration head: {heads[0]}')
           
-          # Check for branches
-          branches = script.get_branches()
-          if branches:
-              print(f'⚠️  Found {len(branches)} branch(es)')
-          
-          print('✅ Migration chain is valid')
+          # Walk the full chain to prove it is connected and acyclic
+          # (get_branches was removed in Alembic 1.19; walk_revisions is
+          # stable across all supported Alembic versions).
+          revisions = list(script.walk_revisions())
+          print(f'✅ Migration chain is valid ({len(revisions)} revisions)')
           "
 
       - name: Check for missing downgrades

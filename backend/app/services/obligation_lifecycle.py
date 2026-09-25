@@ -197,6 +197,13 @@ async def assign_obligation(
     )
     db.add(assignee)
     if primary_assignee:
+        # Flush first so ``assignee.id`` is materialised: the WHERE clause
+        # below must exclude the new row itself. Built before the flush, the
+        # bound ``id != None`` parameter compiles to ``id IS NOT NULL`` and
+        # the demote-UPDATE silently clears the very assignee we just added
+        # (deterministic under SQLAlchemy >= 2.1, where the pending INSERT
+        # autoflushes ahead of the Core UPDATE).
+        await db.flush()
         await db.execute(
             ObligationAssignee.__table__.update()
             .where(

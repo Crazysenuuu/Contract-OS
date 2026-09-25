@@ -1699,4 +1699,21 @@ def downgrade() -> None:
     op.drop_table('jurisdictions')
     op.drop_table('agreement_types')
     op.drop_table('agreement_states')
+    # Native ENUM types are not dropped implicitly by drop_table; without
+    # this, `alembic downgrade base` leaves them behind and a subsequent
+    # `upgrade head` fails with DuplicateObjectError (type already exists).
+    for _enum_type in (
+        'bulkactiontype',
+        'clausecategory',
+        'clauserisklevel',
+        'clausesentiment',
+        'importstatus',
+        'importtype',
+        'languagedirection',
+        'queuestatus',
+        'translationpriority',
+        'translationsource',
+        'translationstatus',
+    ):
+        op.execute(f'DROP TYPE IF EXISTS {_enum_type}')
     # ### end Alembic commands ###

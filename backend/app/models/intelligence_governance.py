@@ -23,6 +23,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -561,6 +562,9 @@ class AgreementPrecedent(
     target_clause_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         nullable=True,
+        # Mirrors the dedicated index created by f9a0b1c2d3e4 so the ORM
+        # metadata and the migrated schema agree (alembic check).
+        index=True,
     )
 
     # 'pinned' (explicit user action) | 'suggested' (retrieval engine) |
@@ -579,8 +583,11 @@ class AgreementPrecedent(
     )
 
     score: Mapped[float | None] = mapped_column(
+        Numeric(),
         nullable=True,
         # Retrieval score at suggestion time (explanability, 2.09.26 spirit).
+        # Numeric matches f9a0b1c2d3e4 (NUMERIC) so the ORM metadata and the
+        # migrated schema agree (alembic check).
     )
 
     note: Mapped[str | None] = mapped_column(

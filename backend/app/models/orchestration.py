@@ -24,6 +24,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum as SQLEnum,
     ForeignKey,
@@ -36,6 +37,18 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+def _enum_values(enum_cls):
+    """Persist enum *values* ("draft"), not member names ("DRAFT").
+
+    SQLAlchemy's Enum binds member NAMES by default, which would violate the
+    lowercase CHECK constraints created by e1f2a3b4c5d6 (whose server
+    defaults are also lowercase values). It stayed latent because the SQLite
+    test schema had no CHECK constraints until the drift migration added the
+    ORM-declared ones.
+    """
+    return [member.value for member in enum_cls]
 
 
 class OrchWorkflowStatus(str, enum.Enum):
@@ -98,12 +111,17 @@ class OrchWorkflowDefinition(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[OrchWorkflowStatus] = mapped_column(
-        SQLEnum(OrchWorkflowStatus, native_enum=False),
+        SQLEnum(
+            OrchWorkflowStatus,
+            native_enum=False,
+            length=32,
+            values_callable=_enum_values,
+        ),
         nullable=False,
         default=OrchWorkflowStatus.DRAFT,
     )
     scope: Mapped[OrchScope] = mapped_column(
-        SQLEnum(OrchScope, native_enum=False),
+        SQLEnum(OrchScope, native_enum=False, length=32, values_callable=_enum_values),
         nullable=False,
         default=OrchScope.GLOBAL,
     )
@@ -120,6 +138,18 @@ class OrchWorkflowDefinition(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "code",
             "version",
             name="uq_orch_workflow_definitions_code_version",
+        ),
+        # Mirrors e1f2a3b4c5d6 so the ORM metadata and migrated schema agree.
+        # NOTE: the naming convention expands these bare names
+        # (ck template -> <table>_<name>_check); the drift migration renames
+        # the DB constraints to exactly those expanded names.
+        CheckConstraint(
+            "status IN ('draft', 'active', 'disabled', 'archived')",
+            name="status",
+        ),
+        CheckConstraint(
+            "scope IN ('global', 'organization', 'agreement_type')",
+            name="scope",
         ),
     )
 
@@ -140,7 +170,8 @@ class OrchStepDefinition(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     step_key: Mapped[str] = mapped_column(String(150), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     step_type: Mapped[OrchStepType] = mapped_column(
-        SQLEnum(OrchStepType, native_enum=False), nullable=False
+        SQLEnum(OrchStepType, native_enum=False, length=32, values_callable=_enum_values),
+        nullable=False,
     )
     configuration: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict)
@@ -153,6 +184,11 @@ class OrchStepDefinition(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "workflow_definition_id",
             "step_key",
             name="uq_orch_workflow_step_definitions_definition_step",
+        ),
+        CheckConstraint(
+            "step_type IN ('task', 'approval', 'condition', 'delay', 'event_wait', "
+            "'action', 'parallel', 'subworkflow')",
+            name="step_type",
         ),
     )
 
@@ -210,7 +246,12 @@ class OrchWorkflowInstance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("agreements.id", ondelete="CASCADE"), nullable=True
     )
     status: Mapped[OrchInstanceStatus] = mapped_column(
-        SQLEnum(OrchInstanceStatus, native_enum=False),
+        SQLEnum(
+            OrchInstanceStatus,
+            native_enum=False,
+            length=40,
+            values_callable=_enum_values,
+        ),
         nullable=False,
         default=OrchInstanceStatus.RUNNING,
     )
@@ -224,6 +265,14 @@ class OrchWorkflowInstance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', "
+            "'suspended', 'human_intervention_required')",
+            name="status",
+        ),
+    )
 
 
 class OrchStepInstance(Base, UUIDPrimaryKeyMixin, TimestampMixin):
