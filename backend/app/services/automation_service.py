@@ -96,7 +96,9 @@ def validate_condition_tree(node, depth: int = 0) -> None:
     if node is None or not isinstance(node, dict):
         raise AutomationRuleError("Condition nodes must be objects")
     if "all" in node or "any" in node:
-        children = node.get("all") or node.get("any")
+        # Key membership, not truthiness: {"all": []} is a valid (vacuously
+        # true) node and must not fall through to the any/branch via `or`.
+        children = node["all"] if "all" in node else node["any"]
         if not isinstance(children, list):
             raise AutomationRuleError("all/any require a list of nodes")
         for child in children:

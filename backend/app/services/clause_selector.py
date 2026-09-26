@@ -171,16 +171,15 @@ class ClauseSelector:
                     )
                 continue
 
-            # Eagerly load conditions if not already loaded
-            if not version.conditions:
-                cond_result = await db.execute(
-                    select(ClauseCondition)
-                    .where(ClauseCondition.clause_version_id == version.id)
-                    .order_by(ClauseCondition.display_order)
-                )
-                conditions: list[ClauseCondition] = list(cond_result.scalars().all())
-            else:
-                conditions = list(version.conditions)
+            # Load conditions with an explicit query: async sessions cannot
+            # lazy-load relationships (MissingGreenlet), so never touch
+            # version.conditions on an object that came from a plain select.
+            cond_result = await db.execute(
+                select(ClauseCondition)
+                .where(ClauseCondition.clause_version_id == version.id)
+                .order_by(ClauseCondition.display_order)
+            )
+            conditions: list[ClauseCondition] = list(cond_result.scalars().all())
 
             # 3. Evaluate conditions
             all_passed = True

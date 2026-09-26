@@ -153,6 +153,9 @@ async def create_forecast(
         )
         run.completed_at = datetime.now(timezone.utc)
         await db.flush()
+        # Load the (empty) predictions collection explicitly: async lazy-load
+        # in the serializer would fail the request (missing greenlet).
+        await db.refresh(run, attribute_names=["predictions"])
         return _serialize_run(run)
 
     dataset_manifest = {
@@ -225,6 +228,7 @@ async def get_forecast(
     run = await db.get(ForecastRun, uuid.UUID(run_id))
     if run is None or run.organization_id != uuid.UUID(str(org_id)):
         raise HTTPException(status_code=404, detail="Forecast run not found")
+    await db.refresh(run, attribute_names=["predictions"])
     return _serialize_run(run)
 
 

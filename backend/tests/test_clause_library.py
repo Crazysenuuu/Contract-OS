@@ -165,6 +165,82 @@ async def test_selector_returns_only_approved_version(db_session, clause_setup):
 
 
 @pytest.mark.asyncio
+async def test_select_clauses_for_agreement_no_lazy_load(db_session, clause_setup):
+    """Regression: the old code guarded condition loading with
+    ``if not version.conditions:`` — an attribute access that itself attempts
+    an async lazy-load and raises MissingGreenlet under asyncio. The selector
+    must use an explicit query and never touch the relationship."""
+    from app.models.clause import ClauseCondition
+    from app.services.clause_condition_engine import ClauseConditionEngine
+    from app.services.clause_selector import ClauseSelector
+
+    setup = clause_setup
+    db_session.add(
+        ClauseCondition(
+            clause_version_id=setup["v1"].id,
+            condition={
+                "all": [
+                    {
+                        "path": "agreement.governing_law",
+                        "operator": "exists",
+                    }
+                ]
+            },
+            display_order=1,
+        )
+    )
+    await db_session.commit()
+
+    selector = ClauseSelector()
+    # The version object here is freshly selected inside the service, so any
+    # relationship access on it would previously explode with MissingGreenlet.
+    selected = await selector.select_clauses_for_agreement(
+        db_session,
+        agreement_type_id=setup["binding"].agreement_type_id,
+        agreement_data={"agreement": {"governing_law": "LK"}},
+        organization_id=setup["clause"].organization_id,
+    )
+    assert len(selected) == 1
+    assert selected[0].version.id == setup["v1"].id
+
+
+@pytest.mark.asyncio
+async def test_select_clauses_for_agreement_condition_fails_excludes(
+    db_session, clause_setup
+):
+    """A clause whose condition evaluates false is excluded from assembly."""
+    from app.models.clause import ClauseCondition
+    from app.services.clause_selector import ClauseSelector
+
+    setup = clause_setup
+    db_session.add(
+        ClauseCondition(
+            clause_version_id=setup["v1"].id,
+            condition={
+                "all": [
+                    {
+                        "path": "agreement.governing_law",
+                        "operator": "equals",
+                        "value": "DE",
+                    }
+                ]
+            },
+            display_order=1,
+        )
+    )
+    await db_session.commit()
+
+    selector = ClauseSelector()
+    selected = await selector.select_clauses_for_agreement(
+        db_session,
+        agreement_type_id=setup["binding"].agreement_type_id,
+        agreement_data={"agreement": {"governing_law": "LK"}},
+        organization_id=setup["clause"].organization_id,
+    )
+    assert selected == []
+
+
+@pytest.mark.asyncio
 async def test_approved_version_is_immutable_in_lifecycle(db_session, clause_setup):
     """Editing approval flow never rewrites approved content: superseding
     creates a new current version while v1 remains referenceable."""

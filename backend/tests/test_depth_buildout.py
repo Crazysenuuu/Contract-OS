@@ -239,6 +239,20 @@ class TestConditionDSL:
         with pytest.raises(AutomationRuleError):
             validate_condition_tree({"all": "not-a-list"})
 
+    def test_empty_condition_groups_are_valid(self):
+        """Regression: {"all": []} was rejected because validation used
+        ``node.get("all") or node.get("any")``, which turns the empty list
+        into None. An empty group is a valid vacuously-true node."""
+        validate_condition_tree({"all": []})
+        validate_condition_tree({"any": []})
+        validate_condition_tree({"all": [{"any": []}]})
+
+    def test_empty_group_evaluation_semantics(self):
+        # evaluate_condition uses key membership (no `or` bug), so empty
+        # groups already behave correctly — lock the semantics in.
+        assert evaluate_condition({"all": []}, {}) is True
+        assert evaluate_condition({"any": []}, {}) is False
+
 
 class TestAutomationAPI:
     async def test_rule_crud_and_dry_run(self, client, auth_headers, db_session, test_org):
@@ -300,6 +314,73 @@ class TestAutomationAPI:
         assert resp.status_code in (403, 422)
         if resp.status_code == 200:
             raise AssertionError("unknown action key must not create a rule")
+
+    async def test_rule_with_empty_conditions_group_is_accepted(
+        self, client, auth_headers, db_session, test_org
+    ):
+        """Regression: the API validated conditions even when a valid empty
+        group was supplied and 422'd on {"all": []} (falsy-empty bug in
+        validate_condition_tree)."""
+        resp = await client.post(
+            "/api/v1/automation/rules",
+            json={
+                "name": "Always notify",
+                "trigger_event": "agreement.executed",
+                "conditions": {"all": []},
+                "action_key": "CREATE_NOTIFICATION",
+                "action_config": {
+                    "to_email": "legal@example.com",
+                    "subject": "Executed",
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"]
+
+
+class TestForecastingAPI:
+    async def test_rejected_forecast_returns_payload_not_500(
+        self, client, auth_headers, db_session, test_org
+    ):
+        """Regression: the insufficient-data path serialized run.predictions
+        without loading the (empty) relationship — the async lazy-load raised
+        MissingGreenlet and the endpoint returned 500 instead of a rejected
+        run. The dev DB had zero snapshots for the metric; so does this DB."""
+        resp = await client.post(
+            "/api/v1/forecast/runs",
+            json={
+                "metric_key": "inventory.never_measured",
+                "horizon_days": 7,
+                "model_type": "trend",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "rejected"
+        assert "insufficient" in body["status_reason"]
+        assert body["predictions"] == []
+
+    async def test_get_run_serializer_loads_predictions(
+        self, client, auth_headers, db_session, test_org
+    ):
+        """Regression: GET /forecast/runs/{id} hit the same unloaded
+        relationship inside _serialize_run."""
+        create = await client.post(
+            "/api/v1/forecast/runs",
+            json={"metric_key": "inventory.also_missing", "horizon_days": 7},
+            headers=auth_headers,
+        )
+        assert create.status_code == 200, create.text
+        run_id = create.json()["id"]
+
+        fetched = await client.get(
+            f"/api/v1/forecast/runs/{run_id}", headers=auth_headers
+        )
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.json()["status"] == "rejected"
+        assert fetched.json()["predictions"] == []
 
 
 class TestCheckpoints:

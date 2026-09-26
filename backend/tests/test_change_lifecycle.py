@@ -207,3 +207,89 @@ async def test_change_set_url_alias_and_changes_url_are_equivalent(
     )
     assert listed.status_code == 200
     assert any(d["id"] == change_id for d in listed.json())
+
+# --- accept/reject with items loaded through the non-eager path ----------
+
+
+async def test_accept_change_via_service_function_is_async_safe(
+    db_session, test_agreement, test_user
+):
+    """Regression: accept/reject iterate ``change.items``, which raises
+    MissingGreenlet if the relationship was never loaded. All current HTTP
+    callers load it via get_change (selectinload); this pins the service
+    functions themselves to be safe with a fresh-from-DB instance."""
+    from app.services.agreement_changes import accept_change, create_change
+
+    change = await create_change(
+        db_session,
+        agreement=test_agreement,
+        base_version_id=await _base_version_id(db_session, test_agreement),
+        proposed_by=test_user.id,
+        change_type="redline",
+        explanation="Extend payment terms",
+        items=[
+            {
+                "clause_identifier": "payment_terms",
+                "change_type": "modify",
+                "new_content": "Payment within 45 days",
+            }
+        ],
+    )
+
+    # Simulate a caller that fetched the row without eager loading.
+    from sqlalchemy import select
+
+    fresh = (
+        await db_session.execute(
+            select(AgreementChange).where(AgreementChange.id == change.id)
+        )
+    ).scalar_one()
+
+    result = await accept_change(db_session, fresh)
+    assert result.status == "accepted"
+    assert all(item.status == "accepted" for item in result.items)
+
+
+async def test_reject_change_via_service_function_is_async_safe(
+    db_session, test_agreement, test_user
+):
+    from sqlalchemy import select
+
+    from app.services.agreement_changes import create_change, reject_change
+
+    change = await create_change(
+        db_session,
+        agreement=test_agreement,
+        base_version_id=await _base_version_id(db_session, test_agreement),
+        proposed_by=test_user.id,
+        change_type="redline",
+        explanation="Shorten confidentiality",
+        items=[
+            {
+                "clause_identifier": "confidentiality",
+                "change_type": "modify",
+                "new_content": "Confidentiality for 2 years",
+            }
+        ],
+    )
+    fresh = (
+        await db_session.execute(
+            select(AgreementChange).where(AgreementChange.id == change.id)
+        )
+    ).scalar_one()
+
+    result = await reject_change(db_session, fresh)
+    assert result.status == "rejected"
+    assert all(item.status == "rejected" for item in result.items)
+
+
+async def _base_version_id(db_session, agreement):
+    from sqlalchemy import select
+
+    row = await db_session.execute(
+        select(AgreementVersion.id)
+        .where(AgreementVersion.agreement_id == agreement.id)
+        .order_by(AgreementVersion.version_number.desc())
+        .limit(1)
+    )
+    return row.scalar_one()
