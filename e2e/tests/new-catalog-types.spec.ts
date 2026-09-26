@@ -40,6 +40,17 @@ const NEW_TYPES: Array<{ name: string }> = [
  * Fills every visible control with plausible values; distinct text values so
  * party-name fields never collide ("parties must be distinct entities").
  */
+// The suite config sets no actionTimeout, so ANY locator call without an
+// explicit timeout waits indefinitely (bounded only by the test timeout).
+// Helper: cap an unbounded locator promise (e.g. evaluate, which has no
+// timeout option and waits for the element to exist) and fall back cleanly.
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    p.catch(() => fallback),
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 async function fillVisibleControls(page: Page) {
   // Every fill below is bounded and failure-tolerant: the wizard can advance
   // to the next (or final) view while this helper is running — the last view
@@ -67,13 +78,31 @@ async function fillVisibleControls(page: Page) {
   const selectCount = await selects.count();
   for (let i = 0; i < selectCount; i++) {
     const select = selects.nth(i);
-    const optionCount = await select.locator("option:not([disabled])").count();
-    if (optionCount > 0) {
+    // Rotate through each select's real (enabled, non-empty) options by the
+    // select's position in this pass: views with TWO party-entity selects
+    // must resolve them to DIFFERENT entities or validation rejects the
+    // draft ("parties must be distinct entities") and the wizard never
+    // navigates (index 1 for every select made both pick the same one).
+    // Value-based, not index-based, so placeholder/disabled layouts don't
+    // skew the mapping; the mapping is stable across fillUntilStuck passes.
+    // evaluate() has no timeout option and waits for the element — a select
+    // detaching mid-pass (view advanced) would hang it forever, so cap it.
+    const optionValues = await withTimeout(
+      select.evaluate((el) =>
+        Array.from((el as HTMLSelectElement).options)
+          .filter((o) => !o.disabled && o.value !== "")
+          .map((o) => o.value)
+      ),
+      FILL_TIMEOUT_MS,
+      [] as string[]
+    );
+    const value = optionValues[i % Math.max(1, optionValues.length)];
+    if (value !== undefined) {
       try {
-        await select.selectOption({ index: 1 }, { timeout: FILL_TIMEOUT_MS });
+        await select.selectOption(value, { timeout: FILL_TIMEOUT_MS });
         // Controlled <select> needs change/input events after hydration.
-        await select.dispatchEvent("change");
-        await select.dispatchEvent("input");
+        await select.dispatchEvent("change", { timeout: FILL_TIMEOUT_MS });
+        await select.dispatchEvent("input", { timeout: FILL_TIMEOUT_MS });
       } catch {
         // View changed mid-loop — handled by the next fillUntilStuck pass.
       }
@@ -159,30 +188,27 @@ test.describe("New catalog types through the wizard", () => {
       const fillUntilStuck = async () => {
         const probe = currentViewProbe();
         if (!(await probe.isVisible().catch(() => false))) return;
-        const kind = await probe.evaluate((el) =>
-          el.tagName === "INPUT"
-            ? (el as HTMLInputElement).type
-            : el.tagName === "SELECT"
-              ? "select"
-              : "textarea"
-        );
         for (let attempt = 0; attempt < 10; attempt++) {
           await fillVisibleControls(page);
-          const stuck = await probe
-            .inputValue()
-            .then((v) =>
-              kind === "date"
-                ? v === "2026-06-01"
-                : kind === "number"
-                  ? v === "12"
-                  : kind === "textarea"
-                    ? v === "E2E test purpose"
-                    : kind === "select"
-                      ? v !== ""
-                      : /^E2E Test Value \d+$/.test(v)
-            )
-            .catch(() => false);
-          if (stuck) return;
+          // Verify EVERY panel control holds a value, not just the first:
+          // a single-control probe passes while the remaining fills race
+          // hydration and silently drop (the Shareholders failure — the
+          // section view saved only effective_date and validation rejected
+          // 9 missing required fields). Explicit inputValue timeouts:
+          // unbounded waits hang when the view advances mid-check.
+          const panel = page.locator(
+            `${SECTION_PANEL} input:visible, ${SECTION_PANEL} select:visible, ${SECTION_PANEL} textarea:visible`
+          );
+          const count = await panel.count().catch(() => 0);
+          let allFilled = count > 0;
+          for (let i = 0; i < count && allFilled; i++) {
+            const v = await panel
+              .nth(i)
+              .inputValue({ timeout: 2_000 })
+              .catch(() => null);
+            if (v === null || v === "") allFilled = false;
+          }
+          if (allFilled) return;
           await page.waitForTimeout(400);
         }
       };
@@ -190,59 +216,102 @@ test.describe("New catalog types through the wizard", () => {
       // First view: fill until hydration confirms.
       await fillUntilStuck();
 
-      // Walk the remaining views until only "Create Agreement" (final step)
-      // remains. The Next button flips to a disabled "Saving..." mid-save;
-      // matching it would race the final step, where it unmounts instead of
-      // re-enabling — and Playwright's actionability wait then hangs the
-      // click forever (trace: click 'Next, Saving' with no matching after).
-      // Match the enabled "Next" only, bound the click, and re-check before
-      // every iteration.
-      const NEXT_BTN = "button:has-text('Next'):enabled";
+      // Walk the remaining views until the final step ("Create Agreement")
+      // is offered. Match a UNION of both navigation buttons and WAIT for it:
+      // a freshly mounted view may not have rendered yet, and during a save
+      // the button reads a disabled "Saving..." (matches neither segment) —
+      // an instant isVisible() check breaks the loop mid-wizard on slow dev
+      // servers (the Shareholders CI failure: walk exited on step 2, then no
+      // Create button ever appeared). Waiting on the union absorbs both gaps:
+      // it resolves only when "Next" is enabled again or the final step's
+      // "Create Agreement" has mounted.
+      const NAV_BTN =
+        "button:has-text('Next'):enabled, button:has-text('Create Agreement')";
       let guard = 0;
       while (guard < 8) {
-        const nextBtn = page.locator(NEXT_BTN).first();
-        if (!(await nextBtn.isVisible().catch(() => false))) break;
-        await nextBtn.click({ timeout: 10_000 }).catch(() => {});
+        const nav = page.locator(NAV_BTN).first();
+        const appeared = await nav
+          .waitFor({ state: "visible", timeout: 15_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!appeared) break;
+        const label = (await nav.textContent().catch(() => "")) ?? "";
+        if (label.includes("Create Agreement")) break; // final step reached
+        await nav.click({ timeout: 10_000 }).catch(() => {});
         guard += 1;
         // The freshly mounted view needs its own fill-verification before
-        // the next click; bail out if we've reached the final step.
+        // the next wait-for-navigation.
         await fillUntilStuck();
-        if (!(await page
-          .locator(NEXT_BTN)
-          .first()
-          .isVisible()
-          .catch(() => false))) {
-          break;
-        }
       }
 
       // 5. Submit: "Create Agreement" triggers handleFinish — create draft,
       //    save answers, validate, navigate to the agreement detail page.
-      //    The detail route compiles on first hit under the dev server, so
-      //    the URL can stay on /agreements/new for tens of seconds after the
-      //    (already successful) POST — give waitForURL real headroom.
+      //    Wait for the button to be ENABLED first: after the walk's last
+      //    Next-click the wizard may still be finishing its save ("Saving...",
+      //    disabled) — an early click is silently swallowed and handleFinish
+      //    never runs (no validate call, no navigation, test times out).
+      //    The detail route also compiles on first hit under the dev server,
+      //    so waitForURL gets real headroom.
       for (let attempt = 0; attempt < 3; attempt++) {
-        await fillVisibleControls(page);
         const createBtn = page
-          .locator("button:has-text('Create Agreement')")
+          .locator("button:has-text('Create Agreement'):enabled")
           .first();
-        if (!(await createBtn.isVisible().catch(() => false))) {
+        if (
+          !(await createBtn
+            .waitFor({ state: "visible", timeout: 10_000 })
+            .then(() => true)
+            .catch(() => false))
+        ) {
           break;
         }
+        await fillVisibleControls(page);
         await createBtn.click({ timeout: 10_000 }).catch(() => {});
-        const navigated = await page
-          .waitForURL(/\/agreements\/[0-9a-f-]{36}/, { timeout: 30_000 })
+        // Phase 1: confirm the click registered — handleFinish flips the
+        // button to a disabled "Saving...". If it never flips, the click
+        // was swallowed (React re-render race — the Founder Agreement
+        // failure burned 30s per attempt on a dead waitForURL).
+        const started = await page
+          .locator("button:has-text('Saving...')")
+          .first()
+          .waitFor({ state: "visible", timeout: 5_000 })
           .then(() => true)
           .catch(() => false);
-        if (navigated) break;
+        if (!started) {
+          if (/\/agreements\/[0-9a-f-]{36}/.test(page.url())) break;
+          continue;
+        }
+        // Phase 2: three outcomes decide the next step IMMEDIATELY:
+        // navigation wins; an error banner means validation failed
+        // (retry); the button re-enabling without either means
+        // handleFinish completed silently (retry now).
+        const outcome = await Promise.race([
+          page
+            .waitForURL(/\/agreements\/[0-9a-f-]{36}/, { timeout: 30_000 })
+            .then(() => "navigated" as const)
+            .catch(() => "timeout" as const),
+          page
+            .locator(".bg-red-50")
+            .first()
+            .waitFor({ state: "visible", timeout: 30_000 })
+            .then(() => "error" as const)
+            .catch(() => "timeout" as const),
+          page
+            .locator("button:has-text('Create Agreement'):enabled")
+            .first()
+            .waitFor({ state: "visible", timeout: 30_000 })
+            .then(() => "re-enabled" as const)
+            .catch(() => "timeout" as const),
+        ]);
+        if (outcome === "navigated") break;
+        if (outcome === "timeout") break;
         await page.waitForTimeout(400);
       }
 
       // 6. Land on the agreement detail page. The h1 renders only after the
-      //    page's agreement fetch resolves; under a fully loaded dev server
-      //    (cold compile + parallel suites) that can exceed 5s.
+      //    page's agreement fetch resolves; the route also compiles on first
+      //    hit under the dev server, so give this real headroom.
       await expect(page).toHaveURL(/\/agreements\/[0-9a-f-]{36}/, {
-        timeout: 10000,
+        timeout: 30_000,
       });
       await expect(page.locator("h1")).toBeVisible({ timeout: 15000 });
     });

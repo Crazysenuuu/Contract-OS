@@ -5,7 +5,12 @@ import { login as sharedLogin } from "./helpers";
 // a multi-step wizard. The 30s suite default timed out in CI inside the
 // hydration-wait loops (12/12 E2E failures were 30000ms timeouts; retries
 // passed). 90s gives the fill-until-hydrated loops real headroom.
-test.setTimeout(90_000);
+// One long test covers the full lifecycle (login → dashboard → wizard →
+// submit → landing checks). Every route cold-compiles under the dev server
+// webServer on first hit; 90s was exceeded ~1 run in 3 even with zero
+// functional failures (test always reached the final step), so give it the
+// same headroom-per-activity as the catalog suite inside the 35m CI budget.
+test.setTimeout(150_000);
 
 /**
  * Critical path: login → create → wizard → negotiate → review → sign.
@@ -93,7 +98,21 @@ test.describe("Critical Path", () => {
         // e.g. the last view (Clauses) has no text inputs at all. An
         // unbounded fill on a detached element waits the suite default and
         // hangs the whole test (locator.fill: input[type=text].nth(1)).
+        // The suite config sets no actionTimeout, so ANY locator call
+        // without an explicit timeout waits indefinitely (bounded only by
+        // the test timeout). Helper: cap an unbounded locator promise (e.g.
+        // evaluate, which has no timeout option and waits for the element
+        // to exist) and fall back cleanly.
         const FILL_TIMEOUT_MS = 2_000;
+        const withTimeout = <T>(
+          p: Promise<T>,
+          ms: number,
+          fallback: T
+        ): Promise<T> =>
+          Promise.race([
+            p.catch(() => fallback),
+            new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+          ]);
         const dates = page.locator("input[type='date']:visible");
         const dateCount = await dates.count();
         for (let i = 0; i < dateCount; i++) {
@@ -114,13 +133,36 @@ test.describe("Critical Path", () => {
         const selectCount = await selects.count();
         for (let i = 0; i < selectCount; i++) {
           const select = selects.nth(i);
-          const optionCount = await select
-            .locator("option:not([disabled])")
-            .count();
-          if (optionCount > 0) {
-            await select
-              .selectOption({ index: 1 }, { timeout: FILL_TIMEOUT_MS })
-              .catch(() => {});
+          // Rotate through each select's real (enabled, non-empty) options by
+          // the select's position in this pass: views with TWO party-entity
+          // selects must resolve them to DIFFERENT entities or validation
+          // rejects the draft ("parties must be distinct entities") and the
+          // wizard never navigates (index 1 for every select made both pick
+          // the same one). Value-based, not index-based, so
+          // placeholder/disabled layouts don't skew the mapping; the mapping
+          // is stable across fillUntilStuck passes. evaluate() has no
+          // timeout option and waits for the element — a select detaching
+          // mid-pass (view advanced) would hang it forever, so cap it.
+          const optionValues = await withTimeout(
+            select.evaluate((el) =>
+              Array.from((el as HTMLSelectElement).options)
+                .filter((o) => !o.disabled && o.value !== "")
+                .map((o) => o.value)
+            ),
+            FILL_TIMEOUT_MS,
+            [] as string[]
+          );
+          const value = optionValues[i % Math.max(1, optionValues.length)];
+          if (value !== undefined) {
+            try {
+              await select.selectOption(value, { timeout: FILL_TIMEOUT_MS });
+              // Controlled <select> needs change/input events after
+              // hydration (same contract as new-catalog-types).
+              await select.dispatchEvent("change", { timeout: FILL_TIMEOUT_MS });
+              await select.dispatchEvent("input", { timeout: FILL_TIMEOUT_MS });
+            } catch {
+              // View changed mid-loop — handled by the next pass.
+            }
           }
         }
         const textboxes = page.locator("input[type='text']:visible");
@@ -166,30 +208,27 @@ test.describe("Critical Path", () => {
       const fillUntilStuck = async () => {
         const probe = currentViewProbe();
         if (!(await probe.isVisible().catch(() => false))) return;
-        const kind = await probe.evaluate((el) =>
-          el.tagName === "INPUT"
-            ? (el as HTMLInputElement).type
-            : el.tagName === "SELECT"
-              ? "select"
-              : "textarea"
-        );
         for (let attempt = 0; attempt < 10; attempt++) {
           await fillVisibleControls();
-          const stuck = await probe
-            .inputValue()
-            .then((v) =>
-              kind === "date"
-                ? v === "2026-06-01"
-                : kind === "number"
-                  ? v === "12"
-                  : kind === "textarea"
-                    ? v === "E2E test purpose"
-                    : kind === "select"
-                      ? v !== ""
-                      : /^E2E Test Value \d+$/.test(v)
-            )
-            .catch(() => false);
-          if (stuck) return;
+          // Verify EVERY panel control holds a value, not just the first:
+          // a single-control probe passes while the remaining fills race
+          // hydration and silently drop (the Shareholders failure — the
+          // section view saved only effective_date and validation rejected
+          // 9 missing required fields). Explicit inputValue timeouts:
+          // unbounded waits hang when the view advances mid-check.
+          const panel = page.locator(
+            `${SECTION_PANEL} input:visible, ${SECTION_PANEL} select:visible, ${SECTION_PANEL} textarea:visible`
+          );
+          const count = await panel.count().catch(() => 0);
+          let allFilled = count > 0;
+          for (let i = 0; i < count && allFilled; i++) {
+            const v = await panel
+              .nth(i)
+              .inputValue({ timeout: 2_000 })
+              .catch(() => null);
+            if (v === null || v === "") allFilled = false;
+          }
+          if (allFilled) return;
           await page.waitForTimeout(400);
         }
       };
@@ -203,40 +242,78 @@ test.describe("Critical Path", () => {
       // matching it makes Playwright's actionability wait hang the click
       // (trace: click 'Next, Saving' never completing). Clicks are bounded;
       // a lost race is handled by the next loop iteration.
-      const NEXT_BTN = "button:has-text('Next'):enabled";
-      let clickedNext = true;
+      // Wait for a navigation button (union), never an instant isVisible():
+      // a fresh view may not have rendered yet, and during a save the button
+      // reads a disabled "Saving..." (matches neither segment). The wait
+      // resolves only when "Next" is enabled again or the final step's
+      // "Create Agreement" has mounted — then the loop exits for the
+      // create phase below.
+      const NAV_BTN =
+        "button:has-text('Next'):enabled, button:has-text('Create Agreement')";
       let guard = 0;
-      while (clickedNext && guard < 8) {
-        const nextBtn = page.locator(NEXT_BTN).first();
-        if (!(await nextBtn.isVisible().catch(() => false))) break;
-        await nextBtn.click({ timeout: 10_000 }).catch(() => {});
-        clickedNext = true;
-        guard += 1;
-        // Fill-verify the freshly mounted view before the next click.
-        await fillUntilStuck();
-        clickedNext = await page
-          .locator(NEXT_BTN)
-          .first()
-          .isVisible()
+      while (guard < 8) {
+        const nav = page.locator(NAV_BTN).first();
+        const appeared = await nav
+          .waitFor({ state: "visible", timeout: 15_000 })
+          .then(() => true)
           .catch(() => false);
+        if (!appeared) break;
+        const label = (await nav.textContent().catch(() => "")) ?? "";
+        if (label.includes("Create Agreement")) break; // final step reached
+        await nav.click({ timeout: 10_000 }).catch(() => {});
+        guard += 1;
+        // Fill-verify the freshly mounted view before the next wait.
+        await fillUntilStuck();
       }
       await fillVisibleControls();
       // Single-section templates show "Create Agreement" directly; re-fill
       // and retry on each attempt because pre-hydration fills silently leave
-      // React state empty even when the DOM shows values.
+      // React state empty even when the DOM shows values. Match the ENABLED
+      // button: after the walk's last Next-click the wizard may still be
+      // saving ("Saving...", disabled) and an early click is swallowed.
       for (let attempt = 0; attempt < 5; attempt++) {
+        const createBtn = page
+          .locator("button:has-text('Create Agreement'):enabled")
+          .first();
+        if (
+          !(await createBtn
+            .waitFor({ state: "visible", timeout: 10_000 })
+            .then(() => true)
+            .catch(() => false))
+        ) {
+          break;
+        }
         await fillVisibleControls();
-        await clickIfVisible(page, "button:has-text('Create Agreement')");
-        // The detail route compiles on first hit under the dev server: the
-        // URL can stay on /agreements/new long after the POST succeeded.
-        // 15s beats the old 3s window while keeping the 5 attempts bounded.
+        await createBtn.click({ timeout: 10_000 }).catch(() => {});
+        // Phase 1: confirm the click registered (button flips to disabled
+        // "Saving..."); a swallowed click must retry immediately — waiting
+        // out the race burns budget (the Founder Agreement failure).
+        const started = await page
+          .locator("button:has-text('Saving...')")
+          .first()
+          .waitFor({ state: "visible", timeout: 5_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!started) {
+          if (/\/agreements\/[0-9a-f-]+/.test(page.url())) break;
+          continue;
+        }
+        // Phase 2: the detail route compiles on first hit under the dev
+        // server, so give waitForURL real headroom; an error banner or the
+        // button re-enabling retries immediately.
         const navigated = await Promise.race([
           page
-            .waitForURL(/\/agreements\/[0-9a-f-]+/, { timeout: 15_000 })
+            .waitForURL(/\/agreements\/[0-9a-f-]+/, { timeout: 30_000 })
             .then(() => true)
             .catch(() => false),
           page
-            .waitForSelector(".bg-red-50", { timeout: 15_000 })
+            .waitForSelector(".bg-red-50", { timeout: 30_000 })
+            .then(() => true)
+            .catch(() => false),
+          page
+            .locator("button:has-text('Create Agreement'):enabled")
+            .first()
+            .waitFor({ state: "visible", timeout: 30_000 })
             .then(() => true)
             .catch(() => false),
         ]);
