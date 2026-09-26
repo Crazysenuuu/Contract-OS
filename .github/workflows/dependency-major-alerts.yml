@@ -1,0 +1,95 @@
+name: Dependency Major Alerts
+
+# The dependency audit capped risky packages in backend/requirements.txt
+# (fastapi<1, pydantic<3, celery<6, sqlalchemy<2.2, alembic<1.21). A cap only
+# works if someone notices when the next major actually ships: this workflow
+# runs scripts/check_dependency_majors.py weekly, and on any new release
+# beyond a cap opens/updates ONE tracking issue (dep-major-alerts label)
+# instead of spamming one issue per dependency per week.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC — before the work week starts.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {} # manual runs for testing
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  check-majors:
+    name: Check dependency majors on PyPI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Stdlib-only script: no pip install needed (a bare runner must not
+      # pull the 135-package lock just to compare version strings).
+      - name: Compare upper bounds against PyPI
+        id: check
+        # Actions runs bash with -e: capture the exit code explicitly or a
+        # non-zero checker (alert found) would kill the step before the
+        # output is recorded.
+        run: |
+          set +e
+          python scripts/check_dependency_majors.py --fail-on-alert > /tmp/majors_report.txt
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize
+        run: |
+          touch /tmp/majors_report.txt
+          cat /tmp/majors_report.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update tracking issue
+        if: steps.check.outputs.exitcode == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="[deps] New releases exceed requirements.txt upper bounds"
+          LABEL="dep-major-alerts"
+          gh label create "$LABEL" --color D93F0B --description "A requirements.txt upper bound is exceeded by a new release" 2>/dev/null || true
+          # Assemble the body from static text + the report (a single
+          # quoted heredoc would NOT expand $(cat ...), and an unquoted one
+          # would execute any backticks inside the report).
+          BODY_FILE=$(mktemp)
+          {
+            cat <<'EOF'
+          Automated weekly check found PyPI releases beyond the upper bounds
+          in `backend/requirements.txt`. Each cap carries a rationale comment
+          there — test the new major, then update the bound.
+
+          <details><summary>Full report</summary>
+
+          ```
+          EOF
+            cat /tmp/majors_report.txt
+            cat <<'EOF'
+          ```
+
+          </details>
+          EOF
+          } > "$BODY_FILE"
+          # ONE issue, updated every week it still fires — no alert spam.
+          EXISTING=$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file "$BODY_FILE"
+          else
+            gh issue create --title "$TITLE" --label "$LABEL" --body-file "$BODY_FILE"
+          fi
+
+      - name: Fail the run when a bound is exceeded
+        if: steps.check.outputs.exitcode == '1'
+        run: |
+          echo "Upper bounds exceeded — see the summary and tracking issue."
+          exit 1

@@ -3,9 +3,11 @@ import { login as sharedLogin } from "./helpers";
 
 // 13 independent wizard runs against the dev server: cold-route compiles and
 // hydration races routinely exceeded the 30s suite default in CI (all 12
-// failures were 30000ms timeouts; 2 passed on retry). 90s per test keeps the
-// fill-until-hydrated loops safe while staying inside the job budget.
-test.setTimeout(90_000);
+// failures were 30000ms timeouts; 2 passed on retry). Each create attempt
+// can cost up to ~30s (Saving-flip wait + outcome race), so 90s left no
+// room for a single swallowed click on a cold server; 120s covers 3
+// attempts + the walk while 13 tests stay well inside the 35m job budget.
+test.setTimeout(120_000);
 
 /**
  * Per-type wizard coverage for the 13 agreement types added to the catalog
@@ -286,19 +288,19 @@ test.describe("New catalog types through the wizard", () => {
         // handleFinish completed silently (retry now).
         const outcome = await Promise.race([
           page
-            .waitForURL(/\/agreements\/[0-9a-f-]{36}/, { timeout: 30_000 })
+            .waitForURL(/\/agreements\/[0-9a-f-]{36}/, { timeout: 25_000 })
             .then(() => "navigated" as const)
             .catch(() => "timeout" as const),
           page
             .locator(".bg-red-50")
             .first()
-            .waitFor({ state: "visible", timeout: 30_000 })
+            .waitFor({ state: "visible", timeout: 25_000 })
             .then(() => "error" as const)
             .catch(() => "timeout" as const),
           page
             .locator("button:has-text('Create Agreement'):enabled")
             .first()
-            .waitFor({ state: "visible", timeout: 30_000 })
+            .waitFor({ state: "visible", timeout: 25_000 })
             .then(() => "re-enabled" as const)
             .catch(() => "timeout" as const),
         ]);

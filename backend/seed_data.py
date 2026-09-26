@@ -1533,10 +1533,43 @@ async def seed_catalog_agreement_types(db):
             template_key=template_key,
         ))
         added += 1
+
+    # Repair pass: the key-gated upsert above cannot help rows it does not
+    # recognise. Databases seeded before the catalog was introduced carry
+    # (a) catalog-keyed rows whose schema predates the questionnaire bank
+    # and (b) *_agreement duplicate rows for the same type under a different
+    # key — both render as wizard cards, but (a) serves no questions and (b)
+    # 404s on /types/{id}/questions because no questionnaire is defined.
+    #   1. catalog-keyed rows without questions get the composed schema;
+    #   2. non-catalog active rows without questions are retired
+    #      (status="retired") so every active type is wizard-renderable and
+    #      the type list carries exactly one card per agreement type.
+    # Rows that already have questions are never touched: the 4 original MVP
+    # types keep their hand-written schemas.
+    catalog_schemas = {
+        key: compose_catalog_schema(kind, extras)
+        for key, _name, _category, kind, _description, extras in EXTENDED_AGREEMENT_TYPES
+    }
+    schemas_backfilled = 0
+    retired = 0
+    all_rows = (await db.execute(select(AgreementType))).scalars().all()
+    for row in all_rows:
+        has_questions = bool((row.schema or {}).get("questions"))
+        composed = catalog_schemas.get(row.key)
+        if composed is not None:
+            if not has_questions:
+                row.schema = composed
+                schemas_backfilled += 1
+            continue
+        if row.status == "active" and not has_questions:
+            row.status = "retired"
+            retired += 1
+
     await db.flush()
     print(
         f"    ✅ {added} catalog agreement types created "
-        f"({len(EXTENDED_AGREEMENT_TYPES)} in catalog), {backfilled} template backfilled"
+        f"({len(EXTENDED_AGREEMENT_TYPES)} in catalog), {backfilled} template backfilled, "
+        f"{schemas_backfilled} schemas backfilled, {retired} legacy duplicates retired"
     )
 
 

@@ -192,6 +192,113 @@ class TestCatalogSeed:
         result = await db_session.execute(select(func.count()).select_from(AgreementType))
         assert result.scalar_one() == len(EXTENDED_AGREEMENT_TYPES)
 
+    async def test_backfills_schema_for_catalog_key_without_questions(self, db_session):
+        """A DB seeded before the catalog existed can hold a catalog-keyed row
+        whose schema predates the questionnaire bank. The wizard served it a
+        404 on /types/{id}/questions — the next seed run must backfill the
+        composed schema."""
+        from app.models.agreement_type import AgreementType
+
+        stale = AgreementType(
+            id=catalog_type_id("referral"),
+            key="referral",
+            name="Referral Agreement",
+            category="commercial",
+            status="active",
+            version=1,
+            schema={"clauses": []},  # pre-catalog layout: no questions
+            template_key="marketing_agreement_lk_v1",
+        )
+        db_session.add(stale)
+        await db_session.commit()
+
+        await seed_catalog_agreement_types(db_session)
+        await db_session.commit()
+        row = (
+            await db_session.execute(
+                select(AgreementType).where(AgreementType.key == "referral")
+            )
+        ).scalar_one()
+        assert row.schema.get("questions"), "schema must be backfilled"
+        assert any(q["key"] == "commission_rate" for q in row.schema["questions"])
+        assert row.status == "active"
+
+    async def test_retires_non_catalog_row_without_questions(self, db_session):
+        """Legacy *_agreement duplicate rows (same type, different key) have
+        no questionnaire and 404 in the wizard; they must be retired so the
+        type list shows exactly one card per agreement type."""
+        from app.models.agreement_type import AgreementType
+
+        legacy_dup = AgreementType(
+            id=catalog_type_id("legacy_referral"),
+            key="referral_agreement",  # not in the catalog
+            name="Referral Agreement",
+            category="Commercial",
+            status="active",
+            version=1,
+            schema={"clauses": []},
+            template_key="generic_agreement_lk_v1",
+        )
+        legacy_with_questions = AgreementType(
+            id=catalog_type_id("legacy_nda"),
+            key="mutual_nda",
+            name="Mutual NDA",
+            category="Confidentiality",
+            status="active",
+            version=1,
+            schema={"questions": [{"key": "effective_date", "type": "date",
+                                   "label": "Effective Date", "required": True}],
+                    "clauses": []},
+            template_key="mutual_nda_lk_v1",
+        )
+        db_session.add_all([legacy_dup, legacy_with_questions])
+        await db_session.commit()
+
+        await seed_catalog_agreement_types(db_session)
+        await db_session.commit()
+
+        dup = (
+            await db_session.execute(
+                select(AgreementType).where(AgreementType.key == "referral_agreement")
+            )
+        ).scalar_one()
+        assert dup.status == "retired", "question-less duplicate must be retired"
+
+        nda = (
+            await db_session.execute(
+                select(AgreementType).where(AgreementType.key == "mutual_nda")
+            )
+        ).scalar_one()
+        assert nda.status == "active", "rows with questions are never touched"
+        assert nda.schema["questions"][0]["key"] == "effective_date"
+
+    async def test_active_types_all_have_questions_after_seed(self, db_session):
+        """The invariant the wizard depends on: every type the /types listing
+        serves (status=active) must resolve to a questionnaire."""
+        legacy = AgreementType(
+            id=catalog_type_id("legacy_vendor"),
+            key="vendor_agreement",
+            name="Vendor Agreement",
+            category="Commercial",
+            status="active",
+            version=1,
+            schema={"clauses": []},
+            template_key="generic_agreement_lk_v1",
+        )
+        db_session.add(legacy)
+        await db_session.commit()
+
+        await seed_catalog_agreement_types(db_session)
+        await db_session.commit()
+
+        rows = (await db_session.execute(select(AgreementType))).scalars().all()
+        active = [r for r in rows if r.status == "active"]
+        assert active, "catalog must be active"
+        for r in active:
+            assert (r.schema or {}).get("questions"), (
+                f"{r.key}: active without questions — wizard would 404"
+            )
+
     async def test_types_exposed_via_api(
         self, client, auth_headers, db_session, agreements_api_path
     ):
