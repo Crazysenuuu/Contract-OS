@@ -71,7 +71,14 @@ class BulkJob(Base):
     updated_at = Column(DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
 
     # Relationships
-    items = relationship("BulkJobItem", back_populates="bulk_job", cascade="all, delete-orphan")
+    # Job detail views read items after awaits; keep eager (AsyncSession
+    # cannot lazy-load without MissingGreenlet).
+    items = relationship(
+        "BulkJobItem",
+        back_populates="bulk_job",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class BulkJobItem(Base):

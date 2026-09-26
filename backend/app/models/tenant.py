@@ -52,8 +52,15 @@ class Tenant(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    branding = relationship("TenantBranding", back_populates="tenant", uselist=False)
-    themes = relationship("TenantTheme", back_populates="tenant")
+    # Branding/themes are curated per-tenant config (bounded), read by
+    # white-label rendering after awaits; keep eager (AsyncSession cannot
+    # lazy-load without MissingGreenlet).
+    branding = relationship(
+        "TenantBranding", back_populates="tenant", lazy="selectin", uselist=False
+    )
+    themes = relationship(
+        "TenantTheme", back_populates="tenant", lazy="selectin"
+    )
 
 
 class TenantBranding(Base):

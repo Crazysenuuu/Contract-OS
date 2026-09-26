@@ -24,6 +24,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.agreement import Agreement
+from app.models.bulk_operations import BulkJob
 from app.models.agreement_access import AgreementParty
 from app.models.agreement_type import AgreementType
 from app.models.approval import ApprovalDefinition, ApprovalRecord, ApprovalStage
@@ -35,6 +36,7 @@ from app.models.ingestion import IngestionJob
 from app.models.legal_entity import LegalEntity
 from app.models.negotiation import AgreementChange
 from app.models.template import Template
+from app.models.tenant import Tenant
 from app.models.termination import AgreementTermination, TerminationSettlement
 from app.models.user import User
 
@@ -66,7 +68,18 @@ HOT_EAGER_RELATIONSHIPS = [
     (ApprovalDefinition, "stages"),
     (ApprovalStage, "steps"),
     (ApprovalRecord, "decisions"),
+    # --- edge-module sweep (bounded collections only) ---
+    (BulkJob, "items"),
+    (Tenant, "branding"),
+    (Tenant, "themes"),
 ]
+
+# Deliberately NOT pinned (documented skips):
+# - WebhookEndpoint.deliveries: append-only delivery log, unbounded, no
+#   relationship traversals in app code (services query the table directly).
+# - Language.translations: catalog table, unbounded, no traversals.
+# - Organization.users/legal_entities/agreements: unbounded aggregates; every
+#   real access path queries the child table with filters/pagination.
 
 
 class TestHotRelationshipsAreSelectin:
