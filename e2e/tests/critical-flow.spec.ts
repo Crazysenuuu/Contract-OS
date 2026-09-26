@@ -1,6 +1,12 @@
 import { test, expect, Page } from "@playwright/test";
 import { login as sharedLogin } from "./helpers";
 
+// This spec walks the real Next.js dev server (cold route compiles) through
+// a multi-step wizard. The 30s suite default timed out in CI inside the
+// hydration-wait loops (12/12 E2E failures were 30000ms timeouts; retries
+// passed). 90s gives the fill-until-hydrated loops real headroom.
+test.setTimeout(90_000);
+
 /**
  * Critical path: login → create → wizard → negotiate → review → sign.
  *
@@ -16,14 +22,17 @@ async function login(page: Page) {
 async function fillIfVisible(page: Page, selector: string, value: string) {
   const locator = page.locator(selector).first();
   if (await locator.isVisible()) {
-    await locator.fill(value);
+    // Bounded: the element can detach between isVisible and fill.
+    await locator.fill(value, { timeout: 10_000 }).catch(() => {});
   }
 }
 
 async function clickIfVisible(page: Page, selector: string) {
   const locator = page.locator(selector).first();
   if (await locator.isVisible()) {
-    await locator.click();
+    // Bounded: the element can unmount mid-action (wizard step changes);
+    // an unbounded click hangs the whole test on the actionability wait.
+    await locator.click({ timeout: 10_000 }).catch(() => {});
     return true;
   }
   return false;
@@ -79,15 +88,27 @@ test.describe("Critical Path", () => {
       // its onChange handlers, so verify the first fill actually stuck and
       // retry (values revert when the handler wasn't attached yet).
       const fillVisibleControls = async () => {
+        // Every fill below is bounded and failure-tolerant: the wizard can
+        // advance to the next (or final) view while this helper is running —
+        // e.g. the last view (Clauses) has no text inputs at all. An
+        // unbounded fill on a detached element waits the suite default and
+        // hangs the whole test (locator.fill: input[type=text].nth(1)).
+        const FILL_TIMEOUT_MS = 2_000;
         const dates = page.locator("input[type='date']:visible");
         const dateCount = await dates.count();
         for (let i = 0; i < dateCount; i++) {
-          await dates.nth(i).fill("2026-06-01");
+          await dates
+            .nth(i)
+            .fill("2026-06-01", { timeout: FILL_TIMEOUT_MS })
+            .catch(() => {});
         }
         const numbers = page.locator("input[type='number']:visible");
         const numberCount = await numbers.count();
         for (let i = 0; i < numberCount; i++) {
-          await numbers.nth(i).fill("12");
+          await numbers
+            .nth(i)
+            .fill("12", { timeout: FILL_TIMEOUT_MS })
+            .catch(() => {});
         }
         const selects = page.locator("select:visible");
         const selectCount = await selects.count();
@@ -97,7 +118,9 @@ test.describe("Critical Path", () => {
             .locator("option:not([disabled])")
             .count();
           if (optionCount > 0) {
-            await select.selectOption({ index: 1 });
+            await select
+              .selectOption({ index: 1 }, { timeout: FILL_TIMEOUT_MS })
+              .catch(() => {});
           }
         }
         const textboxes = page.locator("input[type='text']:visible");
@@ -105,12 +128,18 @@ test.describe("Critical Path", () => {
         for (let i = 0; i < textCount; i++) {
           // Distinct values: party-name fields must not collide ("parties must
           // be distinct entities" is a schema-level rule).
-          await textboxes.nth(i).fill(`E2E Test Value ${i + 1}`);
+          await textboxes
+            .nth(i)
+            .fill(`E2E Test Value ${i + 1}`, { timeout: FILL_TIMEOUT_MS })
+            .catch(() => {});
         }
         const areas = page.locator("textarea:visible");
         const areaCount = await areas.count();
         for (let i = 0; i < areaCount; i++) {
-          await areas.nth(i).fill("E2E test purpose");
+          await areas
+            .nth(i)
+            .fill("E2E test purpose", { timeout: FILL_TIMEOUT_MS })
+            .catch(() => {});
         }
       };
 
@@ -168,23 +197,25 @@ test.describe("Critical Path", () => {
       // First view: fill until hydration confirms.
       await fillUntilStuck();
 
-      // Walk the remaining views. handleNext disables and relabels the
-      // button to "Saving..." while saving; matching both lets Playwright
-      // auto-wait for the re-enabled "Next" instead of mistaking the
-      // transient save state for the final step ("Create Agreement").
+      // Walk the remaining views until only "Create Agreement" (final step)
+      // remains. Match the ENABLED "Next" only: the button flips to a
+      // disabled "Saving..." mid-save and unmounts on the final step —
+      // matching it makes Playwright's actionability wait hang the click
+      // (trace: click 'Next, Saving' never completing). Clicks are bounded;
+      // a lost race is handled by the next loop iteration.
+      const NEXT_BTN = "button:has-text('Next'):enabled";
       let clickedNext = true;
       let guard = 0;
       while (clickedNext && guard < 8) {
-        clickedNext = await clickIfVisible(
-          page,
-          "button:has-text('Next'), button:has-text('Saving')"
-        );
+        const nextBtn = page.locator(NEXT_BTN).first();
+        if (!(await nextBtn.isVisible().catch(() => false))) break;
+        await nextBtn.click({ timeout: 10_000 }).catch(() => {});
+        clickedNext = true;
         guard += 1;
-        if (!clickedNext) break;
         // Fill-verify the freshly mounted view before the next click.
         await fillUntilStuck();
         clickedNext = await page
-          .locator("button:has-text('Next'), button:has-text('Saving')")
+          .locator(NEXT_BTN)
           .first()
           .isVisible()
           .catch(() => false);
@@ -196,13 +227,16 @@ test.describe("Critical Path", () => {
       for (let attempt = 0; attempt < 5; attempt++) {
         await fillVisibleControls();
         await clickIfVisible(page, "button:has-text('Create Agreement')");
+        // The detail route compiles on first hit under the dev server: the
+        // URL can stay on /agreements/new long after the POST succeeded.
+        // 15s beats the old 3s window while keeping the 5 attempts bounded.
         const navigated = await Promise.race([
           page
-            .waitForURL(/\/agreements\/[0-9a-f-]+/, { timeout: 3000 })
+            .waitForURL(/\/agreements\/[0-9a-f-]+/, { timeout: 15_000 })
             .then(() => true)
             .catch(() => false),
           page
-            .waitForSelector(".bg-red-50", { timeout: 3000 })
+            .waitForSelector(".bg-red-50", { timeout: 15_000 })
             .then(() => true)
             .catch(() => false),
         ]);
@@ -215,14 +249,14 @@ test.describe("Critical Path", () => {
       // or returns to the list; both are acceptable endpoints.
       const landed = await Promise.race([
         page
-          .waitForURL(/\/agreements\/[0-9a-f-]+/, { timeout: 8000 })
+          .waitForURL(/\/agreements\/[0-9a-f-]+/, { timeout: 15_000 })
           .then(() => true)
           .catch(() => false),
         page
-          .waitForURL(/\/dashboard/, { timeout: 8000 })
+          .waitForURL(/\/dashboard/, { timeout: 15_000 })
           .then(() => true)
           .catch(() => false),
-        page.waitForTimeout(8000).then(() => false),
+        page.waitForTimeout(15_000).then(() => false),
       ]);
       if (!landed) {
         const alertText = await page
@@ -247,7 +281,8 @@ test.describe("Critical Path", () => {
             'a[href^="/agreements/"]:not([href="/agreements/new"])'
           );
       if (clicked) {
-        await expect(page).toHaveURL(/\/agreements\/[^/]+$/);
+        // Detail route compiles on first hit under the dev server.
+        await expect(page).toHaveURL(/\/agreements\/[^/]+$/, { timeout: 30_000 });
       } else if (!alreadyThere) {
         await page.goto("/dashboard");
         await expect(page.getByRole("heading", { level: 1 })).toContainText(

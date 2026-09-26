@@ -243,7 +243,10 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     needs: [backend-test, frontend-test]
-    timeout-minutes: 25
+    # Wizard specs get 90s/test (hydration-wait loops vs cold dev-server
+    # compiles); 12 retries at 90s + ~35 passing tests + backend/web-server
+    # boot exceeded the previous 25m cap (job died at 23m21s).
+    timeout-minutes: 35
 
     services:
       postgres:

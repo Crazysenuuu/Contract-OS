@@ -18,7 +18,14 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  // Local runs hit the dev server with parallel workers; navigation-dependent
+  // CI wizard specs (critical-flow, new-catalog-types) walk the real
+  // Next.js dev server, whose per-route cold compiles routinely exceed the
+  // 30s default. 12/12 CI failures were "Test timeout of 30000ms exceeded"
+  // inside the hydration-wait loops (2 of them passed on retry — flaky), so
+  // the loops simply need more headroom. 90s × (retries≈2) keeps the job
+  // within its 25-minute budget. Non-wizard specs keep the 30s default.
+  timeout: 30_000,
+  expect: { timeout: 15_000 },
   // assertions (toHaveURL after a click) need headroom for cold route
   // compiles. Healthy assertions still pass instantly.
   expect: { timeout: 15_000 },

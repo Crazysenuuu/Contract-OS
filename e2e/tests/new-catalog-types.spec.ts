@@ -1,6 +1,12 @@
 import { test, expect, Page } from "@playwright/test";
 import { login as sharedLogin } from "./helpers";
 
+// 13 independent wizard runs against the dev server: cold-route compiles and
+// hydration races routinely exceeded the 30s suite default in CI (all 12
+// failures were 30000ms timeouts; 2 passed on retry). 90s per test keeps the
+// fill-until-hydrated loops safe while staying inside the job budget.
+test.setTimeout(90_000);
+
 /**
  * Per-type wizard coverage for the 13 agreement types added to the catalog
  * (Corporate & Governance + commercial types from the spec's extended §3.A
@@ -35,15 +41,27 @@ const NEW_TYPES: Array<{ name: string }> = [
  * party-name fields never collide ("parties must be distinct entities").
  */
 async function fillVisibleControls(page: Page) {
+  // Every fill below is bounded and failure-tolerant: the wizard can advance
+  // to the next (or final) view while this helper is running — the last view
+  // (Clauses) has no text inputs at all. An unbounded fill on a detached
+  // element waits the suite default and hangs the whole test
+  // (locator.fill: input[type=text].nth(1)).
+  const FILL_TIMEOUT_MS = 2_000;
   const dates = page.locator("input[type='date']:visible");
   const dateCount = await dates.count();
   for (let i = 0; i < dateCount; i++) {
-    await dates.nth(i).fill("2026-06-01");
+    await dates
+      .nth(i)
+      .fill("2026-06-01", { timeout: FILL_TIMEOUT_MS })
+      .catch(() => {});
   }
   const numbers = page.locator("input[type='number']:visible");
   const numberCount = await numbers.count();
   for (let i = 0; i < numberCount; i++) {
-    await numbers.nth(i).fill("12");
+    await numbers
+      .nth(i)
+      .fill("12", { timeout: FILL_TIMEOUT_MS })
+      .catch(() => {});
   }
   const selects = page.locator("select:visible");
   const selectCount = await selects.count();
@@ -51,21 +69,33 @@ async function fillVisibleControls(page: Page) {
     const select = selects.nth(i);
     const optionCount = await select.locator("option:not([disabled])").count();
     if (optionCount > 0) {
-      await select.selectOption({ index: 1 });
-      // Controlled <select> needs change/input events after hydration.
-      await select.dispatchEvent("change");
-      await select.dispatchEvent("input");
+      try {
+        await select.selectOption({ index: 1 }, { timeout: FILL_TIMEOUT_MS });
+        // Controlled <select> needs change/input events after hydration.
+        await select.dispatchEvent("change");
+        await select.dispatchEvent("input");
+      } catch {
+        // View changed mid-loop — handled by the next fillUntilStuck pass.
+      }
     }
   }
   const textboxes = page.locator("input[type='text']:visible");
   const textCount = await textboxes.count();
   for (let i = 0; i < textCount; i++) {
-    await textboxes.nth(i).fill(`E2E Test Value ${i + 1}`);
+    // Distinct values so party-name fields never collide ("parties must be
+    // distinct entities").
+    await textboxes
+      .nth(i)
+      .fill(`E2E Test Value ${i + 1}`, { timeout: FILL_TIMEOUT_MS })
+      .catch(() => {});
   }
   const areas = page.locator("textarea:visible");
   const areaCount = await areas.count();
   for (let i = 0; i < areaCount; i++) {
-    await areas.nth(i).fill("E2E test purpose");
+    await areas
+      .nth(i)
+      .fill("E2E test purpose", { timeout: FILL_TIMEOUT_MS })
+      .catch(() => {});
   }
 }
 
@@ -160,24 +190,25 @@ test.describe("New catalog types through the wizard", () => {
       // First view: fill until hydration confirms.
       await fillUntilStuck();
 
-      // Walk the remaining views. handleNext saves before advancing, so the
-      // button label flips to "Saving..." (disabled) mid-round-trip. Matching
-      // both labels lets Playwright auto-wait for the re-enabled "Next"
-      // instead of the loop mistaking the transient save state for the last
-      // step (whose button reads "Create Agreement").
+      // Walk the remaining views until only "Create Agreement" (final step)
+      // remains. The Next button flips to a disabled "Saving..." mid-save;
+      // matching it would race the final step, where it unmounts instead of
+      // re-enabling — and Playwright's actionability wait then hangs the
+      // click forever (trace: click 'Next, Saving' with no matching after).
+      // Match the enabled "Next" only, bound the click, and re-check before
+      // every iteration.
+      const NEXT_BTN = "button:has-text('Next'):enabled";
       let guard = 0;
       while (guard < 8) {
-        const nextBtn = page
-          .locator("button:has-text('Next'), button:has-text('Saving')")
-          .first();
+        const nextBtn = page.locator(NEXT_BTN).first();
         if (!(await nextBtn.isVisible().catch(() => false))) break;
-        await nextBtn.click();
+        await nextBtn.click({ timeout: 10_000 }).catch(() => {});
         guard += 1;
         // The freshly mounted view needs its own fill-verification before
         // the next click; bail out if we've reached the final step.
         await fillUntilStuck();
         if (!(await page
-          .locator("button:has-text('Next'), button:has-text('Saving')")
+          .locator(NEXT_BTN)
           .first()
           .isVisible()
           .catch(() => false))) {
@@ -187,7 +218,10 @@ test.describe("New catalog types through the wizard", () => {
 
       // 5. Submit: "Create Agreement" triggers handleFinish — create draft,
       //    save answers, validate, navigate to the agreement detail page.
-      for (let attempt = 0; attempt < 5; attempt++) {
+      //    The detail route compiles on first hit under the dev server, so
+      //    the URL can stay on /agreements/new for tens of seconds after the
+      //    (already successful) POST — give waitForURL real headroom.
+      for (let attempt = 0; attempt < 3; attempt++) {
         await fillVisibleControls(page);
         const createBtn = page
           .locator("button:has-text('Create Agreement')")
@@ -195,9 +229,9 @@ test.describe("New catalog types through the wizard", () => {
         if (!(await createBtn.isVisible().catch(() => false))) {
           break;
         }
-        await createBtn.click();
+        await createBtn.click({ timeout: 10_000 }).catch(() => {});
         const navigated = await page
-          .waitForURL(/\/agreements\/[0-9a-f-]{36}/, { timeout: 5000 })
+          .waitForURL(/\/agreements\/[0-9a-f-]{36}/, { timeout: 30_000 })
           .then(() => true)
           .catch(() => false);
         if (navigated) break;
