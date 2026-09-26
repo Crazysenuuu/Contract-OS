@@ -81,6 +81,9 @@ class ForecastRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         "ForecastPrediction",
         back_populates="run",
         cascade="all, delete-orphan",
+        lazy="selectin",
+        # Serializer paths (create, rejected, get) read predictions after
+        # db.refresh awaits — default lazy load raised MissingGreenlet.
         order_by="ForecastPrediction.target_date",
     )
 

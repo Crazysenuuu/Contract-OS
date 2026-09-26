@@ -76,10 +76,12 @@ class Template(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # ------------------------------------------------------------------ #
     # Relationships
     # ------------------------------------------------------------------ #
+    # Template render/detail paths read versions and variables after awaits.
     versions: Mapped[list[TemplateVersion]] = relationship(
         "TemplateVersion",
         back_populates="template",
         cascade="all, delete-orphan",
+        lazy="selectin",
         order_by="TemplateVersion.version_number",
     )
 
@@ -87,6 +89,7 @@ class Template(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         "TemplateVariable",
         back_populates="template",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 

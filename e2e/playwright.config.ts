@@ -56,7 +56,13 @@ export default defineConfig({
     command: "npm run dev",
     cwd: "../frontend",
     url: "http://localhost:3000",
-    reuseExistingServer: !process.env.CI,
+    // scripts/test.sh owns the dev server (boot + hot-route warm-up) in BOTH
+    // local and CI runs — cold per-route compiles behind this webServer were
+    // the #1 e2e flake, so warming must happen before tests start, and only
+    // the process that boots the server can warm it in time. reuseExisting
+    // lets Playwright attach to test.sh's server; a bare `npx playwright
+    // test` (no test.sh) still boots one here as a fallback.
+    reuseExistingServer: true,
     timeout: 120_000,
     env: {
       // Frontend rewrites proxy API calls to this backend URL.

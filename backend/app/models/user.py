@@ -79,16 +79,20 @@ class User(
         server_default="false",
     )
 
+    # Org resolution runs on every authenticated request (memberships ->
+    # organization); keep it eager so post-await access never lazy-loads.
     memberships = relationship(
         "OrganizationMember",
         back_populates="user",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     sessions = relationship(
         "UserSession",
         back_populates="user",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 

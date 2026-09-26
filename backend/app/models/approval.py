@@ -90,10 +90,13 @@ class ApprovalDefinition(
     # Relationships
     organization = relationship("Organization")
 
+    # Definition detail + approval submission read stages after awaits; keep
+    # them eager (AsyncSession cannot lazy-load without MissingGreenlet).
     stages = relationship(
         "ApprovalStage",
         back_populates="definition",
         cascade="all, delete-orphan",
+        lazy="selectin",
         order_by="ApprovalStage.order",
     )
 
@@ -174,6 +177,7 @@ class ApprovalStage(
         "ApprovalStep",
         back_populates="stage",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 
@@ -301,10 +305,12 @@ class ApprovalRecord(
     definition = relationship("ApprovalDefinition")
     current_stage = relationship("ApprovalStage")
 
+    # Record detail + quorum evaluation read decisions after awaits.
     decisions = relationship(
         "ApprovalDecision",
         back_populates="record",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 

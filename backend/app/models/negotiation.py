@@ -104,10 +104,14 @@ class AgreementChange(
     )
     proposer = relationship("User")
 
+    # Read by agreement_changes.accept_change/reject_change after awaits —
+    # a default lazy load here raised MissingGreenlet (see the removed
+    # _ensure_items_loaded hand-patch).
     items = relationship(
         "AgreementChangeItem",
         back_populates="change",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 

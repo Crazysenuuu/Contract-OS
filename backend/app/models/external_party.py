@@ -208,10 +208,13 @@ class ExternalParty(
     # guest performed: accepted / signed. Captures the identity method used
     # (otp_email | kyc_provider) and the document hash at the time so the
     # audit ledger can answer "who signed what, when, and with what hash".
+    # Audit-ledger and guest-session serializers read these after awaits;
+    # keep them eager (AsyncSession cannot lazy-load without MissingGreenlet).
     signature_events = relationship(
         "SignatureEvent",
         back_populates="external_party",
         cascade="all, delete-orphan",
+        lazy="selectin",
         order_by="SignatureEvent.created_at",
     )
 
@@ -224,6 +227,7 @@ class ExternalParty(
         "ExternalPartySession",
         back_populates="external_party",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     @staticmethod

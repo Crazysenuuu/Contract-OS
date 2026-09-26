@@ -59,6 +59,23 @@ async function fillVisibleControls(page: Page) {
   // (Clauses) has no text inputs at all. An unbounded fill on a detached
   // element waits the suite default and hangs the whole test
   // (locator.fill: input[type=text].nth(1)).
+  //
+  // Pure queries have NO timeout option at all (locator.count(), etc.) and
+  // were observed hanging indefinitely on the final Clauses view: both
+  // Purchase Agreement runs burned the entire 120s budget inside
+  // textboxes.count() while the page itself rendered fine and nothing was
+  // left to fill. Cap the WHOLE pass — if any single query wedges, the
+  // caller proceeds to the next step (on the final view: straight to the
+  // Create click) instead of losing the test.
+  const FILL_PASS_DEADLINE_MS = 15_000;
+  await withTimeout(
+    fillVisibleControlsInner(page),
+    FILL_PASS_DEADLINE_MS,
+    undefined
+  );
+}
+
+async function fillVisibleControlsInner(page: Page) {
   const FILL_TIMEOUT_MS = 2_000;
   const dates = page.locator("input[type='date']:visible");
   const dateCount = await dates.count();

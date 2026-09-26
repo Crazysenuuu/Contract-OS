@@ -273,6 +273,9 @@ jobs:
       ENVIRONMENT: testing
       # Script writes the backend log here; kept for artifact upload on failure.
       BACKEND_LOG_FILE: ${{ github.workspace }}/backend/e2e-backend.log
+      # Same for the Next.js dev server log (test.sh boots the frontend so it
+      # can pre-warm routes; compile/hydration errors only show here).
+      FRONTEND_LOG_FILE: ${{ github.workspace }}/frontend/e2e-frontend.log
 
     steps:
       - name: Checkout code
@@ -331,6 +334,14 @@ jobs:
         with:
           name: e2e-backend-log
           path: backend/e2e-backend.log
+          retention-days: 7
+
+      - name: Upload frontend log
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-frontend-log
+          path: frontend/e2e-frontend.log
           retention-days: 7
 
       - name: Upload Playwright report

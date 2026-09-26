@@ -150,16 +150,20 @@ class AgreementTermination(
 
     agreement = relationship("Agreement")
 
+    # Termination detail/settle serializers read these after awaits; keep
+    # them eager (AsyncSession cannot lazy-load without MissingGreenlet).
     post_termination_obligations = relationship(
         "PostTerminationObligation",
         back_populates="termination",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     settlement = relationship(
         "TerminationSettlement",
         back_populates="termination",
         cascade="all, delete-orphan",
+        lazy="selectin",
         uselist=False,
     )
 
@@ -285,10 +289,12 @@ class TerminationSettlement(
         back_populates="settlement",
     )
 
+    # Settlement checklist serializer reads items after awaits.
     items = relationship(
         "TerminationSettlementItem",
         back_populates="settlement",
         cascade="all, delete-orphan",
+        lazy="selectin",
         order_by="TerminationSettlementItem.position",
     )
 

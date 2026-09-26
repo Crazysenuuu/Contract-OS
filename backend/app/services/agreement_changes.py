@@ -78,18 +78,6 @@ async def create_change(
     return change
 
 
-async def _ensure_items_loaded(db: AsyncSession, change: AgreementChange) -> None:
-    """Load ``change.items`` if not already populated.
-
-    Async sessions cannot lazy-load relationships (MissingGreenlet), so any
-    entry point that iterates ``change.items`` must guarantee it is loaded.
-    Callers today all come through ``get_change`` (selectinload), but this
-    guard keeps the mutators safe for future callers.
-    """
-    if "items" not in change.__dict__:
-        await db.refresh(change, attribute_names=["items"])
-
-
 async def accept_change(
     db: AsyncSession,
     change: AgreementChange,
@@ -99,8 +87,6 @@ async def accept_change(
     Marks all items as accepted and the change as accepted.
     """
     change.status = "accepted"
-    await _ensure_items_loaded(db, change)
-
     for item in change.items:
         item.status = "accepted"
 
@@ -117,8 +103,6 @@ async def reject_change(
     Marks all items as rejected and the change as rejected.
     """
     change.status = "rejected"
-    await _ensure_items_loaded(db, change)
-
     for item in change.items:
         item.status = "rejected"
 

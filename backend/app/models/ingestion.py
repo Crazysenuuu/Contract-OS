@@ -99,10 +99,12 @@ class IngestionJob(
         nullable=True,
     )
 
+    # Review-queue/summary serializers read documents after awaits.
     documents = relationship(
         "OCRDocument",
         back_populates="job",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 

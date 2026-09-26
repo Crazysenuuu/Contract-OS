@@ -165,22 +165,29 @@ class Agreement(
         back_populates="agreements",
     )
 
+    # Hot serializer path: list/detail payloads read versions, parties and
+    # participants after awaits (sessions are closed mid-request). Default
+    # lazy="select" raises MissingGreenlet there; selectin keeps one extra
+    # query per collection and makes access always safe.
     versions = relationship(
         "AgreementVersion",
         back_populates="agreement",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     parties = relationship(
         "AgreementParty",
         back_populates="agreement",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     participants = relationship(
         "AgreementParticipant",
         back_populates="agreement",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 

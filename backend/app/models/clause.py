@@ -62,10 +62,14 @@ class Clause(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
 
+    # Clause library selectors/detail serializers traverse this chain after
+    # awaits (clause -> versions -> variables/conditions/bindings); every
+    # collection must be eager or access raises MissingGreenlet.
     versions = relationship(
         "ClauseVersion",
         back_populates="clause",
         cascade="all, delete-orphan",
+        lazy="selectin",
         order_by="ClauseVersion.version_number",
     )
 
@@ -129,18 +133,21 @@ class ClauseVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         "ClauseVariable",
         back_populates="clause_version",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     conditions = relationship(
         "ClauseCondition",
         back_populates="clause_version",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     jurisdiction_bindings = relationship(
         "ClauseJurisdiction",
         back_populates="clause_version",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     __table_args__ = (

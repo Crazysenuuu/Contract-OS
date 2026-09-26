@@ -332,10 +332,13 @@ class Invoice(
         nullable=True,
     )
 
+    # Invoice serializers read lines after awaits; default lazy load would
+    # raise MissingGreenlet on the async session.
     lines = relationship(
         "InvoiceLine",
         back_populates="invoice",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
 
