@@ -15,7 +15,17 @@ PORT="${1:-8000}"
 LOG="${2:-/tmp/backend_e2e_restart.log}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BACKEND_DIR="$ROOT/backend"
-PYTHON="$BACKEND_DIR/venv/bin/python"
+
+# Prefer the backend venv (local dev), else python3 / python the same way
+# scripts/test.sh resolves its interpreter — CI installs deps into
+# setup-python's python3 and has no backend/venv.
+if [ -x "$BACKEND_DIR/venv/bin/python" ]; then
+  PYTHON="$BACKEND_DIR/venv/bin/python"
+elif command -v python3 > /dev/null 2>&1; then
+  PYTHON="python3"
+else
+  PYTHON="python"
+fi
 PATTERN="uvicorn app.main:app"
 
 PID="$(pgrep -f "$PATTERN" | head -1 || true)"

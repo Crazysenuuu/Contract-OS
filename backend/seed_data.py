@@ -17,13 +17,11 @@ import asyncio
 import sys
 import os
 import uuid
-from datetime import datetime
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app.core.database import AsyncSessionLocal
-from app.models.base import Base
 from app.models import *  # noqa: Import all models
 
 

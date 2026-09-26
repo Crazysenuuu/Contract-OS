@@ -129,8 +129,9 @@ def check(requirements_path: Path) -> tuple[list[str], int]:
             lines.append(f"WARN  {name}: PyPI unreachable or unknown project — skipped ({raw})")
             continue
         latest_nums, is_pre = parse_version(latest)
-        bound_nums, inclusive = parse_upper_bound(spec)
-        assert bound_nums is not None  # parse_requirements guarantees it
+        bound = parse_upper_bound(spec)
+        assert bound is not None  # parse_requirements guarantees it
+        bound_nums, inclusive = bound
         if is_pre:
             lines.append(f"ok    {name}: latest {latest} is a pre-release — bound {spec} not challenged")
             continue
@@ -149,7 +150,9 @@ def check(requirements_path: Path) -> tuple[list[str], int]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description=next(iter((__doc__ or "").splitlines()), "")
+    )
     parser.add_argument(
         "requirements",
         nargs="?",
