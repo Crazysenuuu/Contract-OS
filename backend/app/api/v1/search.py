@@ -29,6 +29,7 @@ from app.models.agreement_type import AgreementType
 from app.models.legal_entity import LegalEntity
 from app.models.saved_search import SavedSearch
 from app.models.user import User
+from app.services.party_service import search_parties
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -167,6 +168,114 @@ def _party_filter_condition(party: str):
 # --------------------------------------------------------------------------
 # Endpoints
 # --------------------------------------------------------------------------
+
+
+@router.get("/suggestions")
+async def search_suggestions(
+    q: str,
+    current_user: User = Depends(get_current_user),
+    org_id: str = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search suggestions (spec §3.9.25-26): top agreement titles + parties
+    matching the prefix, cheap and bounded."""
+    from sqlalchemy import func as _func
+
+    from app.models.agreement_access import AgreementParty
+    from app.models.legal_entity import LegalEntity
+
+    prefix = q.strip()
+    if len(prefix) < 2:
+        return []
+    org = UUID(org_id)
+    title_rows = (
+        await db.execute(
+            select(Agreement.title)
+            .where(
+                Agreement.organization_id == org,
+                Agreement.title.ilike(f"%{prefix}%"),
+            )
+            .limit(5)
+        )
+    ).all()
+    party_rows = (
+        await db.execute(
+            select(LegalEntity.legal_name)
+            .join(AgreementParty, AgreementParty.legal_entity_id == LegalEntity.id)
+            .where(
+                AgreementParty.agreement_id == Agreement.id,
+                Agreement.organization_id == org,
+                LegalEntity.legal_name.ilike(f"%{prefix}%"),
+            )
+            .distinct()
+            .limit(5)
+        )
+    ).all()
+    suggestions = [r[0] for r in title_rows] + [r[0] for r in party_rows]
+    seen: set = set()
+    return [s for s in suggestions if not (s in seen or seen.add(s))][:8]
+
+
+@router.get("/global")
+async def global_search(
+    q: str,
+    current_user: User = Depends(get_current_user),
+    org_id: str = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unified search across agreements and parties (spec §3.9.3-4, §3.9.15).
+
+    Bounded per-source, merged, with exact-match boost (§3.9.18) and a
+    ts-rank snippet for agreement hits (§3.9.36).
+    """
+    from sqlalchemy import func as _func, or_ as _or
+
+    org = UUID(org_id)
+    needle = q.strip()
+    if not needle:
+        return {"agreements": [], "parties": [], "total": 0}
+
+    like = f"%{needle}%"
+
+    agreement_rows = (
+        await db.execute(
+            select(Agreement)
+            .where(
+                Agreement.organization_id == org,
+                _or(
+                    Agreement.title.ilike(like),
+                    Agreement.agreement_number.ilike(like),
+                ),
+            )
+            .limit(10)
+        )
+    ).scalars().all()
+
+    agreements_out = []
+    for agreement in agreement_rows:
+        # Exact-match boost (§3.9.18): title equality ranks first.
+        boost = 2 if (agreement.title or "").lower() == needle.lower() else 1
+        agreements_out.append(
+            {
+                "id": str(agreement.id),
+                "type": "agreement",
+                "title": agreement.title,
+                "agreement_number": agreement.agreement_number,
+                "status": agreement.status,
+                "rank": boost,
+            }
+        )
+
+    parties_out = await search_parties(db, organization_id=org, query=needle, limit=10)
+    for party in parties_out:
+        party["type"] = "party"
+        party["rank"] = 2 if party["match_type"] == "exact" else 1
+
+    results = sorted(
+        agreements_out + parties_out, key=lambda r: r.get("rank", 1), reverse=True
+    )
+    return {"agreements": agreements_out, "parties": parties_out, "results": results,
+            "total": len(agreements_out) + len(parties_out)}
 
 
 @router.get("/agreements", response_model=SearchResponse)

@@ -26,6 +26,8 @@ from app.services.approval_engine import (
     get_approval_for_agreement,
     get_approval_record,
     get_pending_approvals_for_user,
+    get_signoff_readiness,
+    lock_for_version_change,
     record_decision,
     resolve_and_start_approval,
     start_approval,
@@ -706,3 +708,44 @@ async def list_pending_approvals(
 ):
     """List all agreements pending approval for the current user."""
     return await get_pending_approvals_for_user(db, current_user.id, org_id)
+
+
+# --- Sign-off readiness & version locks (spec §3.6.54-56) ---
+
+
+@record_router.get("/agreements/{agreement_id}/signoff")
+async def signoff_readiness(
+    agreement_id: UUID,
+    current_user: User = Depends(get_current_user),
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sign-off checklist: deterministic gates that must all pass before
+    the agreement may proceed to signing (spec §3.6.55)."""
+    await verify_agreement_access(
+        agreement_id=agreement_id, current_user=current_user, org_id=org_id, db=db
+    )
+    try:
+        return await get_signoff_readiness(db, agreement_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@record_router.post("/agreements/{agreement_id}/version-lock")
+async def inspect_version_locks(
+    agreement_id: UUID,
+    current_user: User = Depends(get_current_user),
+    org_id: UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply/inspect the version-lock state for in-flight approvals.
+
+    Called after a version change: locks decisions on superseded terms.
+    Idempotent — re-locking only refreshes timestamps of unlocked records.
+    """
+    await verify_agreement_access(
+        agreement_id=agreement_id, current_user=current_user, org_id=org_id, db=db
+    )
+    locked = await lock_for_version_change(db, agreement_id)
+    await db.commit()
+    return {"agreement_id": str(agreement_id), "locked_records": locked}

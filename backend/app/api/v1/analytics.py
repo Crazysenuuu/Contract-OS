@@ -1,86 +1,122 @@
-"""Analytics API (spec §84-85).
+"""Portfolio analytics & intelligence API (spec §3.17.53-56).
 
-GET /analytics/executive  — full executive analytics
-GET /analytics/financial   — financial contract analytics
+GET  /analytics/portfolio          — snapshot-based executive dashboard
+POST /analytics/portfolio/aggregate — on-demand aggregation (admin/testing)
+GET  /analytics/anomalies          — open anomaly records
+GET  /analytics/insights           — current executive insights
+
+All metrics are served from stored snapshots (metrics are snapshots, not
+facts — §3.17.3); when no snapshot exists the endpoint says so explicitly
+instead of computing untracked numbers on the fly.
 """
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_admin, get_current_user
 from app.dependencies.tenant import get_current_organization_id
+from app.models.analytics import AnomalyRecord, ExecutiveInsight
 from app.models.user import User
 from app.services.analytics_service import (
-    get_executive_analytics,
-    get_financial_analytics,
-    get_supplier_performance,
+    get_portfolio_dashboard,
+    run_daily_aggregation,
 )
-from app.services.risk_scoring import compute_deterministic_risk
 
-router = APIRouter(prefix="/analytics", tags=["Analytics"])
+router = APIRouter(prefix="/analytics", tags=["Portfolio Analytics"])
 
 
-@router.get("/executive")
-async def executive_analytics(
+@router.get("/portfolio")
+async def portfolio_dashboard(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     org_id: str = Depends(get_current_organization_id),
 ):
-    """Spec §84 — executive-level analytics across all agreements."""
-    import uuid
-
-    return await get_executive_analytics(db, org_id=uuid.UUID(str(org_id)))
+    """Snapshot-based portfolio dashboard with trend, anomalies, insights."""
+    return await get_portfolio_dashboard(db, org_id=uuid.UUID(str(org_id)))
 
 
-@router.get("/financial")
-async def financial_analytics(
+@router.post("/portfolio/aggregate")
+async def aggregate_now(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+    org_id: str = Depends(get_current_organization_id),
+):
+    """Run the daily aggregation immediately (admin action / CI hook).
+
+    Mirrors the nightly Celery beat task so deployments can seed snapshots
+    without waiting for the scheduler.
+    """
+    result = await run_daily_aggregation(db)
+    await db.commit()
+    return {"status": "ok", **result}
+
+
+@router.get("/anomalies")
+async def list_anomalies(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     org_id: str = Depends(get_current_organization_id),
 ):
-    """Spec §85 — financial contract analytics (committed spend, obligations)."""
-    import uuid
+    """Open anomaly records for the workspace."""
+    rows = (
+        await db.execute(
+            select(AnomalyRecord)
+            .where(
+                AnomalyRecord.organization_id == uuid.UUID(str(org_id)),
+                AnomalyRecord.status == "open",
+            )
+            .order_by(AnomalyRecord.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": str(a.id),
+            "metric_key": a.metric_key,
+            "snapshot_date": a.snapshot_date.isoformat(),
+            "observed_value": a.observed_value,
+            "baseline_mean": a.baseline_mean,
+            "baseline_stddev": a.baseline_stddev,
+            "deviation": a.deviation,
+            "direction": a.direction,
+            "status": a.status,
+        }
+        for a in rows
+    ]
 
-    return await get_financial_analytics(db, org_id=uuid.UUID(str(org_id)))
 
-
-@router.get("/supplier-performance")
-async def supplier_performance(
+@router.get("/insights")
+async def list_insights(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     org_id: str = Depends(get_current_organization_id),
 ):
-    """Spec §84/86 — per-supplier performance metrics."""
-    import uuid
-
-    return await get_supplier_performance(db, org_id=uuid.UUID(str(org_id)))
-
-
-@router.get("/risk-score/{agreement_id}")
-async def deterministic_risk_score(
-    agreement_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-    org_id: str = Depends(get_current_organization_id),
-):
-    """Spec §39 — deterministic, explainable risk score for one agreement."""
-    import uuid
-
-    score = await compute_deterministic_risk(db, agreement_id=uuid.UUID(agreement_id))
-    return {
-        "overall": score.overall,
-        "level": score.level,
-        "factors_count": score.factors_count,
-        "explanation": score.explanation,
-        "components": [
-            {
-                "category": c.category,
-                "score": c.score,
-                "weight": c.weight,
-                "weighted_score": c.weighted_score,
-                "contributing_factors": c.contributing_factors,
-            }
-            for c in score.components
-        ],
-    }
+    """Current executive insights with their metric evidence."""
+    rows = (
+        await db.execute(
+            select(ExecutiveInsight)
+            .where(
+                ExecutiveInsight.organization_id == uuid.UUID(str(org_id)),
+                ExecutiveInsight.status == "current",
+            )
+            .order_by(ExecutiveInsight.insight_date.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": str(i.id),
+            "insight_date": i.insight_date.isoformat(),
+            "category": i.category,
+            "title": i.title,
+            "body": i.body,
+            "severity": i.severity,
+            "generated_by": i.generated_by,
+            "evidence": i.evidence,
+        }
+        for i in rows
+    ]

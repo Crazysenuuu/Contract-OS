@@ -152,6 +152,18 @@ class ApprovalStage(
         default="sequential",  # 'sequential' | 'parallel'
     )
 
+    # Quorum semantics (spec §3.6.28): a parallel stage completes once this
+    # many approvers have approved. Null = all required approvers (legacy
+    # behaviour preserved for existing stages).
+    minimum_approvals: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    # Stage deadline in hours (spec §3.6.29): the deadline scanner escalates
+    # (and optionally cancels) stages left undecided past this window.
+    deadline_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Relationships
     definition = relationship(
         "ApprovalDefinition",
@@ -264,6 +276,24 @@ class ApprovalRecord(
         String(30),
         nullable=False,
         default="legal_review",  # 'legal_review' | 'party_approval'
+    )
+
+    # Stage entered at (spec §3.6.29): set by the engine when the stage
+    # becomes current; the deadline scanner compares it against now.
+    stage_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Set when the deadline scanner escalates the record (spec §3.6.51).
+    escalated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Set when the record is version-locked (spec §3.6.34-35): a lock stops
+    # decisions while the underlying version changed under the approval.
+    version_locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Relationships

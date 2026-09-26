@@ -75,6 +75,13 @@ from app.api.v1.sso import router as sso_router
 from app.api.v1.sso import scim_router
 from app.api.v1.templates import router as templates_router
 from app.api.v1.analytics import router as analytics_router
+from app.api.v1.forecasting import router as forecasting_router
+from app.api.v1.forecasting import scenarios_router as scenarios_router
+from app.api.v1.action_items import router as action_items_router
+from app.api.v1.external_policy import router as external_policy_router
+from app.api.v1.external_policy import agreement_router as sharing_policy_router
+from app.api.v1.automation import router as automation_router
+from app.api.v1.party import router as party_router
 from app.api.v1.compliance_summary import router as compliance_summary_router
 from app.api.v1.security_monitoring import router as security_monitoring_router
 from app.api.v1.api_keys import router as api_keys_router
@@ -173,6 +180,13 @@ api_router.include_router(sso_router)
 api_router.include_router(scim_router)
 api_router.include_router(templates_router)
 api_router.include_router(analytics_router)
+api_router.include_router(forecasting_router)
+api_router.include_router(scenarios_router)
+api_router.include_router(action_items_router)
+api_router.include_router(external_policy_router)
+api_router.include_router(sharing_policy_router)
+api_router.include_router(automation_router)
+api_router.include_router(party_router)
 api_router.include_router(compliance_summary_router)
 api_router.include_router(security_monitoring_router)
 api_router.include_router(api_keys_router)

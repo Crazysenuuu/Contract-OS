@@ -10,9 +10,11 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -107,6 +109,65 @@ class Notification(
     agreement = relationship("Agreement")
 
 
+class NotificationDelivery(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """Per-channel delivery record (spec §3.10.7, §3.10.36).
+
+    One row per delivery attempt per channel, so email/push/inbox status is
+    separately trackable with provider message ids and retry counts.
+    """
+
+    __tablename__ = "notification_deliveries"
+
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notifications.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # 'email' | 'push' | 'sms' | 'inbox'
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # 'queued' | 'sent' | 'failed' | 'bounced'
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class EmailTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """DB-backed email template (spec §3.10.44).
+
+    Templates are versioned rows so content changes are auditable; rendering
+    happens through the sandboxed engine with a strict variable contract.
+    """
+
+    __tablename__ = "email_templates"
+
+    # Stable key, e.g. 'approval_request', 'obligation_reminder'.
+    key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    subject_template: Mapped[str] = mapped_column(String(500), nullable=False)
+    body_template: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Variable contract: required template variables, validated at send time.
+    required_variables: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class NotificationPreference(
     UUIDPrimaryKeyMixin,
     TimestampMixin,
@@ -149,6 +210,13 @@ class NotificationPreference(
     digest_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     digest_frequency: Mapped[str] = mapped_column(String(20), nullable=False, default="daily")
     # 'daily', 'weekly'
+
+    # Quiet hours (spec §3.10.46-48): non-security notifications inside the
+    # window are deferred to its end. Stored as hours 0-23 in the user's
+    # organization timezone; null = no quiet hours. Mandatory security
+    # notifications bypass the window (§3.10.9).
+    quiet_hours_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quiet_hours_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
     user = relationship("User")

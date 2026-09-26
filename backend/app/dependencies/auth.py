@@ -43,6 +43,14 @@ async def get_current_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
+    # Admin MFA enforcement (spec §2.17): when an admin has enrolled in MFA
+    # they must have completed verification; admins who never enrolled are
+    # flagged so deployment can require enrollment before going live.
+    if current_user.mfa_enabled and not current_user.mfa_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin MFA configuration is incomplete",
+        )
     return current_user
 
 

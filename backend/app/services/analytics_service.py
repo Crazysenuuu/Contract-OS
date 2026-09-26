@@ -571,3 +571,596 @@ async def get_supplier_performance(
         })
 
     return {"suppliers": suppliers, "total": len(suppliers)}
+
+
+# ---------------------------------------------------------------------------
+# Portfolio analytics: daily metric snapshots (spec §3.17)
+# ---------------------------------------------------------------------------
+
+# The canonical metric set materialised once per day per organization.
+# Every entry is deterministic over domain tables — no AI, no hidden state.
+PORTFOLIO_METRICS = (
+    "inventory.total_agreements",
+    "inventory.active_agreements",
+    "inventory.executed_agreements",
+    "inventory.draft_agreements",
+    "inventory.total_value",
+    "lifecycle.renewals_due_30d",
+    "lifecycle.expired_agreements",
+    "obligations.open_count",
+    "obligations.overdue_count",
+    "risk.open_findings",
+    "risk.critical_findings",
+)
+
+
+def _metric_value_of(data: dict | None) -> float:
+    """Numeric contract value from the agreement JSON payload."""
+    raw = (data or {}).get("total_value") or (data or {}).get("contract_value")
+    if raw is None:
+        return 0.0
+    try:
+        return float(str(raw).replace(",", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def compute_portfolio_metrics(db: AsyncSession, *, org_id: uuid.UUID) -> dict:
+    """Compute today's deterministic portfolio metrics for one workspace."""
+    from datetime import timedelta
+
+    from app.models.ai_analysis import RiskFinding
+    from app.models.obligation import Obligation
+
+    today = date.today()
+
+    status_rows = (
+        await db.execute(
+            select(Agreement.status, Agreement.data).where(
+                Agreement.organization_id == org_id
+            )
+        )
+    ).all()
+
+    status_counts: dict[str, int] = {}
+    total_value = 0.0
+    for status, data in status_rows:
+        status_counts[status] = status_counts.get(status, 0) + 1
+        total_value += _metric_value_of(data)
+
+    total = len(status_rows)
+    active = sum(status_counts.get(s, 0) for s in ("active", "executed"))
+    executed = status_counts.get("executed", 0) + status_counts.get("signed", 0)
+    draft = sum(
+        status_counts.get(s, 0) for s in ("draft", "in_draft", "pending")
+    )
+
+    renewal_due_30d = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Agreement)
+            .where(
+                Agreement.organization_id == org_id,
+                Agreement.expiry_date.is_not(None),
+                Agreement.expiry_date >= today,
+                Agreement.expiry_date <= today + timedelta(days=30),
+            )
+        )
+    ) or 0
+
+    expired = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Agreement)
+            .where(
+                Agreement.organization_id == org_id,
+                Agreement.expiry_date.is_not(None),
+                Agreement.expiry_date < today,
+            )
+        )
+    ) or 0
+
+    open_obligations = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Obligation)
+            .join(Agreement, Agreement.id == Obligation.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                Obligation.status.notin_(
+                    ("completed", "cancelled", "waived", "SUPERSEDED", "CANCELLED", "WAIVED")
+                ),
+            )
+        )
+    ) or 0
+
+    overdue_obligations = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Obligation)
+            .join(Agreement, Agreement.id == Obligation.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                Obligation.status.notin_(
+                    ("completed", "cancelled", "waived", "SUPERSEDED", "CANCELLED", "WAIVED")
+                ),
+                Obligation.due_date.is_not(None),
+                Obligation.due_date < today,
+            )
+        )
+    ) or 0
+
+    open_findings = (
+        await db.scalar(
+            select(func.count())
+            .select_from(RiskFinding)
+            .join(Agreement, Agreement.id == RiskFinding.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                RiskFinding.reviewer_status == "pending",
+            )
+        )
+    ) or 0
+
+    critical_findings = (
+        await db.scalar(
+            select(func.count())
+            .select_from(RiskFinding)
+            .join(Agreement, Agreement.id == RiskFinding.agreement_id)
+            .where(
+                Agreement.organization_id == org_id,
+                RiskFinding.reviewer_status == "pending",
+                RiskFinding.severity.in_(("critical", "high")),
+            )
+        )
+    ) or 0
+
+    return {
+        "inventory.total_agreements": float(total),
+        "inventory.active_agreements": float(active),
+        "inventory.executed_agreements": float(executed),
+        "inventory.draft_agreements": float(draft),
+        "inventory.total_value": round(total_value, 2),
+        "lifecycle.renewals_due_30d": float(renewal_due_30d),
+        "lifecycle.expired_agreements": float(expired),
+        "obligations.open_count": float(open_obligations),
+        "obligations.overdue_count": float(overdue_obligations),
+        "risk.open_findings": float(open_findings),
+        "risk.critical_findings": float(critical_findings),
+    }
+
+
+async def _write_snapshot(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    snapshot_date: date,
+    metric_key: str,
+    value: float | None,
+    missing_reason: str | None = None,
+    source_summary: dict | None = None,
+) -> None:
+    """Upsert one metric snapshot (idempotent per org/date/metric)."""
+    from app.models.analytics import MetricSnapshot
+
+    existing = (
+        await db.execute(
+            select(MetricSnapshot).where(
+                MetricSnapshot.organization_id == org_id,
+                MetricSnapshot.snapshot_date == snapshot_date,
+                MetricSnapshot.metric_key == metric_key,
+            )
+        )
+    ).scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    if existing is not None:
+        existing.value = value
+        existing.is_missing = 1 if value is None else 0
+        existing.missing_reason = missing_reason
+        existing.source_summary = source_summary
+        existing.computed_at = now
+        return
+
+    db.add(
+        MetricSnapshot(
+            organization_id=org_id,
+            snapshot_date=snapshot_date,
+            metric_key=metric_key,
+            value=value,
+            is_missing=1 if value is None else 0,
+            missing_reason=missing_reason,
+            source_summary=source_summary,
+            computed_at=now,
+        )
+    )
+
+
+def _detect_anomalies(
+    history: list[tuple[date, float]],
+    *,
+    window: int = 14,
+    threshold: float = 3.0,
+) -> dict[str, dict]:
+    """Rolling-baseline anomaly detection (spec §3.17.28-31).
+
+    For each metric, compare today's value against the mean/stddev of the
+    previous ``window`` days. Returns {metric_key: anomaly_dict} for values
+    deviating more than ``threshold`` standard deviations. Deterministic:
+    pure arithmetic over stored snapshots.
+    """
+    anomalies: dict[str, dict] = {}
+    if len(history) < window + 1:
+        return anomalies
+
+    by_metric: dict[str, list[tuple[date, float]]] = {}
+    for d, key, value in history:
+        if value is not None:
+            by_metric.setdefault(key, []).append((d, value))
+
+    for key, points in by_metric.items():
+        points.sort()
+        today_value = points[-1][1]
+        baseline = [v for _, v in points[-window - 1 : -1]]
+        if len(baseline) < window:
+            continue
+        mean = sum(baseline) / len(baseline)
+        variance = sum((v - mean) ** 2 for v in baseline) / len(baseline)
+        stddev = variance ** 0.5
+        if stddev == 0:
+            continue
+        deviation = (today_value - mean) / stddev
+        if abs(deviation) >= threshold:
+            anomalies[key] = {
+                "observed_value": today_value,
+                "baseline_mean": round(mean, 4),
+                "baseline_stddev": round(stddev, 4),
+                "deviation": round(deviation, 2),
+                "direction": "spike" if deviation > 0 else "drop",
+            }
+    return anomalies
+
+
+def _generate_insights(
+    metrics: dict[str, float],
+) -> list[dict]:
+    """Deterministic executive insights backed by metric evidence (§3.17.36).
+
+    Each insight quotes the metric values that justify it — no invented
+    numbers, no black-box score.
+    """
+    insights: list[dict] = []
+
+    total = metrics.get("inventory.total_agreements", 0.0)
+    if total > 0:
+        overdue = metrics.get("obligations.overdue_count", 0.0)
+        if overdue > 0:
+            insights.append(
+                {
+                    "category": "obligation_performance",
+                    "title": f"{int(overdue)} overdue obligations across the portfolio",
+                    "body": (
+                        f"The portfolio holds {int(total)} agreements with "
+                        f"{int(overdue)} obligations past their due date. "
+                        "Prioritise remediation before counterparties raise breach."
+                    ),
+                    "severity": "warning" if overdue / max(total, 1) < 0.5 else "critical",
+                    "evidence": {
+                        "metric_refs": [
+                            {
+                                "metric_key": "obligations.overdue_count",
+                                "value": overdue,
+                            },
+                            {
+                                "metric_key": "inventory.total_agreements",
+                                "value": total,
+                            },
+                        ]
+                    },
+                }
+            )
+
+        renewals = metrics.get("lifecycle.renewals_due_30d", 0.0)
+        if renewals > 0:
+            insights.append(
+                {
+                    "category": "renewal_exposure",
+                    "title": f"{int(renewals)} agreements reach term within 30 days",
+                    "body": (
+                        f"{int(renewals)} of {int(total)} agreements expire or renew "
+                        "within the next 30 days. Confirm renewal decisions early "
+                        "to avoid uncontrolled auto-renewal."
+                    ),
+                    "severity": "info" if renewals / max(total, 1) < 0.2 else "warning",
+                    "evidence": {
+                        "metric_refs": [
+                            {
+                                "metric_key": "lifecycle.renewals_due_30d",
+                                "value": renewals,
+                            }
+                        ]
+                    },
+                }
+            )
+
+        critical = metrics.get("risk.critical_findings", 0.0)
+        if critical > 0:
+            insights.append(
+                {
+                    "category": "risk_portfolio",
+                    "title": f"{int(critical)} critical/high risk findings await review",
+                    "body": (
+                        f"{int(critical)} open risk findings are rated critical or high. "
+                        "Resolve or mitigate before signing new agreements in the "
+                        "affected categories."
+                    ),
+                    "severity": "warning",
+                    "evidence": {
+                        "metric_refs": [
+                            {
+                                "metric_key": "risk.critical_findings",
+                                "value": critical,
+                            }
+                        ]
+                    },
+                }
+            )
+
+    return insights
+
+
+async def run_daily_aggregation(db: AsyncSession) -> dict:
+    """Materialise today's metric snapshots for every organization.
+
+    Called nightly by the ``aggregate_analytics`` Celery beat task (spec
+    §3.17.58-59). Idempotent: re-running the same day upserts the same
+    rows. Also records anomalies against the rolling baseline and refreshes
+    deterministic executive insights for the day.
+    """
+    from app.models.analytics import AnomalyRecord, ExecutiveInsight, MetricSnapshot
+    from app.models.organization import Organization
+
+    today = date.today()
+    org_rows = (await db.execute(select(Organization.id))).all()
+
+    processed = 0
+    anomalies_written = 0
+    insights_written = 0
+
+    for (org_id,) in org_rows:
+        try:
+            metrics = await compute_portfolio_metrics(db, org_id=org_id)
+        except Exception:
+            # A workspace whose domain data fails computation still gets
+            # explicit missing markers, never yesterday's numbers (§3.17.12).
+            for metric_key in PORTFOLIO_METRICS:
+                await _write_snapshot(
+                    db,
+                    org_id=org_id,
+                    snapshot_date=today,
+                    metric_key=metric_key,
+                    value=None,
+                    missing_reason="computation_failed",
+                )
+            processed += 1
+            continue
+
+        for metric_key, value in metrics.items():
+            await _write_snapshot(
+                db,
+                org_id=org_id,
+                snapshot_date=today,
+                metric_key=metric_key,
+                value=value,
+                source_summary={"metric_key": metric_key, "computed": True},
+            )
+        processed += 1
+
+        # --- Anomaly detection over the trailing snapshot history ---------
+        history_rows = (
+            await db.execute(
+                select(MetricSnapshot.snapshot_date, MetricSnapshot.metric_key, MetricSnapshot.value)
+                .where(
+                    MetricSnapshot.organization_id == org_id,
+                    MetricSnapshot.metric_key.in_(PORTFOLIO_METRICS),
+                    MetricSnapshot.is_missing == 0,
+                )
+                .order_by(MetricSnapshot.snapshot_date.asc())
+            )
+        ).all()
+        history = [(row[0], row[1], row[2]) for row in history_rows]
+        for metric_key, anomaly in _detect_anomalies(history).items():
+            existing = (
+                await db.execute(
+                    select(AnomalyRecord).where(
+                        AnomalyRecord.organization_id == org_id,
+                        AnomalyRecord.metric_key == metric_key,
+                        AnomalyRecord.snapshot_date == today,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
+            db.add(
+                AnomalyRecord(
+                    organization_id=org_id,
+                    metric_key=metric_key,
+                    snapshot_date=today,
+                    observed_value=anomaly["observed_value"],
+                    baseline_mean=anomaly["baseline_mean"],
+                    baseline_stddev=anomaly["baseline_stddev"],
+                    deviation=anomaly["deviation"],
+                    direction=anomaly["direction"],
+                )
+            )
+            anomalies_written += 1
+
+        # --- Deterministic executive insights ----------------------------
+        metrics_float = {k: float(v) for k, v in metrics.items() if v is not None}
+        for insight in _generate_insights(metrics_float):
+            existing = (
+                await db.execute(
+                    select(ExecutiveInsight).where(
+                        ExecutiveInsight.organization_id == org_id,
+                        ExecutiveInsight.insight_date == today,
+                        ExecutiveInsight.category == insight["category"],
+                        ExecutiveInsight.status == "current",
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                existing.title = insight["title"]
+                existing.body = insight["body"]
+                existing.severity = insight["severity"]
+                existing.evidence = insight["evidence"]
+                continue
+            # Supersede older insights in the same category.
+            older = (
+                await db.execute(
+                    select(ExecutiveInsight).where(
+                        ExecutiveInsight.organization_id == org_id,
+                        ExecutiveInsight.category == insight["category"],
+                        ExecutiveInsight.status == "current",
+                    )
+                )
+            ).scalars().all()
+            for row in older:
+                row.status = "superseded"
+            db.add(
+                ExecutiveInsight(
+                    organization_id=org_id,
+                    insight_date=today,
+                    category=insight["category"],
+                    title=insight["title"],
+                    body=insight["body"],
+                    severity=insight["severity"],
+                    generated_by="rule",
+                    evidence=insight["evidence"],
+                )
+            )
+            insights_written += 1
+
+    await db.flush()
+    return {
+        "snapshot_date": today.isoformat(),
+        "organizations_processed": processed,
+        "anomalies_written": anomalies_written,
+        "insights_written": insights_written,
+    }
+
+
+async def get_portfolio_dashboard(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+) -> dict:
+    """Executive dashboard payload built from snapshots, never live math
+    presented as fact (§3.17.3: metrics are snapshots).
+
+    Returns today's snapshot (or the most recent available) plus the
+    trailing trend and current anomalies/insights.
+    """
+    from app.models.analytics import AnomalyRecord, ExecutiveInsight, MetricSnapshot
+
+    latest_date = (
+        await db.scalar(
+            select(func.max(MetricSnapshot.snapshot_date)).where(
+                MetricSnapshot.organization_id == org_id
+            )
+        )
+    )
+    if latest_date is None:
+        return {
+            "status": "no_data",
+            "message": "No metric snapshots exist yet; the nightly aggregation has not run for this workspace.",
+        }
+
+    latest = (
+        await db.execute(
+            select(MetricSnapshot).where(
+                MetricSnapshot.organization_id == org_id,
+                MetricSnapshot.snapshot_date == latest_date,
+            )
+        )
+    ).scalars().all()
+
+    metrics: dict[str, dict] = {}
+    for snap in latest:
+        metrics[snap.metric_key] = {
+            "value": snap.value,
+            "is_missing": bool(snap.is_missing),
+            "missing_reason": snap.missing_reason,
+        }
+
+    trend_rows = (
+        await db.execute(
+            select(MetricSnapshot.snapshot_date, MetricSnapshot.metric_key, MetricSnapshot.value)
+            .where(
+                MetricSnapshot.organization_id == org_id,
+                MetricSnapshot.is_missing == 0,
+            )
+            .order_by(MetricSnapshot.snapshot_date.asc())
+            .limit(1000)
+        )
+    ).all()
+    trend: dict[str, list[dict]] = {}
+    for d, key, value in trend_rows:
+        trend.setdefault(key, []).append(
+            {"date": d.isoformat(), "value": value}
+        )
+
+    anomalies = (
+        await db.execute(
+            select(AnomalyRecord)
+            .where(
+                AnomalyRecord.organization_id == org_id,
+                AnomalyRecord.status == "open",
+            )
+            .order_by(AnomalyRecord.created_at.desc())
+            .limit(20)
+        )
+    ).scalars().all()
+
+    insights = (
+        await db.execute(
+            select(ExecutiveInsight)
+            .where(
+                ExecutiveInsight.organization_id == org_id,
+                ExecutiveInsight.status == "current",
+            )
+            .order_by(ExecutiveInsight.insight_date.desc())
+            .limit(20)
+        )
+    ).scalars().all()
+
+    return {
+        "status": "ok",
+        "snapshot_date": latest_date.isoformat(),
+        "metrics": metrics,
+        "trend": {
+            key: points[-30:] for key, points in trend.items()
+        },
+        "anomalies": [
+            {
+                "metric_key": a.metric_key,
+                "snapshot_date": a.snapshot_date.isoformat(),
+                "observed_value": a.observed_value,
+                "baseline_mean": a.baseline_mean,
+                "deviation": a.deviation,
+                "direction": a.direction,
+            }
+            for a in anomalies
+        ],
+        "insights": [
+            {
+                "id": str(i.id),
+                "category": i.category,
+                "title": i.title,
+                "body": i.body,
+                "severity": i.severity,
+                "generated_by": i.generated_by,
+                "evidence": i.evidence,
+            }
+            for i in insights
+        ],
+    }

@@ -615,3 +615,181 @@ async def supplier_risk_analysis(
             {"type": "aggregated_clauses", "weight": round(float(total_risk), 2)}
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# Entity risk & graph integrity (spec §3.16.25-39, §3.16.75-78)
+# ---------------------------------------------------------------------------
+
+
+def _edge_degree_map(edges: list[RiskGraphEdge]) -> dict[str, int]:
+    degrees: dict[str, int] = {}
+    for edge in edges:
+        for endpoint in (str(edge.source_node_id), str(edge.target_node_id)):
+            degrees[endpoint] = degrees.get(endpoint, 0) + 1
+    return degrees
+
+
+async def entity_risk_profile(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    entity_node_id: uuid.UUID,
+) -> dict:
+    """Aggregate an entity's risk from its graph neighbourhood (§3.16.25-28).
+
+    Direct risk comes from the entity's own severity; propagated risk from
+    neighbours is dampened (×0.5 per hop, single hop) and de-duplicated per
+    source so the same upstream finding is never double-counted (§3.16.28).
+    """
+    from app.models.risk_graph import RiskGraphNode as N
+
+    node = await db.get(N, entity_node_id)
+    if node is None or node.organization_id != organization_id:
+        raise ValueError("Graph node not found")
+
+    edges = (
+        await db.execute(
+            select(RiskGraphEdge).where(
+                (RiskGraphEdge.source_node_id == entity_node_id)
+                | (RiskGraphEdge.target_node_id == entity_node_id)
+            )
+        )
+    ).scalars().all()
+
+    degrees = _edge_degree_map(edges)
+    neighbour_ids: set = set()
+    for edge in edges:
+        for endpoint in (edge.source_node_id, edge.target_node_id):
+            if endpoint != entity_node_id:
+                neighbour_ids.add(endpoint)
+
+    neighbours = (
+        await db.execute(select(N).where(N.id.in_(neighbour_ids)))
+    ).scalars().all() if neighbour_ids else []
+
+    own = _severity_weight(getattr(node, "risk_level", None) or "low")
+    # Dedup per neighbour severity bucket: propagate the max, not the sum.
+    severity_buckets: dict[str, float] = {}
+    for n in neighbours:
+        level = getattr(n, "risk_level", None) or "low"
+        w = _severity_weight(level) * 0.5
+        severity_buckets[level] = max(severity_buckets.get(level, 0.0), w)
+    propagated = sum(severity_buckets.values())
+
+    centrality = degrees.get(str(entity_node_id), 0)
+    score = round(own + propagated, 3)
+    level = (
+        "critical" if score >= 8
+        else "high" if score >= 5
+        else "medium" if score >= 2.5
+        else "low"
+    )
+    return {
+        "entity_node_id": str(entity_node_id),
+        "node_type": node.node_type,
+        "own_risk": own,
+        "propagated_risk": round(propagated, 3),
+        "score": score,
+        "level": level,
+        "dependency_centrality": centrality,
+        "neighbour_count": len(neighbours),
+        "explain": {
+            "weights_by_level": severity_buckets,
+            "propagation": "max-per-bucket x0.5 (single hop)",
+        },
+    }
+
+
+async def graph_snapshot_hash(db: AsyncSession, *, organization_id: uuid.UUID) -> str:
+    """Deterministic hash over node/edge content (§3.16.36)."""
+    import hashlib
+
+    from app.models.risk_graph import RiskGraphNode as N
+
+    nodes = (
+        await db.execute(
+            select(N).where(N.organization_id == organization_id).order_by(N.id)
+        )
+    ).scalars().all()
+    edges = (
+        await db.execute(
+            select(RiskGraphEdge)
+            .where(RiskGraphEdge.organization_id == organization_id)
+            .order_by(RiskGraphEdge.id)
+        )
+    ).scalars().all()
+
+    hasher = hashlib.sha256()
+    for n in nodes:
+        hasher.update(f"N|{n.id}|{n.node_type}|{getattr(n, 'risk_level', '')}".encode())
+    for e in edges:
+        hasher.update(
+            f"E|{e.source_node_id}|{e.target_node_id}|{getattr(e, 'edge_type', '')}".encode()
+        )
+    return hasher.hexdigest()
+
+
+async def verify_graph_integrity(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    expected_hash: str | None = None,
+) -> dict:
+    """Compare the current graph content hash to a stored baseline (§3.16.37)."""
+    current = await graph_snapshot_hash(db, organization_id=organization_id)
+    return {
+        "current_hash": current,
+        "expected_hash": expected_hash,
+        "matches": expected_hash is None or current == expected_hash,
+    }
+
+
+async def rebuild_graph(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+) -> dict:
+    """Full graph rebuild from domain tables (§3.16.39).
+
+    Deletes the workspace's graph content and re-projects every agreement.
+    Returns the fresh snapshot hash for later integrity checks.
+    """
+    from sqlalchemy import delete as _delete
+
+    from app.models.agreement import Agreement
+    from app.models.risk_graph import RiskGraphNode as N
+
+    await db.execute(
+        _delete(RiskGraphEdge).where(
+            RiskGraphEdge.organization_id == organization_id
+        )
+    )
+    await db.execute(
+        _delete(N).where(N.organization_id == organization_id)
+    )
+    await db.flush()
+
+    agreements = (
+        await db.execute(
+            select(Agreement).where(Agreement.organization_id == organization_id)
+        )
+    ).scalars().all()
+    projected = 0
+    for agreement in agreements:
+        try:
+            await build_agreement_graph(
+                db, organization_id=organization_id, agreement=agreement
+            )
+            projected += 1
+        except Exception:
+            # A single broken agreement must not block the rebuild; the
+            # stale-detection pass will surface it (§3.16.57).
+            continue
+    await db.flush()
+    return {
+        "agreements_projected": projected,
+        "snapshot_hash": await graph_snapshot_hash(
+            db, organization_id=organization_id
+        ),
+    }

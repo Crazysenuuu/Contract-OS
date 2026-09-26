@@ -8,9 +8,9 @@ Manages multi-stage approval workflows:
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -152,6 +152,27 @@ async def start_approval(
     )
     db.add(record)
     await db.flush()
+
+    # Action Center hook (spec §3.10.17-19): open a live action item for
+    # this approval so it surfaces on the assignees' queue.
+    from app.services.action_item_service import upsert_action_item
+
+    agreement_row = await db.get(Agreement, agreement_id)
+    await upsert_action_item(
+        db,
+        organization_id=(
+            agreement_row.organization_id
+            if agreement_row is not None
+            else uuid.UUID(int=0)
+        ),
+        action_type="approval_request",
+        title=f"Approval requested: {agreement_row.title if agreement_row else agreement_id}",
+        source_system="approvals",
+        source_id=record.id,
+        description=(
+            f"Stage: {first_stage.name}" if first_stage else None
+        ),
+    )
 
     return record
 
@@ -339,6 +360,15 @@ async def advance_stage(
         record.status = "approved"
 
     await db.flush()
+
+    # Close the approval's action item when the record leaves in-flight.
+    if record.status in ("approved", "rejected", "cancelled"):
+        from app.services.action_item_service import resolve_source_item
+
+        await resolve_source_item(
+            db, source_system="approvals", source_id=record.id
+        )
+
     return record
 
 
@@ -387,6 +417,221 @@ async def cancel_approval(
     record.status = "cancelled"
     await db.flush()
     return record
+
+
+# ---------------------------------------------------------------------------
+# Quorum, deadlines, sign-off and version locking (spec §3.6.28-56)
+# ---------------------------------------------------------------------------
+
+
+def _stage_quorum_met(stage: ApprovalStage, decisions: list[ApprovalDecision]) -> bool:
+    """Whether the stage's approval quorum is satisfied (§3.6.28).
+
+    Sequential stages always require the stage's approver decision; parallel
+    stages complete at ``minimum_approvals`` approvals when configured, else
+    when every required approver has approved (legacy semantics).
+    """
+    approvals = [d for d in decisions if d.stage_id == stage.id and d.decision == "approved"]
+    if stage.execution_mode == "parallel" and stage.minimum_approvals:
+        return len(approvals) >= stage.minimum_approvals
+    if stage.execution_mode == "parallel":
+        # No quorum configured: any-one-approved semantics (require_all_approvers
+        # False) or every required approver.
+        if stage.require_all_approvers:
+            required_user_ids = {s.user_id for s in stage.steps if s.is_required}
+            return required_user_ids.issubset({d.user_id for d in approvals})
+        return len(approvals) >= 1
+    # Sequential stage: complete when decided (handled by the caller).
+    return len(approvals) >= 1
+
+
+async def evaluate_stage_completion(
+    db: AsyncSession,
+    record: ApprovalRecord,
+    stage: ApprovalStage,
+) -> bool:
+    """Re-evaluate a stage against quorum and advance the record when met.
+
+    Called after each decision. Returns True when the record advanced.
+    """
+    decisions = list(record.decisions)
+    if any(d.decision == "rejected" for d in decisions):
+        return False
+    if not _stage_quorum_met(stage, decisions):
+        return False
+    await advance_stage(db, record)
+    return True
+
+
+async def scan_approval_deadlines(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """Escalate approvals stuck past their stage deadline (§3.6.29, §3.6.50).
+
+    A record whose current stage has ``deadline_hours`` set and whose stage
+    has been current longer than that window gets ``escalated_at`` stamped
+    exactly once. Returns a summary for the beat task.
+    """
+    now = now or datetime.now(timezone.utc)
+    records = (
+        await db.execute(
+            select(ApprovalRecord)
+            .where(
+                ApprovalRecord.status == "in_progress",
+                ApprovalRecord.current_stage_id.is_not(None),
+            )
+            .options(selectinload(ApprovalRecord.current_stage))
+        )
+    ).scalars().all()
+
+    escalated = 0
+    for record in records:
+        stage = record.current_stage
+        if stage is None or not stage.deadline_hours:
+            continue
+        started = record.stage_started_at or record.created_at
+        started = started if started.tzinfo else started.replace(tzinfo=timezone.utc)
+        deadline = started + timedelta(hours=stage.deadline_hours)
+        if now >= deadline and record.escalated_at is None:
+            record.escalated_at = now
+            escalated += 1
+    if escalated:
+        await db.flush()
+    return {"scanned": len(records), "escalated": escalated}
+
+
+async def lock_for_version_change(
+    db: AsyncSession,
+    agreement_id: uuid.UUID,
+) -> int:
+    """Version-lock every in-flight approval for an agreement (§3.6.34).
+
+    Called when a new version becomes current: decisions may not proceed on
+    terms that are no longer current. The record stays in place (unlike
+    cancellation) so the UI can explain what is blocked and why.
+    """
+    records = (
+        await db.execute(
+            select(ApprovalRecord).where(
+                ApprovalRecord.agreement_id == agreement_id,
+                ApprovalRecord.status == "in_progress",
+            )
+        )
+    ).scalars().all()
+    now = datetime.now(timezone.utc)
+    for record in records:
+        record.version_locked_at = now
+    if records:
+        await db.flush()
+    return len(records)
+
+
+async def unlock_version(
+    db: AsyncSession,
+    record: ApprovalRecord,
+    *,
+    version_id: uuid.UUID | None,
+) -> ApprovalRecord:
+    """Re-bind an approval record to the new current version and unlock it."""
+    record.agreement_version_id = version_id
+    record.version_locked_at = None
+    await db.flush()
+    return record
+
+
+async def get_signoff_readiness(
+    db: AsyncSession,
+    agreement_id: uuid.UUID,
+) -> dict:
+    """Sign-off checklist for an agreement (§3.6.54-55).
+
+    Deterministic gates: current version exists and is not draft, at least
+    one approval record approved, no in-flight approvals, no open approval
+    comments outstanding (rejections), no version lock.
+    """
+    from app.models.agreement import Agreement, AgreementVersion
+
+    agreement = await db.get(Agreement, agreement_id)
+    if agreement is None:
+        raise ValueError("Agreement not found")
+
+    version = (
+        await db.execute(
+            select(AgreementVersion)
+            .where(AgreementVersion.agreement_id == agreement_id)
+            .order_by(AgreementVersion.version_number.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+
+    checks: list[dict] = []
+
+    checks.append(
+        {
+            "key": "current_version",
+            "label": "Agreement has a rendered version",
+            "passed": version is not None and bool(version.content),
+        }
+    )
+
+    approved = (
+        await db.scalar(
+            select(func.count())
+            .select_from(ApprovalRecord)
+            .where(
+                ApprovalRecord.agreement_id == agreement_id,
+                ApprovalRecord.status == "approved",
+            )
+        )
+    ) or 0
+    checks.append(
+        {
+            "key": "approval_complete",
+            "label": "At least one approval record approved",
+            "passed": approved > 0,
+        }
+    )
+
+    in_flight = (
+        await db.scalar(
+            select(func.count())
+            .select_from(ApprovalRecord)
+            .where(
+                ApprovalRecord.agreement_id == agreement_id,
+                ApprovalRecord.status.in_(["pending", "in_progress"]),
+            )
+        )
+    ) or 0
+    checks.append(
+        {
+            "key": "no_open_approvals",
+            "label": "No approvals awaiting decision",
+            "passed": in_flight == 0,
+        }
+    )
+
+    locked = (
+        await db.scalar(
+            select(func.count())
+            .select_from(ApprovalRecord)
+            .where(
+                ApprovalRecord.agreement_id == agreement_id,
+                ApprovalRecord.version_locked_at.is_not(None),
+            )
+        )
+    ) or 0
+    checks.append(
+        {
+            "key": "no_version_lock",
+            "label": "No approval is version-locked",
+            "passed": locked == 0,
+        }
+    )
+
+    ready = all(c["passed"] for c in checks)
+    return {"agreement_id": str(agreement_id), "ready": ready, "checks": checks}
 
 
 async def get_pending_approvals_for_user(

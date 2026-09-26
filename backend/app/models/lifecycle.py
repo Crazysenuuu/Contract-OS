@@ -9,7 +9,7 @@ lifecycle service to apply a transition, which consults these rules.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -90,6 +90,38 @@ class StatusTransitionRule(
         nullable=False,
         default=False,
     )
+
+
+class WorkspaceLifecycleConfig(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """Per-workspace lifecycle behaviour (spec §3.12.22).
+
+    Singleton per organization: controls which lifecycle events create
+    notifications/action items, and the default renewal notice lead time —
+    replacing hardcoded values with workspace policy.
+    """
+
+    __tablename__ = "workspace_lifecycle_configs"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    renewal_notice_days: Mapped[int] = mapped_column(Integer, nullable=False, default=90)
+    expiry_warning_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+
+    # Event toggles: which lifecycle events notify (security events are
+    # never suppressed — they live outside lifecycle).
+    notify_on_renewal_due: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    notify_on_expiration: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    create_action_items: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class AgreementState(

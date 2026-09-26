@@ -1971,6 +1971,100 @@ export async function adminDeactivateUser(token: string, userId: string) {
   });
 }
 
+// Admin suspend / unsuspend (spec 2.7-2.8) — suspension also terminates
+// active sessions and lands in the audit chain.
+export async function adminSuspendUser(token: string, userId: string) {
+  return apiRequest<{ message: string }>(`/admin/users/${userId}/suspend`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function adminUnsuspendUser(token: string, userId: string) {
+  return apiRequest<{ message: string }>(`/admin/users/${userId}/unsuspend`, {
+    method: "POST",
+    token,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio intelligence & forecasting (spec 3.17 / 3.18)
+// ---------------------------------------------------------------------------
+
+export interface PortfolioMetricPoint {
+  date: string;
+  value: number;
+}
+
+export interface PortfolioDashboard {
+  status: string;
+  message?: string;
+  snapshot_date?: string;
+  metrics?: Record<string, { value: number | null; is_missing: boolean; missing_reason?: string | null }>;
+  trend?: Record<string, PortfolioMetricPoint[]>;
+  anomalies?: Array<{
+    metric_key: string;
+    snapshot_date: string;
+    observed_value: number;
+    baseline_mean: number;
+    deviation: number;
+    direction: string;
+  }>;
+  insights?: Array<{
+    id: string;
+    category: string;
+    title: string;
+    body: string;
+    severity: string;
+    generated_by: string;
+    evidence: { metric_refs?: Array<{ metric_key: string; value: number }> } | null;
+  }>;
+}
+
+export async function getPortfolioDashboard(token: string) {
+  return apiRequest<PortfolioDashboard>("/analytics/portfolio", { token });
+}
+
+export async function triggerPortfolioAggregation(token: string) {
+  return apiRequest<{ status: string; organizations_processed: number }>(
+    "/analytics/portfolio/aggregate",
+    { method: "POST", token }
+  );
+}
+
+export interface ForecastRunSummary {
+  id: string;
+  metric_key: string;
+  model_type: string;
+  status: string;
+  status_reason?: string | null;
+  horizon_days: number;
+  dataset_manifest?: { snapshot_count?: number } | null;
+  backtest?: { evaluated?: boolean; mae?: number; mape?: number | null } | null;
+  completed_at?: string | null;
+  predictions?: Array<{
+    target_date: string;
+    predicted_value: number;
+    confidence_low: number | null;
+    confidence_high: number | null;
+  }>;
+}
+
+export async function listForecastRuns(token: string) {
+  return apiRequest<ForecastRunSummary[]>("/forecast/runs", { token });
+}
+
+export async function createForecastRun(
+  token: string,
+  body: { metric_key: string; horizon_days: number; model_type: string }
+) {
+  return apiRequest<ForecastRunSummary>("/forecast/runs", {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
 // Contract quality (spec 77-81)
 export interface QualityFinding {
   engine: string;

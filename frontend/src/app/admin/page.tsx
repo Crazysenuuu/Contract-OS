@@ -15,6 +15,8 @@ import {
   adminDemoteUser,
   adminActivateUser,
   adminDeactivateUser,
+  adminSuspendUser,
+  adminUnsuspendUser,
   AdminSession,
   AdminUser,
 } from "@/lib/api";
@@ -595,6 +597,22 @@ function UsersTable({
                       className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
                     >
                       Reactivate
+                    </button>
+                  )}
+                  {u.user_id !== currentUserId && !u.is_admin && u.status === "suspended" && (
+                    <button
+                      onClick={() => run(adminUnsuspendUser, u)}
+                      className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                    >
+                      Unsuspend
+                    </button>
+                  )}
+                  {u.user_id !== currentUserId && !u.is_admin && u.status !== "suspended" && (
+                    <button
+                      onClick={() => run(adminSuspendUser, u)}
+                      className="px-3 py-1.5 text-xs font-bold rounded-lg bg-orange-50 text-orange-700 hover:bg-orange-100 transition-colors"
+                    >
+                      Suspend
                     </button>
                   )}
                   {u.user_id !== currentUserId && u.status !== "deactivated" && (

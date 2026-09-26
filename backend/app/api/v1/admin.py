@@ -395,6 +395,8 @@ async def admin_promote_user(
     target.is_admin = True
     target.status = "active"
     target.email_verified_at = target.email_verified_at or _utcnow()
+    await _admin_audit(db, admin=admin, action="ADMIN_USER_PROMOTE",
+                       target_user=target)
     await db.commit()
     return {"message": f"{target.name} is now a system admin"}
 
@@ -414,6 +416,8 @@ async def admin_demote_user(
         )
 
     target.is_admin = False
+    await _admin_audit(db, admin=admin, action="ADMIN_USER_DEMOTE",
+                       target_user=target)
     await db.commit()
     return {"message": f"{target.name}'s admin rights have been removed"}
 
@@ -427,8 +431,107 @@ async def admin_activate_user(
     """Re-activate a deactivated user account."""
     target = await _get_user_or_404(user_id, db)
     target.status = "active"
+    await _admin_audit(db, admin=admin, action="ADMIN_USER_ACTIVATE",
+                       target_user=target)
     await db.commit()
     return {"message": f"{target.name}'s account is active again"}
+
+
+@router.post("/users/{user_id}/suspend")
+async def admin_suspend_user(
+    user_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suspend a user account (spec §2.7).
+
+    Suspended users cannot sign in (the login status check rejects anything
+    outside active/pending_verification) and every active session is
+    terminated immediately. The action lands in the audit chain (§2.18).
+    """
+    target = await _get_user_or_404(user_id, db)
+    if target.id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot suspend your own account",
+        )
+    if target.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Suspend admin rights first (demote) before suspending",
+        )
+
+    target.status = "suspended"
+    await _kill_sessions(db, target)
+    await _admin_audit(db, admin=admin, action="ADMIN_USER_SUSPEND",
+                       target_user=target)
+    await db.commit()
+    return {"message": f"{target.name}'s account has been suspended"}
+
+
+@router.post("/users/{user_id}/unsuspend")
+async def admin_unsuspend_user(
+    user_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lift a suspension (spec §2.8: reactivate)."""
+    target = await _get_user_or_404(user_id, db)
+    if target.status != "suspended":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not suspended",
+        )
+    target.status = "active"
+    await _admin_audit(db, admin=admin, action="ADMIN_USER_UNSUSPEND",
+                       target_user=target)
+    await db.commit()
+    return {"message": f"{target.name}'s suspension has been lifted"}
+
+
+async def _kill_sessions(db: AsyncSession, target: User) -> None:
+    """Terminate every active session for a user."""
+    await db.execute(
+        UserSession.__table__.update().where(
+            (UserSession.user_id == target.id)
+            & (UserSession.status == "active")
+        ).values(status="logged_out", logout_at=_utcnow())
+    )
+
+
+async def _admin_audit(
+    db: AsyncSession,
+    *,
+    admin: User,
+    action: str,
+    target_user: User,
+) -> None:
+    """Record a privileged admin action in the tamper-evident audit chain
+    (spec §2.18: role changes and suspensions must be audited)."""
+    import uuid as uuid_mod
+
+    from app.models.rbac import OrganizationMember
+    from app.services.audit_service import record_event
+
+    org_row = await db.execute(
+        select(OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == admin.id)
+        .limit(1)
+    )
+    tenant_id = org_row.scalar_one_or_none() or uuid_mod.UUID(int=0)
+    await record_event(
+        db,
+        tenant_id=tenant_id,
+        actor_id=admin.id,
+        actor_type="admin",
+        action=action,
+        resource_type="user",
+        resource_id=target_user.id,
+        metadata_json={
+            "target_email": target_user.email,
+            "target_status": target_user.status,
+        },
+    )
 
 
 @router.post("/users/{user_id}/deactivate")
@@ -446,12 +549,9 @@ async def admin_deactivate_user(
         )
 
     target.status = "deactivated"
-    await db.execute(
-        UserSession.__table__.update().where(
-            (UserSession.user_id == target.id)
-            & (UserSession.status == "active")
-        ).values(status="logged_out", logout_at=_utcnow())
-    )
+    await _kill_sessions(db, target)
+    await _admin_audit(db, admin=admin, action="ADMIN_USER_DEACTIVATE",
+                       target_user=target)
     await db.commit()
     return {"message": f"{target.name}'s account has been deactivated"}
 

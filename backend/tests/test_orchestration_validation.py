@@ -74,22 +74,30 @@ async def test_workflow_with_no_steps_is_invalid(db_session: AsyncSession):
     assert any("no steps" in e for e in result["errors"])
 
 
-async def test_planned_action_rejected_validation(db_session: AsyncSession):
+async def test_unknown_action_rejected_validation_named(db_session: AsyncSession):
+    """Previously CREATE_APPROVAL was 'spec-planned'; it is implemented now,
+    so the rejected-action path is exercised with a still-unimplemented key."""
+
+    from app.services import orchestration_actions as _oa
+
+    assert not _oa.PLANNED_ACTIONS, (
+        "If new PLANNED_ACTIONS are added, point this test at one of them"
+    )
+
     def_id = await _build_definition(
         db_session,
-        "wf_planned",
+        "wf_unknown_action_named",
         steps=[
             {
-                "step_key": "approve",
+                "step_key": "go",
                 "step_type": "action",
-                "configuration": {"action": "CREATE_APPROVAL"},
+                "configuration": {"action": "DO_WILD_THING"},
             }
         ],
         transitions=[],
     )
     result = await validate_workflow_definition(db_session, def_id)
     assert result["valid"] is False
-    assert any("spec-planned but not implemented" in e for e in result["errors"])
 
 
 async def test_unknown_action_rejected_validation(db_session: AsyncSession):

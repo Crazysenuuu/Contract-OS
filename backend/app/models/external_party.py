@@ -105,6 +105,12 @@ class ExternalParty(
         default=True,
     )
 
+    # Extensible state bag (spec §3.20.28-30): evidence requests and other
+    # per-party operational state that does not warrant its own table yet.
+    party_metadata: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=dict
+    )
+
     can_propose_changes: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

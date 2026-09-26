@@ -2,16 +2,48 @@ import hashlib
 import os
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import FileSystemLoader, StrictUndefined, select_autoescape
+from jinja2.sandbox import SandboxedEnvironment
 
 
 TEMPLATE_DIR = Path(__file__).parent.parent.parent / "templates"
 
 
-def get_jinja_env() -> Environment:
-    return Environment(
+class ConditionalUndefined(StrictUndefined):
+    """Strict about output, lenient in conditionals.
+
+    Printing an undefined variable still fails loudly (§3.3.38: no
+    unresolved production placeholders), but testing one in an ``{% if %}``
+    evaluates falsy so templates can keep gating optional sections with
+    bare ``{% if optional_var %}`` — matching how the seeded template
+    catalog is written.
+    """
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) or other is None
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return id(self)
+
+
+def get_jinja_env() -> SandboxedEnvironment:
+    """Sandboxed template environment (spec §3.3.12).
+
+    Templates may only use safe Jinja constructs — attribute access through
+    the sandbox can never reach ``__class__``/``__subclasses__`` style escapes,
+    and ConditionalUndefined keeps unresolved variables loud in output
+    (§3.3.38) while letting conditionals test them safely.
+    """
+    return SandboxedEnvironment(
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=select_autoescape([]),
+        undefined=ConditionalUndefined,
         trim_blocks=True,
         lstrip_blocks=True,
         keep_trailing_newline=True,

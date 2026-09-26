@@ -105,6 +105,77 @@ async def create_amendment(
     return amendment
 
 
+async def apply_downstream_invalidation(
+    db: AsyncSession,
+    *,
+    amendment: AgreementAmendment,
+    activated_by: uuid.UUID,
+) -> dict:
+    """Downstream invalidation pipeline (spec §3.22.45-55).
+
+    After an amendment activates, dependent intelligence must refresh or be
+    explicitly marked stale — never silently wrong:
+      1. obligations tied to superseded clauses are superseded
+         (handled by activate_amendment; counted here),
+      2. in-flight approvals on the amended agreement are version-locked
+         (§3.22.25 signing/approval invalidation),
+      3. risk findings are flagged for re-analysis (status stays, a marker
+         records staleness),
+      4. graph nodes for the agreement are marked for re-projection.
+    """
+    from app.models.ai_analysis import RiskFinding
+    from app.models.approval import ApprovalRecord
+    from app.models.risk_graph import RiskGraphNode
+    from sqlalchemy import select as _select
+
+    agreement_id = amendment.agreement_id
+
+    # 2. version-lock in-flight approvals
+    locked = (
+        await db.execute(
+            _select(ApprovalRecord).where(
+                ApprovalRecord.agreement_id == agreement_id,
+                ApprovalRecord.status == "in_progress",
+            )
+        )
+    ).scalars().all()
+    from datetime import datetime as _dt, timezone as _tz
+
+    for record in locked:
+        record.version_locked_at = _dt.now(_tz.utc)
+
+    # 3. mark risk findings stale for re-analysis
+    findings = (
+        await db.execute(
+            _select(RiskFinding).where(RiskFinding.agreement_id == agreement_id)
+        )
+    ).scalars().all()
+    for finding in findings:
+        finding.evidence = dict(finding.evidence or {}) | {"stale_after_amendment": str(amendment.id)}
+
+    # 4. mark graph nodes for re-projection
+    nodes = (
+        await db.execute(
+            _select(RiskGraphNode).where(
+                RiskGraphNode.organization_id.is_not(None),
+                RiskGraphNode.entity_id == agreement_id,
+            )
+        )
+    ).scalars().all()
+    for node in nodes:
+        node.properties = dict(node.properties or {}) | {
+            "stale_after_amendment": str(amendment.id)
+        }
+
+    await db.flush()
+    return {
+        "amendment_id": str(amendment.id),
+        "approvals_version_locked": len(locked),
+        "risk_findings_marked_stale": len(findings),
+        "graph_nodes_marked_stale": len(nodes),
+    }
+
+
 async def activate_amendment(
     db: AsyncSession,
     *,

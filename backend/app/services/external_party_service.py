@@ -29,6 +29,108 @@ def generate_access_token() -> str:
     return secrets.token_urlsafe(96)
 
 
+async def create_share_link(
+    db: AsyncSession,
+    *,
+    agreement_id: uuid.UUID,
+    created_by: uuid.UUID,
+    ttl_hours: int = 72,
+    allow_comments: bool = True,
+) -> ExternalParty:
+    """Share-by-link for an agreement (spec §3.5.42).
+
+    Creates a lightweight view-only guest whose party role is 'viewer' and
+    whose capabilities are limited to commenting (optionally none). The link
+    expires by construction — share links are always time-bound.
+    """
+    from sqlalchemy import select as _select
+    from app.models.agreement_access import AgreementParty
+
+    party = (
+        await db.execute(
+            _select(AgreementParty)
+            .where(AgreementParty.agreement_id == agreement_id)
+            .limit(1)
+        )
+    ).scalars().first()
+    if party is None:
+        raise ValueError("Agreement has no party rows to anchor a share link")
+
+    link_party = ExternalParty(
+        agreement_id=agreement_id,
+        agreement_party_id=party.id,
+        company_name="Shared link",
+        signatory_name="Anonymous viewer",
+        signatory_email=f"share-{secrets.token_hex(6)}@links.invalid",
+        access_token=generate_access_token(),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
+        status="invited",
+        can_comment=allow_comments,
+        can_propose_changes=False,
+        can_accept=False,
+        can_sign=False,
+    )
+    db.add(link_party)
+    await db.flush()
+    return link_party
+
+
+async def create_evidence_request(
+    db: AsyncSession,
+    *,
+    external_party: ExternalParty,
+    title: str,
+    description: str | None = None,
+    due_in_days: int = 14,
+) -> dict:
+    """External evidence request (spec §3.20.28-30).
+
+    The host asks the counterparty to upload evidence (insurance certificate,
+    delivery note). The request is stored on the party's metadata and the
+    upload itself goes through the normal authorized upload endpoint — the
+    request grants nothing by itself.
+    """
+    requests = list((external_party.party_metadata or {}).get("evidence_requests", []))
+    request = {
+        "id": secrets.token_hex(8),
+        "title": title,
+        "description": description,
+        "status": "pending",
+        "due_at": (
+            datetime.now(timezone.utc) + timedelta(days=due_in_days)
+        ).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    requests.append(request)
+    external_party.party_metadata = dict(external_party.party_metadata or {}) | {
+        "evidence_requests": requests
+    }
+    await db.flush()
+    return request
+
+
+async def update_evidence_request_status(
+    db: AsyncSession,
+    *,
+    external_party: ExternalParty,
+    request_id: str,
+    status: str,
+) -> dict | None:
+    """Advance an evidence request's state (§3.20.79)."""
+    if status not in ("submitted", "verified", "rejected", "cancelled"):
+        raise ValueError("status must be submitted|verified|rejected|cancelled")
+    requests = list((external_party.party_metadata or {}).get("evidence_requests", []))
+    for request in requests:
+        if request.get("id") == request_id:
+            request["status"] = status
+            external_party.party_metadata = dict(external_party.party_metadata or {}) | {
+                "evidence_requests": requests
+            }
+            await db.flush()
+            return request
+    return None
+
+
 async def create_external_party(
     db: AsyncSession,
     agreement_id: uuid.UUID,
@@ -63,6 +165,26 @@ async def create_external_party(
     Returns:
         The created ExternalParty with access_token.
     """
+    # Organization-level external policy is the upper bound (spec §3.20.51):
+    # guest links cannot exist when external access is disabled, and the
+    # link lifetime is clamped to the configured maximum (§3.20.77).
+    from app.services.external_policy_service import (
+        ExternalPolicyError,
+        assert_external_access_allowed,
+        clamp_link_expiry,
+    )
+
+    agreement_row = await db.get(Agreement, agreement_id)
+    if agreement_row is None:
+        raise ValueError("Agreement not found")
+    try:
+        policy = await assert_external_access_allowed(
+            db, organization_id=agreement_row.organization_id
+        )
+    except ExternalPolicyError as exc:
+        raise ValueError(str(exc)) from exc
+    expires_at = clamp_link_expiry(policy, expires_at)
+
     external_party = ExternalParty(
         agreement_id=agreement_id,
         agreement_party_id=agreement_party_id,

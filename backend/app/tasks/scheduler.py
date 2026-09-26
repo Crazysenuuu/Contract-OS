@@ -89,6 +89,17 @@ celery_app.conf.beat_schedule = {
         'task': 'app.monitoring.tasks.detect_stale_monitorings_task',
         'schedule': crontab(minute=30),
     },
+    # Hourly at :20: escalate approvals stuck past their stage deadline
+    # (spec §3.6.29/§3.6.50-51) and expire stale action-center items
+    # (spec §3.10.72-73).
+    'approval-deadline-scanner': {
+        'task': 'app.tasks.scheduler.scan_approval_deadlines',
+        'schedule': crontab(minute=20),
+    },
+    'expire-action-items': {
+        'task': 'app.tasks.scheduler.expire_action_items_task',
+        'schedule': crontab(minute=40),
+    },
 }
 
 
@@ -461,6 +472,44 @@ def process_workflow_timers(limit: int = 200):
                 result = await process_due_timers(db, limit=limit)
                 await db.commit()
                 return result
+            except Exception:
+                await db.rollback()
+                raise
+
+    return _run_async(_run)
+
+
+@celery_app.task(name="app.tasks.scheduler.scan_approval_deadlines")
+def scan_approval_deadlines():
+    """Escalate approvals past their stage deadline (spec §3.6.50-51)."""
+    from app.core.database import AsyncSessionLocal
+    from app.services.approval_engine import scan_approval_deadlines as _scan
+
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            try:
+                result = await _scan(db)
+                await db.commit()
+                return result
+            except Exception:
+                await db.rollback()
+                raise
+
+    return _run_async(_run)
+
+
+@celery_app.task(name="app.tasks.scheduler.expire_action_items_task")
+def expire_action_items_task():
+    """Expire stale action-center items (spec §3.10.72-73)."""
+    from app.core.database import AsyncSessionLocal
+    from app.services.action_item_service import expire_stale_items
+
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            try:
+                expired = await expire_stale_items(db)
+                await db.commit()
+                return {"expired": expired}
             except Exception:
                 await db.rollback()
                 raise

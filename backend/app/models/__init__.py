@@ -45,6 +45,8 @@ from app.models.negotiation import (
     NegotiationRound,
     NegotiationComment,
     NegotiationAction,
+    ClausePlaybook,
+    NegotiationDeadlock,
 )
 from app.models.external_party import (
     ExternalParty,
@@ -107,6 +109,8 @@ from app.models.company_policy import (
 )
 from app.models.notification import (
     Notification,
+    NotificationDelivery,
+    EmailTemplate,
     NotificationPreference,
 )
 from app.models.feature_flag import (
@@ -128,6 +132,7 @@ from app.models.renewal import (
 from app.models.lifecycle import (
     StatusTransitionRule,
     AgreementState,
+    WorkspaceLifecycleConfig,
 )
 from app.models.amendment import (
     AgreementAmendment,
@@ -207,6 +212,42 @@ from app.models.retention import (
     RepositoryRecord,
 )
 from app.models.otp_challenge import OTPChallenge
+from app.models.analytics import (
+    MetricSnapshot,
+    AnomalyRecord,
+    ExecutiveInsight,
+)
+from app.models.forecasting import (
+    ForecastRun,
+    ForecastPrediction,
+    ScenarioRun,
+)
+from app.models.action_item import ActionItem
+from app.models.external_policy import (
+    ExternalWorkspacePolicy,
+    AgreementSharingPolicy,
+)
+from app.models.automation import (
+    AutomationRule,
+    AutomationExecution,
+    HumanCheckpoint,
+)
+from app.models.party import (
+    Contact,
+    Address,
+    PartyIdentifier,
+)
+from app.models.obligation_risk import (
+    ObligationException,
+    RiskPolicyVersion,
+    RiskSnapshot,
+)
+from app.models.ingestion_intelligence import (
+    ExtractionCandidate,
+    ExtractionConflict,
+    IngestionBatch,
+    ExtractionProvenance,
+)
 from app.models.ingestion import (
     IngestionJob,
     OCRDocument,
@@ -286,6 +327,8 @@ __all__ = [
     "NegotiationRound",
     "NegotiationComment",
     "NegotiationAction",
+    "ClausePlaybook",
+    "NegotiationDeadlock",
     "ExternalParty",
     "ExternalPartySession",
     "ExternalPartyComment",
@@ -312,6 +355,8 @@ __all__ = [
     "PolicyViolation",
     "ComplianceReport",
     "Notification",
+    "NotificationDelivery",
+    "EmailTemplate",
     "NotificationPreference",
     "FeatureFlagRecord",
     "FeatureFlagOverrideRecord",
@@ -323,6 +368,7 @@ __all__ = [
     "RenewalReminder",
     "StatusTransitionRule",
     "AgreementState",
+    "WorkspaceLifecycleConfig",
     "AgreementAmendment",
     "AmendmentChange",
     "AgreementTermination",
@@ -409,6 +455,28 @@ __all__ = [
     "IntelligenceAccessCheck",
     "AgreementPrecedent",
     "APIKey",
+    "MetricSnapshot",
+    "AnomalyRecord",
+    "ExecutiveInsight",
+    "ForecastRun",
+    "ForecastPrediction",
+    "ScenarioRun",
+    "ActionItem",
+    "ExternalWorkspacePolicy",
+    "AgreementSharingPolicy",
+    "AutomationRule",
+    "AutomationExecution",
+    "HumanCheckpoint",
+    "Contact",
+    "Address",
+    "PartyIdentifier",
+    "ObligationException",
+    "RiskPolicyVersion",
+    "RiskSnapshot",
+    "ExtractionCandidate",
+    "ExtractionConflict",
+    "IngestionBatch",
+    "ExtractionProvenance",
 ]
 from app.models.stored_object import StoredObject
 __all__.append('StoredObject')

@@ -7,13 +7,15 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
@@ -161,6 +163,12 @@ class AgreementChangeItem(
         String(30),
         nullable=False,
         default="proposed",  # 'proposed', 'accepted', 'rejected'
+    )
+
+    # Concession value (spec §3.22-adj §9): numeric value this item concedes
+    # relative to the party's earlier position (e.g. liability cap delta).
+    concession_value: Mapped[float | None] = mapped_column(
+        Numeric(15, 2), nullable=True
     )
 
     # Relationships
@@ -326,6 +334,13 @@ class NegotiationAction(
         nullable=True,
     )
 
+    # Concession tracking (spec §3.22-adjacent §9): value this party gave up
+    # relative to its earlier position, for leverage analytics.
+    concession_value: Mapped[float | None] = mapped_column(
+        Numeric(15, 2), nullable=True
+    )
+    concession_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Relationships
     round = relationship(
         "NegotiationRound",
@@ -333,3 +348,76 @@ class NegotiationAction(
     )
     actor = relationship("User")
     change = relationship("AgreementChange")
+
+
+class ClausePlaybook(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """A party's fallback positions for one clause (spec §3.22-adj §10).
+
+    Positions are ordered from most to least preferred; the matcher walks
+    them against counterparty proposals. Playbooks are workspace-scoped and
+    private to the owning organization.
+    """
+
+    __tablename__ = "clause_playbooks"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    clause_identifier: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True
+    )
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Ordered positions: [{position, text, is_default, risk_level,
+    #                      acceptable_criteria}]. First match wins.
+    positions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class NegotiationDeadlock(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    Base,
+):
+    """Detected negotiation deadlock (spec §3.22-adj §23).
+
+    Raised when rounds pass without convergence (no accepted changes, no
+    movement on the disputed clauses). Resolving records the path chosen.
+    """
+
+    __tablename__ = "negotiation_deadlocks"
+
+    agreement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agreements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    round_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Clauses with no movement across the detection window.
+    disputed_clauses: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # 'open' | 'resolved' | 'escalated' | 'terminated'
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+
+    detection_rule: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
