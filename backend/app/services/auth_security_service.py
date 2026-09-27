@@ -21,10 +21,17 @@ from app.models.user import LoginAttempt, RefreshToken, User
 
 settings = get_settings_lazy()
 
-# Rate limiting configuration
-MAX_FAILED_ATTEMPTS_PER_EMAIL = 5
-MAX_FAILED_ATTEMPTS_PER_IP = 20
-RATE_LIMIT_WINDOW_MINUTES = 15
+# Rate limiting configuration. Tight in production; relaxed in development
+# where hydration-retrying login forms and repeated smoke-test logins easily
+# accumulate 5+ failures and lock the developer out for the window.
+if settings.environment == "production":
+    MAX_FAILED_ATTEMPTS_PER_EMAIL = 5
+    MAX_FAILED_ATTEMPTS_PER_IP = 20
+    RATE_LIMIT_WINDOW_MINUTES = 15
+else:  # development / test
+    MAX_FAILED_ATTEMPTS_PER_EMAIL = 50
+    MAX_FAILED_ATTEMPTS_PER_IP = 200
+    RATE_LIMIT_WINDOW_MINUTES = 15
 
 
 def now_utc() -> datetime:

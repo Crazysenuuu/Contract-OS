@@ -137,6 +137,13 @@ async def _get_chain_head(
 _SEQUENCE_CONFLICT_RETRIES = 5
 
 
+# Historical sentinel some callers still pass for "no human actor". It is
+# normalized to NULL before insert: audit_events.actor_id carries a FK to
+# users.id, and a zero UUID is not a real user (this only surfaced on
+# PostgreSQL — SQLite-based tests do not enforce the constraint).
+_SYSTEM_ACTOR_SENTINEL = uuid.UUID(int=0)
+
+
 async def record_event(
     db: AsyncSession,
     *,
@@ -158,6 +165,11 @@ async def record_event(
     serialize on the unique constraint via a savepoint + retry; a genuine
     constraint failure after exhausting retries still raises.
     """
+    # Normalize the legacy system-actor sentinel to NULL so the FK to
+    # users.id is never violated; actor_type (e.g. "system") preserves the
+    # information that no human performed the action.
+    if actor_id is not None and actor_id == _SYSTEM_ACTOR_SENTINEL:
+        actor_id = None
     created_at = created_at or now_utc()
     last_error: Exception | None = None
     for _ in range(_SEQUENCE_CONFLICT_RETRIES):

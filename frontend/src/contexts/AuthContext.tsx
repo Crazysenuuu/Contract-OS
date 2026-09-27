@@ -28,7 +28,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   /** Resolves once the session is fully hydrated (token stored + user fetched). */
-  login: (token: string) => Promise<void>;
+  login: (token: string) => Promise<User>;
   logout: () => void;
   isLoading: boolean;
 }
@@ -103,7 +103,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Hydrate the user BEFORE callers navigate away: guards on protected
     // pages (e.g. the dashboard layout) treat `user === null` as logged out
     // and would bounce the fresh session straight back to /login.
-    setUser(await getMe(newToken));
+    const me = await getMe(newToken);
+    setUser(me);
+    return me;
   };
 
   const logout = () => {

@@ -22,8 +22,12 @@ export default function LoginPage() {
 
     try {
       const result = await login({ email, password });
-      await authLogin(result.access_token);
-      router.push("/dashboard");
+      const user = await authLogin(result.access_token);
+      if (user.is_admin) {
+        router.push("/admin");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

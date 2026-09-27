@@ -713,7 +713,7 @@ async def list_pending_approvals(
 # --- Sign-off readiness & version locks (spec §3.6.54-56) ---
 
 
-@record_router.get("/agreements/{agreement_id}/signoff")
+@record_router.get("/{agreement_id}/signoff")
 async def signoff_readiness(
     agreement_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -731,7 +731,7 @@ async def signoff_readiness(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@record_router.post("/agreements/{agreement_id}/version-lock")
+@record_router.post("/{agreement_id}/version-lock")
 async def inspect_version_locks(
     agreement_id: UUID,
     current_user: User = Depends(get_current_user),
