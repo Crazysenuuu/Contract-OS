@@ -20,6 +20,7 @@ class TestAuthIntegration:
                 "email": "newuser@test.com",
                 "name": "New User",
                 "password": "SecurePass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
         assert response.status_code in [200, 201]
@@ -36,6 +37,7 @@ class TestAuthIntegration:
                 "email": "duplicate@test.com",
                 "name": "First User",
                 "password": "SecurePass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
         # Second registration with same email
@@ -45,6 +47,7 @@ class TestAuthIntegration:
                 "email": "duplicate@test.com",
                 "name": "Second User",
                 "password": "SecurePass456!",
+                "date_of_birth": "1990-01-01",
             },
         )
         assert response.status_code in [400, 409, 422]
@@ -58,6 +61,7 @@ class TestAuthIntegration:
                 "email": "login@test.com",
                 "name": "Login User",
                 "password": "TestPass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
         # Login
@@ -81,6 +85,7 @@ class TestAuthIntegration:
                 "email": "wrongpass@test.com",
                 "name": "Wrong Pass User",
                 "password": "CorrectPass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
         # Login with wrong password
@@ -118,6 +123,7 @@ class TestAuthIntegration:
                 "email": "refresh@test.com",
                 "name": "Refresh User",
                 "password": "RefreshPass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
         tokens = reg_response.json()

@@ -1,79 +1,52 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
+import { updateProfile } from "@/lib/api";
 
 export default function SettingsPage() {
   const { user, token, logout } = useAuth();
-  const [mfaSecret, setMfaSecret] = useState<string | null>(null);
-  const [provisioningUri, setProvisioningUri] = useState<string | null>(null);
-  const [mfaCode, setMfaCode] = useState("");
-  const [mfaEnabled, setMfaEnabled] = useState<boolean | null>(null);
+  const [name, setName] = useState(user?.name ?? "");
+  const [phone, setPhone] = useState("");
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [loadedPhone, setLoadedPhone] = useState(false);
 
+  // Load the phone value once /auth/me data is available (the AuthContext
+  // user doesn't carry phone).
   useEffect(() => {
-    if (token) {
-      // The /auth/me response doesn't include mfa_enabled in the frontend
-      // type, so we fetch it from the admin-free profile endpoint.
-      fetch("/api/v1/auth/me", {
-        headers: { Authorization: `Bearer ${token}` },
+    if (!token || loadedPhone) return;
+    setLoadedPhone(true);
+    fetch("/api/v1/auth/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.phone) setPhone(data.phone);
+        if (data?.name) setName(data.name);
       })
-        .then((r) => r.json())
-        .then((data) => {
-          if (typeof data.mfa_enabled === "boolean") setMfaEnabled(data.mfa_enabled);
-        })
-        .catch(() => {});
-    }
-  }, [token]);
+      .catch(() => {});
+  }, [token, loadedPhone]);
 
-  const handleSetupMfa = async () => {
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!token) return;
-    setBusy(true);
+    setSaving(true);
     setError("");
     setMessage("");
     try {
-      const res = await fetch("/api/v1/auth/mfa/setup", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+      const updated = await updateProfile(token, {
+        name: name.trim() || undefined,
+        phone: phone.trim() || null,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "MFA setup failed");
-      setMfaSecret(data.secret);
-      setProvisioningUri(data.provisioning_uri);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "MFA setup failed");
+      setMessage("Profile updated.");
+      if (updated.name) setName(updated.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update profile");
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleVerifyMfa = async () => {
-    if (!token || !mfaCode) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      const res = await fetch("/api/v1/auth/mfa/verify", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ code: mfaCode }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Verification failed");
-      setMessage("MFA enabled successfully");
-      setMfaEnabled(true);
-      setMfaSecret(null);
-      setProvisioningUri(null);
-      setMfaCode("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Verification failed");
-    } finally {
-      setBusy(false);
+      setSaving(false);
     }
   };
 
@@ -86,13 +59,45 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {message && (
+        <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 p-3 rounded-md">
+          {message}
+        </div>
+      )}
+      {error && (
+        <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 p-3 rounded-md">
+          {error}
+        </div>
+      )}
+
       {/* Profile */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Profile</h2>
-        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <dt className="text-sm text-gray-500">Name</dt>
-            <dd className="text-sm font-medium text-gray-900">{user?.name}</dd>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Phone (E.164, for SMS alerts)
+              </label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+94771234567"
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+              />
+            </div>
           </div>
           <div>
             <dt className="text-sm text-gray-500">Email</dt>
@@ -104,82 +109,29 @@ export default function SettingsPage() {
               {user?.is_admin ? "Administrator" : "User"}
             </dd>
           </div>
-          <div>
-            <dt className="text-sm text-gray-500">Account</dt>
-            <dd className="text-sm font-medium text-gray-900">Active</dd>
-          </div>
-        </dl>
-      </div>
-
-      {/* Security / MFA */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Security</h2>
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full ${
-              mfaEnabled ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            MFA {mfaEnabled ? "Enabled" : "Disabled"}
-          </span>
-        </div>
-
-        {message && <div className="mb-4 text-sm text-emerald-700 bg-emerald-50 p-3 rounded-md">{message}</div>}
-        {error && <div className="mb-4 text-sm text-rose-700 bg-rose-50 p-3 rounded-md">{error}</div>}
-
-        {!mfaEnabled && !mfaSecret && (
           <button
-            onClick={handleSetupMfa}
-            disabled={busy}
+            type="submit"
+            disabled={saving}
             className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700 disabled:opacity-50"
           >
-            {busy ? "Setting up…" : "Enable Two-Factor Authentication"}
+            {saving ? "Saving…" : "Save Profile"}
           </button>
-        )}
+        </form>
+      </div>
 
-        {mfaSecret && provisioningUri && (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600">
-              Scan this QR code with your authenticator app (e.g. Google
-              Authenticator, Authy), or enter the secret manually:
-            </p>
-            {/* QR is rendered by the authenticator app via the provisioning
-                URI; we show the secret and a compact QR placeholder. */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <div className="text-xs text-gray-500 mb-1">Manual entry secret</div>
-              <code className="text-sm text-gray-900 font-mono break-all">{mfaSecret}</code>
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">
-                Enter the 6-digit code from your app
-              </label>
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value)}
-                  placeholder="000000"
-                  className="border border-gray-300 rounded-md px-3 py-2 text-sm w-40 tracking-widest"
-                />
-                <button
-                  onClick={handleVerifyMfa}
-                  disabled={busy || mfaCode.length < 6}
-                  className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {busy ? "Verifying…" : "Verify & Enable"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {mfaEnabled && (
-          <p className="text-sm text-gray-600">
-            Two-factor authentication is active on your account. Your
-            password and a time-based code from your authenticator app are
-            required to sign in.
-          </p>
-        )}
+      {/* Security */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Security</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Password, two-factor authentication, active sessions, and registered
+          devices.
+        </p>
+        <Link
+          href="/settings/security"
+          className="inline-block px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800"
+        >
+          Open Security Settings →
+        </Link>
       </div>
 
       {/* Session */}

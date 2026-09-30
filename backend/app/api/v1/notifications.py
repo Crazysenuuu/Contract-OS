@@ -43,6 +43,9 @@ class NotificationResponse(BaseModel):
     agreement_id: Optional[uuid.UUID]
     metadata_: Optional[dict]
     sent_at: Optional[datetime]
+    # When the recipient acknowledged the notification (null = unread).
+    # Powers the inbox read/unread state (spec 2.13).
+    read_at: Optional[datetime]
     created_at: datetime
 
     model_config = {"from_attributes": True}

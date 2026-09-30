@@ -3,8 +3,13 @@ Email Notification Service with SendGrid Integration.
 
 Sends transactional emails for agreement lifecycle events.
 Falls back to logging when SendGrid is not configured.
+
+CAN-SPAM compliance: every outbound email is rendered through
+``_build_base_template`` or the digest builder, and both stamp a working
+unsubscribe link plus the sender's physical postal address in the footer.
 """
 
+import hmac
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -64,9 +69,47 @@ class EmailService:
             )
             self._client = False
 
+    def _unsubscribe_url(self, to_email: str) -> str:
+        """Build the per-recipient signed opt-out URL (CAN-SPAM footer)."""
+        from app.core.config import get_settings_lazy
+
+        settings = get_settings_lazy()
+        import hashlib
+
+        mac = hmac.new(
+            settings.email_opt_out_token.encode(),
+            to_email.lower().encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return (
+            f"{self._app_base_url}/api/v1/email/opt-out"
+            f"?email={to_email}&sig={mac}"
+        )
+
+    def _compliance_footer(self, to_email: str) -> str:
+        """Footer HTML appended to every email: unsubscribe + postal address."""
+        opt_out_url = self._unsubscribe_url(to_email)
+        from app.core.config import get_settings_lazy
+
+        settings = get_settings_lazy()
+        return (
+            f'<p style="font-size:12px;color:#6b7280;margin:8px 0 0 0;">'
+            f'You are receiving this because you have a ContractOS account or '
+            f'were invited to an agreement. '
+            f'<a href="{opt_out_url}" style="color:#6b7280;">Unsubscribe</a> '
+            f'from these emails.&nbsp;&nbsp;'
+            f'{settings.email_postal_address}'
+            f'</p>'
+        )
+
     def _send(self, to_email: str, subject: str, html_content: str) -> EmailResult:
         """Send an email via SendGrid or log it."""
         self._get_config()
+
+        # CAN-SPAM: guarantee the unsubscribe + postal-address footer on every
+        # message, even when a caller builds its own HTML (e.g. the digest).
+        if "data-can-spam-footer" not in html_content:
+            html_content = html_content + self._compliance_footer(to_email)
 
         if self._client and self._client is not False:
             try:
@@ -78,6 +121,26 @@ class EmailService:
                     subject=subject,
                     html_content=html_content,
                 )
+                # RFC 8058 one-click unsubscribe headers (CAN-SPAM / Gmail &
+                # Yahoo bulk-sender requirements).
+                opt_out_url = self._unsubscribe_url(to_email)
+                try:
+                    from sendgrid.helpers.mail import Header
+
+                    for header in (
+                        Header("List-Unsubscribe", f"<{opt_out_url}>"),
+                        Header(
+                            "List-Unsubscribe-Post",
+                            "List-Unsubscribe=One-Click",
+                        ),
+                    ):
+                        if message.personalizations:
+                            message.personalizations[0].add_header(header)
+                except (ImportError, AttributeError):
+                    logger.warning(
+                        "sendgrid Header helper unavailable; "
+                        "skipping List-Unsubscribe headers"
+                    )
                 response = self._client.send(message)
                 message_id = response.headers.get("X-Message-Id", "unknown")
                 logger.info(f"Email sent to {to_email}: {subject} (id={message_id})")
@@ -129,7 +192,11 @@ class EmailService:
                     f"Verify Email</a></div>"
                 )
                 return self._send(
-                    to_email, subject, self._build_base_template("Welcome to ContractOS", body)
+                    to_email,
+                    subject,
+                    self._build_base_template(
+                        "Welcome to ContractOS", body, to_email=to_email
+                    ),
                 )
             if template_name == "review_invitation":
                 return self.send_review_invitation(
@@ -164,7 +231,11 @@ class EmailService:
                     "please ignore this message.</p>"
                 )
                 return self._send(
-                    to_email, subject, self._build_base_template("Verification Code", body)
+                    to_email,
+                    subject,
+                    self._build_base_template(
+                        "Verification Code", body, to_email=to_email
+                    ),
                 )
         except TypeError:
             # Template method signature mismatch — fall through to generic body.
@@ -174,11 +245,28 @@ class EmailService:
         return self._send(
             to_email,
             subject,
-            self._build_base_template("ContractOS Notification", f"<p>{subject}</p>"),
+            self._build_base_template(
+                "ContractOS Notification", f"<p>{subject}</p>", to_email=to_email
+            ),
         )
 
-    def _build_base_template(self, title: str, body_html: str) -> str:
-        """Wrap content in a base email template."""
+    def _build_base_template(
+        self,
+        title: str,
+        body_html: str,
+        to_email: str = "",
+    ) -> str:
+        """Wrap content in a base email template.
+
+        When ``to_email`` is provided the CAN-SPAM footer (unsubscribe link +
+        physical postal address) is embedded and marked with
+        ``data-can-spam-footer`` so ``_send`` does not append it twice.
+        """
+        footer_block = (
+            f'<div data-can-spam-footer>{self._compliance_footer(to_email)}</div>'
+            if to_email
+            else ""
+        )
         return f"""
         <!DOCTYPE html>
         <html>
@@ -199,6 +287,7 @@ class EmailService:
                         This is an automated notification from ContractOS.<br>
                         <a href="{self._app_base_url}" style="color:#3b82f6;">Open ContractOS</a>
                     </p>
+                    {footer_block}
                 </div>
             </div>
         </body>

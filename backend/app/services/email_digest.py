@@ -114,15 +114,13 @@ class EmailDigestService:
 
             # Build digest email
             html = self._build_digest_html(
-                grouped, prefs.digest_frequency
+                grouped, prefs.digest_frequency, to_email=pending[0].to_email
             )
-
-            # Send digest
-            from app.core.config import get_settings_lazy
-            settings = get_settings_lazy()
 
             subject = f"ContractOS Digest - {len(pending)} new notification(s)"
 
+            # Send digest. The shared _send path appends the CAN-SPAM
+            # footer (unsubscribe + postal address) automatically.
             email_result = email_service._send(
                 to_email=pending[0].to_email,
                 subject=subject,
@@ -189,8 +187,19 @@ class EmailDigestService:
         self,
         grouped: dict[Optional[UUID], list[Notification]],
         frequency: str,
+        to_email: str = "",
     ) -> str:
-        """Build HTML for digest email."""
+        """Build HTML for digest email.
+
+        When ``to_email`` is provided the CAN-SPAM footer (unsubscribe link +
+        physical postal address) is embedded inside the styled card, marked
+        with ``data-can-spam-footer`` so ``_send`` does not append it again.
+        """
+        footer_block = (
+            f'<div data-can-spam-footer>{email_service._compliance_footer(to_email)}</div>'
+            if to_email
+            else ""
+        )
         total = sum(len(notifs) for notifs in grouped.values())
 
         sections_html = ""
@@ -238,6 +247,7 @@ class EmailDigestService:
                     <p style="font-size:12px;color:#6b7280;margin:0;">
                         Manage your notification preferences in ContractOS settings.
                     </p>
+                    {footer_block}
                 </div>
             </div>
         </body>

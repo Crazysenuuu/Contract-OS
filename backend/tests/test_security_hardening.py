@@ -53,6 +53,7 @@ class TestRefreshApi:
                 "email": "rotate@test.com",
                 "name": "Rotate User",
                 "password": "RotatePass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
         assert reg.status_code in (200, 201)
@@ -89,6 +90,7 @@ class TestRefreshApi:
                 "email": "logintok@test.com",
                 "name": "Login Tok",
                 "password": "LoginPass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
         assert reg.status_code in (200, 201)
@@ -114,6 +116,7 @@ class TestRefreshApi:
                     "email": "logoutuser@test.com",
                     "name": "Logout User",
                     "password": "LogoutPass123!",
+                    "date_of_birth": "1990-01-01",
                 },
             )
             refresh_token = reg.json()["refresh_token"]
@@ -139,6 +142,7 @@ class TestRateLimiting:
                 "email": "locked@test.com",
                 "name": "Locked User",
                 "password": "CorrectPass123!",
+                "date_of_birth": "1990-01-01",
             },
         )
 

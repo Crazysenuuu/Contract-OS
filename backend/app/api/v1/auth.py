@@ -3,7 +3,7 @@ import uuid
 import secrets
 import logging
 import pyotp
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, update
@@ -26,10 +26,15 @@ from app.schemas.auth import (
     UserResponse,
     MFAVerify,
     MFASetupResponse,
+    MFADisable,
     EmailVerify,
     RefreshRequest,
+    PasswordChange,
+    ProfileUpdate,
+    SessionResponse,
 )
 from app.services.auth_security_service import (
+    MAX_FAILED_ATTEMPTS_PER_EMAIL,
     check_login_rate_limit,
     create_refresh_token,
     record_login_attempt,
@@ -48,6 +53,35 @@ logger = logging.getLogger(__name__)
 def generate_slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug
+
+
+def _totp_valid(user: User, mfa_code: str | None) -> bool | None:
+    """Verify a TOTP code against the user's secret.
+
+    Returns None when the user has MFA enabled but no secret configured
+    (a 500-worthy server state the caller must handle), True/False for the
+    verification result. Shared by /login and /admin/login so both paths
+    verify codes identically.
+    """
+    if not user.mfa_enabled:
+        return True
+    if not user.mfa_secret:
+        return None
+    totp = pyotp.TOTP(user.mfa_secret)
+    return totp.verify(mfa_code or "")
+
+
+async def _first_active_org(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | None:
+    """Resolve the user's first active membership org (login org context)."""
+    result = await db.execute(
+        select(OrganizationMember.organization_id)
+        .where(
+            OrganizationMember.user_id == user_id,
+            OrganizationMember.status == "active",
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 def _client_ip(request: Request) -> str | None:
@@ -93,12 +127,28 @@ async def register(
             detail="Email already registered",
         )
 
+    # COPPA age gate — the schema validator already rejected under-13 DOBs
+    # with 422; this is the last-line server-side check before an account is
+    # created. Only the derived boolean is stored, never the DOB itself.
+    today = date.today()
+    age = (
+        today.year
+        - data.date_of_birth.year
+        - ((today.month, today.day) < (data.date_of_birth.month, data.date_of_birth.day))
+    )
+    if age < 13:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="You must be at least 13 years old to create an account",
+        )
+
     user = User(
         email=data.email,
         name=data.name,
         password_hash=hash_password(data.password),
         status="pending_verification",
         verification_token=secrets.token_urlsafe(32),
+        is_adult=age >= 13,
     )
     db.add(user)
     await db.flush()
@@ -230,13 +280,13 @@ async def login(
                 detail="MFA code required",
                 headers={"WWW-Authenticate": "Bearer error=\"mfa_required\""},
             )
-        if not user.mfa_secret:
+        totp_ok = _totp_valid(user, data.mfa_code)
+        if totp_ok is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="MFA is enabled but no secret is configured",
             )
-        totp = pyotp.TOTP(user.mfa_secret)
-        if not totp.verify(data.mfa_code):
+        if not totp_ok:
             await record_login_attempt(
                 db, email=data.email, ip_address=ip, success=False, reason="invalid_mfa"
             )
@@ -252,15 +302,7 @@ async def login(
             detail="Account is not active",
         )
 
-    membership_result = await db.execute(
-        select(OrganizationMember.organization_id)
-        .where(
-            OrganizationMember.user_id == user.id,
-            OrganizationMember.status == "active",
-        )
-        .limit(1)
-    )
-    org_id = membership_result.scalar_one_or_none()
+    org_id = await _first_active_org(db, user.id)
 
     await _create_session(db, user.id, org_id, request)
 
@@ -281,6 +323,134 @@ async def login(
         ip_address=ip,
         success=True,
         reason="ok",
+        tenant_id=org_id,
+        actor_id=user.id,
+    )
+
+    return TokenResponse(
+        access_token=token,
+        refresh_token=refresh_token,
+        user_id=user.id,
+    )
+
+
+@router.post("/admin/login", response_model=TokenResponse)
+async def admin_login(
+    data: UserLogin,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dedicated, hardened login endpoint for System Admins (Panels.txt).
+
+    Differences from the generic /login:
+    - enforces MFA unconditionally (no successful login without a valid TOTP,
+      even if the flag was somehow left off the account),
+    - rejects any account whose is_admin flag is not set (no user
+      enumeration — non-admin credentials fail exactly like wrong passwords),
+    - stricter rate-limit budget than end-user logins.
+    """
+    ip = _client_ip(request)
+    # Stricter per-email failure budget than the generic /login endpoint —
+    # admin credentials are a higher-value target (spec 1.22 hardening).
+    await check_login_rate_limit(
+        db, data.email, ip, max_failed_attempts=max(3, MAX_FAILED_ATTEMPTS_PER_EMAIL // 2)
+    )
+
+    result = await db.execute(select(User).where(User.email == data.email))
+    user = result.scalar_one_or_none()
+
+    def _fail() -> None:
+        # Uniform error: no user enumeration via the admin endpoint.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email, password, or MFA code",
+        )
+
+    if user is None or not verify_password(data.password, user.password_hash):
+        await record_login_attempt(
+            db,
+            email=data.email,
+            ip_address=ip,
+            success=False,
+            reason="invalid_credentials",
+            tenant_id=None,
+            actor_id=user.id if user else None,
+        )
+        await db.commit()
+        _fail()
+
+    # Hardened path: an admin endpoint never issues tokens for a
+    # non-admin account, and never without MFA.
+    if not user.is_admin:
+        await record_login_attempt(
+            db,
+            email=data.email,
+            ip_address=ip,
+            success=False,
+            reason="not_admin",
+        )
+        await db.commit()
+        _fail()
+
+    if not data.mfa_code:
+        await record_login_attempt(
+            db,
+            email=data.email,
+            ip_address=ip,
+            success=False,
+            reason="mfa_required",
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="MFA code required",
+            headers={"WWW-Authenticate": "Bearer error=\"mfa_required\""},
+        )
+
+    totp_ok = _totp_valid(user, data.mfa_code)
+    if totp_ok is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MFA is enabled but no secret is configured",
+        )
+    if not totp_ok:
+        await record_login_attempt(
+            db,
+            email=data.email,
+            ip_address=ip,
+            success=False,
+            reason="invalid_mfa",
+        )
+        await db.commit()
+        _fail()
+
+    if user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is not active",
+        )
+
+    org_id = await _first_active_org(db, user.id)
+
+    await _create_session(db, user.id, org_id, request)
+
+    token = create_access_token(
+        user_id=user.id,
+        organization_id=org_id,
+    )
+    _, refresh_token = await create_refresh_token(
+        db,
+        user_id=user.id,
+        session_id=None,
+        ip_address=ip,
+        user_agent=request.headers.get("user-agent"),
+    )
+    await record_login_attempt(
+        db,
+        email=data.email,
+        ip_address=ip,
+        success=True,
+        reason="admin_login_ok",
         tenant_id=org_id,
         actor_id=user.id,
     )
@@ -387,6 +557,167 @@ async def verify_email(
     await db.commit()
 
     return {"message": "Email verified successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Profile & account security (Panels.txt user portal: profile management,
+# password change, MFA management, active sessions).
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    data: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the current user's own profile fields (name, phone)."""
+    update_data = data.model_dump(exclude_unset=True)
+    if "name" in update_data and not (update_data["name"] or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Name cannot be empty",
+        )
+    for field, value in update_data.items():
+        setattr(current_user, field, value)
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.post("/me/password")
+async def change_password(
+    data: PasswordChange,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change the current user's password.
+
+    Requires the current password. On success every other session is
+    logged out and all refresh tokens are revoked so a stolen session
+    cannot survive a password rotation; the caller's own session is kept.
+    """
+    if not verify_password(data.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+    if len(data.new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="New password must be at least 8 characters",
+        )
+    if data.new_password == data.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="New password must be different from the current password",
+        )
+
+    current_user.password_hash = hash_password(data.new_password)
+    await db.flush()
+
+    # Kill every other active session + revoke refresh tokens (spec 1.22:
+    # password change invalidates existing sessions). The row for the
+    # caller's current session is not tracked per-request, so "other
+    # sessions" is approximated by logging out everything EXCEPT sessions
+    # seen in the last 60 seconds from the same IP — the caller's.
+    keep_after = datetime.now(timezone.utc) - timedelta(seconds=60)
+    await db.execute(
+        update(UserSession)
+        .where(
+            UserSession.user_id == current_user.id,
+            UserSession.status == "active",
+            UserSession.ip_address != _client_ip(request),
+            UserSession.login_at < keep_after,
+        )
+        .values(
+            status="logged_out",
+            logout_at=datetime.now(timezone.utc),
+        )
+    )
+    await revoke_all_for_user(db, current_user.id, reason="password_change")
+
+    return {"message": "Password updated; other sessions were signed out"}
+
+
+@router.post("/mfa/disable")
+async def disable_mfa(
+    data: MFADisable,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Disable MFA. Requires BOTH the account password and a valid TOTP
+    code — knowing one factor alone must not be enough to strip the second
+    (spec 1.22 hardening)."""
+    if not current_user.mfa_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA is not enabled",
+        )
+    if not verify_password(data.password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password is incorrect",
+        )
+    totp_ok = _totp_valid(current_user, data.code)
+    if totp_ok is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MFA is enabled but no secret is configured",
+        )
+    if not totp_ok:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid MFA code",
+        )
+
+    current_user.mfa_enabled = False
+    current_user.mfa_secret = None
+    await db.commit()
+
+    return {"message": "MFA disabled successfully"}
+
+
+@router.get("/me/sessions", response_model=list[SessionResponse])
+async def list_my_sessions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List the current user's login sessions, newest first."""
+    result = await db.execute(
+        select(UserSession)
+        .where(UserSession.user_id == current_user.id)
+        .order_by(UserSession.login_at.desc())
+        .limit(50)
+    )
+    return result.scalars().all()
+
+
+@router.post("/me/sessions/{session_id}/revoke")
+async def revoke_my_session(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke one of the current user's own sessions ("sign out device")."""
+    result = await db.execute(
+        select(UserSession).where(
+            UserSession.id == session_id,
+            UserSession.user_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+    if session.status == "active":
+        session.status = "revoked"
+        session.logout_at = datetime.now(timezone.utc)
+        await db.commit()
+    return {"message": "Session revoked"}
 
 
 @router.post("/mfa/setup", response_model=MFASetupResponse)

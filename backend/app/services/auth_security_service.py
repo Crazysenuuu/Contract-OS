@@ -198,8 +198,18 @@ async def check_login_rate_limit(
     db: AsyncSession,
     email: str,
     ip_address: str | None,
+    *,
+    max_failed_attempts: int | None = None,
 ) -> None:
-    """Raise 429 if the email or IP has too many recent failures."""
+    """Raise 429 if the email or IP has too many recent failures.
+
+    ``max_failed_attempts`` overrides the default per-email budget — the
+    hardened /admin/login endpoint uses a smaller number than end-user
+    logins. The per-IP budget is unchanged (shared infrastructure address
+    space would otherwise lock whole offices out of the admin endpoint).
+    """
+    if max_failed_attempts is None:
+        max_failed_attempts = MAX_FAILED_ATTEMPTS_PER_EMAIL
     window_start = _naive_utc() - timedelta(minutes=RATE_LIMIT_WINDOW_MINUTES)
 
     email_result = await db.execute(
@@ -212,7 +222,7 @@ async def check_login_rate_limit(
         )
     )
     email_failures = email_result.scalar_one() or 0
-    if email_failures >= MAX_FAILED_ATTEMPTS_PER_EMAIL:
+    if email_failures >= max_failed_attempts:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many failed login attempts for this account; try again later",

@@ -241,6 +241,8 @@ export async function register(data: {
   email: string;
   name: string;
   password: string;
+  /** COPPA age gate: date of birth (YYYY-MM-DD). Used only for the 13+ check; never stored. */
+  date_of_birth: string;
 }) {
   const result = await apiRequest<{
     access_token: string;
@@ -251,12 +253,35 @@ export async function register(data: {
   return result;
 }
 
-export async function login(data: { email: string; password: string }) {
+export async function login(
+  data: { email: string; password: string; mfa_code?: string }
+) {
+  // When the account has MFA enabled and no code was supplied, the server
+  // responds 401 "MFA code required" and apiRequest throws — the caller
+  // catches that and shows the code field.
   const result = await apiRequest<{
     access_token: string;
     refresh_token?: string | null;
     user_id: string;
   }>("/auth/login", { method: "POST", body: data });
+  storeTokenPair(result);
+  return result;
+}
+
+/**
+ * Dedicated hardened admin login (Panels.txt). Requires MFA unconditionally;
+ * returns the same token pair as the generic login on success.
+ */
+export async function adminLogin(data: {
+  email: string;
+  password: string;
+  mfa_code?: string;
+}) {
+  const result = await apiRequest<{
+    access_token: string;
+    refresh_token?: string | null;
+    user_id: string;
+  }>("/auth/admin/login", { method: "POST", body: data });
   storeTokenPair(result);
   return result;
 }
@@ -275,7 +300,87 @@ export async function getMe(token: string) {
     name: string;
     status: string;
     is_admin: boolean;
+    mfa_enabled?: boolean;
+    phone?: string | null;
   }>("/auth/me", { token });
+}
+
+// ---------------------------------------------------------------------------
+// Profile & account security (Panels.txt user portal)
+// ---------------------------------------------------------------------------
+
+export async function updateProfile(
+  token: string,
+  data: { name?: string; phone?: string | null }
+) {
+  return apiRequest<{
+    id: string;
+    email: string;
+    name: string;
+    phone: string | null;
+  }>("/auth/me", { method: "PATCH", body: data, token });
+}
+
+export async function changePassword(
+  token: string,
+  data: { current_password: string; new_password: string }
+) {
+  return apiRequest<{ message: string }>("/auth/me/password", {
+    method: "POST",
+    body: data,
+    token,
+  });
+}
+
+export async function disableMfa(token: string, data: { password: string; code: string }) {
+  return apiRequest<{ message: string }>("/auth/mfa/disable", {
+    method: "POST",
+    body: data,
+    token,
+  });
+}
+
+export interface UserSessionInfo {
+  id: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  login_at: string;
+  last_seen_at: string | null;
+  logout_at: string | null;
+  status: string;
+}
+
+export async function listMySessions(token: string) {
+  return apiRequest<UserSessionInfo[]>("/auth/me/sessions", { token });
+}
+
+export async function revokeMySession(token: string, sessionId: string) {
+  return apiRequest<{ message: string }>(
+    `/auth/me/sessions/${sessionId}/revoke`,
+    { method: "POST", token }
+  );
+}
+
+// Registered devices (push notifications, spec 2.06)
+export interface UserDeviceInfo {
+  id: string;
+  device_id: string;
+  platform: string;
+  push_token: string | null;
+  app_version: string | null;
+  last_seen_at: string;
+  revoked_at: string | null;
+}
+
+export async function listMyDevices(token: string) {
+  return apiRequest<UserDeviceInfo[]>("/mobile/devices", { token });
+}
+
+export async function removeMyDevice(token: string, deviceId: string) {
+  return apiRequest<void>(`/mobile/devices/${deviceId}`, {
+    method: "DELETE",
+    token,
+  });
 }
 
 export async function logout(token: string) {
@@ -365,15 +470,21 @@ export async function getAgreementTypeQuestions(typeId: string, token?: string) 
   >(`/agreements/types/${typeId}/questions`, { token });
 }
 
+export interface AgreementSummary {
+  id: string;
+  agreement_number: string | null;
+  title: string;
+  status: string;
+  governing_law: string | null;
+  effective_date: string | null;
+  execution_date: string | null;
+  expiry_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export async function listAgreements(token: string) {
-  return apiRequest<
-    Array<{
-      id: string;
-      title: string;
-      status: string;
-      created_at: string;
-    }>
-  >("/agreements", { token });
+  return apiRequest<AgreementSummary[]>("/agreements", { token });
 }
 
 export async function createAgreement(
@@ -1286,6 +1397,7 @@ export async function listNotifications(
     status: string;
     message_id: string | null;
     sent_at: string | null;
+    read_at: string | null;
     created_at: string;
   }>>(`/notifications${qs ? `?${qs}` : ""}`, { token });
 }
@@ -1941,6 +2053,37 @@ export interface AdminUser {
 
 export async function getAdminUsers(token: string) {
   return apiRequest<AdminUser[]>("/admin/users", { token });
+}
+
+// --- DMCA notice queue (17 U.S.C. § 512) -------------------------------
+
+export interface DmcaNotice {
+  id: string;
+  kind: "takedown" | "counter";
+  reporter_name: string;
+  reporter_email: string;
+  work_description: string;
+  material_location: string;
+  status: "received" | "action_taken" | "rejected" | "restored";
+  admin_note: string | null;
+  received_at: string;
+  resolved_at: string | null;
+}
+
+export async function listDmcaNotices(token: string) {
+  return apiRequest<DmcaNotice[]>("/legal/dmca/notices", { token });
+}
+
+export async function updateDmcaNotice(
+  token: string,
+  noticeId: string,
+  data: { status: "action_taken" | "rejected" | "restored"; admin_note?: string }
+) {
+  return apiRequest<DmcaNotice>(`/legal/dmca/notices/${noticeId}`, {
+    method: "PATCH",
+    body: data,
+    token,
+  });
 }
 
 export async function adminPromoteUser(token: string, userId: string) {

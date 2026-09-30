@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { login, ssoStart } from "@/lib/api";
+import { login, adminLogin, ssoStart } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [ssoLoading, setSSOLoading] = useState(false);
@@ -21,7 +23,29 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const result = await login({ email, password });
+      // System Admins use the dedicated hardened endpoint (Panels.txt):
+      // unconditional MFA, stricter rate limits. Because MFA is mandatory
+      // there, an admin without a code gets the MFA challenge from
+      // /auth/admin/login itself — handled by the same catch below.
+      const doLogin = () =>
+        mfaCode
+          ? adminLogin({ email, password, mfa_code: mfaCode })
+          : login({ email, password, mfa_code: mfaCode || undefined });
+
+      let result;
+      try {
+        result = await doLogin();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (/mfa/i.test(msg)) {
+          // Server demanded an MFA code — reveal the field and retry.
+          setMfaRequired(true);
+          setError("Enter the 6-digit code from your authenticator app.");
+          return;
+        }
+        throw err;
+      }
+
       const user = await authLogin(result.access_token);
       if (user.is_admin) {
         router.push("/admin");
@@ -108,6 +132,27 @@ export default function LoginPage() {
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
+
+            {mfaRequired && (
+              <div>
+                <label
+                  htmlFor="mfa_code"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Authenticator code
+                </label>
+                <input
+                  id="mfa_code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="000000"
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 tracking-widest text-center text-lg"
+                />
+              </div>
+            )}
           </div>
 
           <button
@@ -143,6 +188,12 @@ export default function LoginPage() {
               className="font-medium text-blue-600 hover:text-blue-500"
             >
               Register
+            </Link>
+          </p>
+
+          <p className="text-center text-xs text-gray-400">
+            <Link href="/legal/dmca" className="hover:text-gray-500">
+              Copyright / DMCA Policy
             </Link>
           </p>
         </form>

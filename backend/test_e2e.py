@@ -22,6 +22,7 @@ def test_register():
         "email": "demo@contractos.lk",
         "name": "Demo User",
         "password": "demo123456",
+        "date_of_birth": "1990-01-01",
     })
     if r.status_code == 409:
         print("⚠️  User already exists, logging in instead")
@@ -36,6 +37,7 @@ def test_login():
     r = requests.post(f"{BASE}/api/v1/auth/login", json={
         "email": "demo@contractos.lk",
         "password": "demo123456",
+        "date_of_birth": "1990-01-01",
     })
     assert r.status_code == 200, f"Login failed: {r.status_code} {r.text}"
     data = r.json()

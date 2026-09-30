@@ -73,6 +73,8 @@ from app.api.v1.rules_engine import router as rules_engine_router
 from app.api.v1.clauses import router as clauses_router
 from app.api.v1.sso import router as sso_router
 from app.api.v1.sso import scim_router
+from app.api.v1.email_compliance import router as email_compliance_router
+from app.api.v1.dmca import router as dmca_router
 from app.api.v1.templates import router as templates_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.forecasting import router as forecasting_router
@@ -178,6 +180,8 @@ api_router.include_router(rules_engine_router)
 api_router.include_router(clauses_router)
 api_router.include_router(sso_router)
 api_router.include_router(scim_router)
+api_router.include_router(email_compliance_router)
+api_router.include_router(dmca_router)
 api_router.include_router(templates_router)
 api_router.include_router(analytics_router)
 api_router.include_router(forecasting_router)

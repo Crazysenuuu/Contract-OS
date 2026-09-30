@@ -212,6 +212,7 @@ from app.models.retention import (
     RepositoryRecord,
 )
 from app.models.otp_challenge import OTPChallenge
+from app.models.dmca import DmcaNotice
 from app.models.analytics import (
     MetricSnapshot,
     AnomalyRecord,

@@ -10,6 +10,9 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // COPPA age gate: collected for the 13+ check only. The backend stores a
+  // derived boolean, never the date itself.
+  const [dateOfBirth, setDateOfBirth] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -18,10 +21,25 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
 
+    // Client-side mirror of the server-side 13+ check.
+    if (dateOfBirth) {
+      const dob = new Date(dateOfBirth + "T00:00:00");
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      const beforeBirthday =
+        today.getMonth() < dob.getMonth() ||
+        (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate());
+      if (beforeBirthday) age -= 1;
+      if (age < 13) {
+        setError("You must be at least 13 years old to create an account.");
+        return;
+      }
+    }
+
+    setLoading(true);
     try {
-      const result = await register({ name, email, password });
+      const result = await register({ name, email, password, date_of_birth: dateOfBirth });
       await authLogin(result.access_token);
       router.push("/dashboard");
     } catch (err) {
@@ -102,6 +120,30 @@ export default function RegisterPage() {
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
+
+            <div>
+              <label
+                htmlFor="date_of_birth"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Date of birth
+              </label>
+              <input
+                id="date_of_birth"
+                name="date_of_birth"
+                type="date"
+                required
+                max={new Date().toISOString().slice(0, 10)}
+                aria-describedby="dob-privacy-note"
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p id="dob-privacy-note" className="mt-1 text-xs text-gray-500">
+                Used only to confirm you are 13 or older. We never store your
+                date of birth.
+              </p>
+            </div>
           </div>
 
           <button
@@ -119,6 +161,12 @@ export default function RegisterPage() {
               className="font-medium text-blue-600 hover:text-blue-500"
             >
               Sign in
+            </Link>
+          </p>
+
+          <p className="text-center text-xs text-gray-400">
+            <Link href="/legal/dmca" className="hover:text-gray-500">
+              Copyright / DMCA Policy
             </Link>
           </p>
         </form>

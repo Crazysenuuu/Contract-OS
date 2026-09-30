@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     email_from_name: str = "ContractOS"
     app_base_url: str = "http://localhost:3000"
 
+    # CAN-SPAM: every outbound email footer must carry a working unsubscribe
+    # link and the sender's physical postal address. Override per environment;
+    # the placeholders MUST be replaced in production.
+    email_postal_address: str = (
+        "ContractOS (Pvt) Ltd, 121 Galle Road, Colombo 03, Sri Lanka"
+    )
+    email_opt_out_token: str = "change-me-opt-out-secret"
+
     # Alerting — Slack
     slack_webhook_url: str | None = None
     slack_channel: str | None = None

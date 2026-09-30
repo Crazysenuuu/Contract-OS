@@ -263,6 +263,26 @@ export default function BillingPage() {
                   </li>
                 ))}
               </ul>
+              {/* Renewal disclosure (FTC Negative Option Rule / ROSCA):
+                  the auto-renewal terms and the cancellation path must be
+                  clear and conspicuous immediately next to the subscribe
+                  action, before the consumer consents. */}
+              <div
+                aria-label="Subscription renewal terms and cancellation instructions"
+                className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2.5"
+              >
+                <p className="text-[11px] leading-relaxed text-amber-900">
+                  <strong>Auto-renews monthly.</strong> Your subscription
+                  renews automatically each month at{" "}
+                  <strong>
+                    {(plan.monthly_price_cents / 100).toFixed(2)} {plan.currency}/mo
+                  </strong>{" "}
+                  until you cancel. You can cancel anytime from{" "}
+                  <strong>Billing → Cancel subscription</strong> — no phone
+                  call or email required. Cancellation takes effect
+                  immediately and ends access to paid features.
+                </p>
+              </div>
               <button
                 onClick={() => handlePickPlan(plan)}
                 disabled={subscription?.plan_code === plan.code}
@@ -276,8 +296,13 @@ export default function BillingPage() {
                   ? "Current plan"
                   : subscription
                     ? "Switch to this plan"
-                    : "Subscribe"}
+                    : "Subscribe with auto-renewal"}
               </button>
+              {!subscription && (
+                <p className="mt-2 text-[11px] text-gray-500">
+                  By subscribing you agree to the auto-renewal terms above.
+                </p>
+              )}
             </div>
           ))}
         </div>

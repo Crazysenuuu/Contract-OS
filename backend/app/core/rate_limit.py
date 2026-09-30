@@ -40,6 +40,17 @@ def _env_int(name: str, default: int) -> int:
 
 _RULES: list[tuple[str, tuple[int, int]]] = [
     ("/api/v1/auth/", (60, _env_int("RATE_LIMIT_AUTH_PER_MIN", 60))),
+    # Unauthenticated public compliance surfaces (DMCA intake, one-click
+    # email opt-out): tight budgets so they can't be used to spam the
+    # designated agent or hammer the preferences table.
+    (
+        "/api/v1/legal/dmca/",
+        (60, _env_int("RATE_LIMIT_DMCA_PER_MIN", 5)),
+    ),
+    (
+        "/api/v1/email/opt-out",
+        (60, _env_int("RATE_LIMIT_OPTOUT_PER_MIN", 10)),
+    ),
     ("/api/v1/bulk/", (60, _env_int("RATE_LIMIT_BULK_PER_MIN", 12))),
     (
         "/api/v1/analytics/export",

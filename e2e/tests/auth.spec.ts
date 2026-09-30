@@ -62,6 +62,8 @@ test.describe("Registration", () => {
     await page.fill("#name", "Test User");
     await page.fill("#email", uniqueEmail);
     await page.fill("#password", "password123");
+    // COPPA age gate: an adult DOB is required to create the account.
+    await page.fill("#date_of_birth", "1990-01-01");
     await page.click('button[type="submit"]');
 
     // Should redirect to dashboard

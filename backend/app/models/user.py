@@ -72,6 +72,16 @@ class User(
         server_default="false",
     )
 
+    # COPPA compliance: set at signup from the provided date of birth (13+).
+    # Only the derived boolean is stored — the DOB itself is never persisted
+    # (data minimization).
+    is_adult: Mapped[bool] = mapped_column(
+        Boolean(),
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
     is_admin: Mapped[bool] = mapped_column(
         Boolean(),
         nullable=False,
