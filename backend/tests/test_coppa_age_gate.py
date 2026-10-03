@@ -25,7 +25,7 @@ class TestCoppaAgeGate:
             json={
                 "email": "kid@test.com",
                 "name": "Kid User",
-                "password": "KidPass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": _dob_for_age(10),
             },
         )
@@ -37,7 +37,7 @@ class TestCoppaAgeGate:
             json={
                 "email": "teen@test.com",
                 "name": "Teen User",
-                "password": "TeenPass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": _dob_for_age(13),
             },
         )
@@ -49,7 +49,7 @@ class TestCoppaAgeGate:
             json={
                 "email": "adult@test.com",
                 "name": "Adult User",
-                "password": "AdultPass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": _dob_for_age(30),
             },
         )
@@ -61,7 +61,7 @@ class TestCoppaAgeGate:
             json={
                 "email": "nodob@test.com",
                 "name": "No Dob",
-                "password": "NoDOBPass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": _dob_for_age(25),
             },
         )
@@ -82,7 +82,7 @@ class TestCoppaAgeGate:
             json={
                 "email": "future@test.com",
                 "name": "Time Traveler",
-                "password": "FuturePass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": future,
             },
         )

@@ -195,6 +195,26 @@ class Settings(BaseSettings):
     # deliveries are rejected (fail closed), mirroring the billing webhook.
     monitoring_webhook_secret: SecretStr | None = None
 
+    # API introspection (OpenAPI UI). Defaults OFF so a deployment that
+    # forgets to set it fails closed: /docs enumerates every route, schema
+    # and dependency, which hands an attacker the full attack surface.
+    # Local development and contract tests opt in via EXPOSE_API_DOCS=true.
+    expose_api_docs: bool = False
+
+    # Public hostnames this service answers for. Empty disables the
+    # TrustedHost guard (convenient locally); set ALLOWED_HOSTS in any
+    # environment reachable from the internet so Host-header spoofing is
+    # rejected before routing.
+    allowed_hosts: str = ""
+
+    # Connection pool sizing. The asyncpg defaults (5 + 10 overflow) are far
+    # below what a multi-worker API holds open against Postgres; size the pool
+    # for (api replicas + celery workers) x uvicorn workers and keep
+    # pool + overflow under the server's max_connections.
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_timeout_seconds: int = 30
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

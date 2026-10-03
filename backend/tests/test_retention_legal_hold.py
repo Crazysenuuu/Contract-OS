@@ -218,3 +218,124 @@ async def test_retention_api_flow(client, auth_headers, test_org, test_agreement
         f"/api/v1/repository/{test_agreement.id}/documents", headers=auth_headers
     )
     assert res.status_code == 200
+
+
+async def _delete_policy_setup(db_session, test_org, test_agreement):
+    from datetime import datetime, timedelta, timezone
+
+    policy = RetentionPolicy(
+        organization_id=test_org.id,
+        name="1 month delete",
+        scope="all",
+        retention_months=1,
+        disposition="delete",
+    )
+    db_session.add(policy)
+    await db_session.flush()
+    await apply_policy_to_agreement(db_session, org_id=test_org.id, agreement=test_agreement)
+    await db_session.flush()
+
+    content_ref = document_storage.build_content_ref(
+        org_id=test_org.id, agreement_id=test_agreement.id, doc_type="executed"
+    )
+    payload = b"%PDF-1.4 retained artifact"
+    document_storage.store_blob(content_ref, payload)
+    await store_repository_record(
+        db_session,
+        org_id=test_org.id,
+        agreement_id=test_agreement.id,
+        version_id=None,
+        document_type="executed",
+        content_ref=content_ref,
+        content_hash="abc123",
+        size_bytes=len(payload),
+    )
+    await db_session.flush()
+
+    rec = (
+        await db_session.execute(
+            select(RetentionRecord).where(
+                RetentionRecord.agreement_id == test_agreement.id
+            )
+        )
+    ).scalar_one()
+    rec.retention_until = datetime.now(timezone.utc) - timedelta(days=40)
+    await db_session.flush()
+    return rec, content_ref, payload
+
+
+@pytest.mark.asyncio
+async def test_retention_delete_removes_blob(db_session, test_org, test_agreement):
+    rec, content_ref, _ = await _delete_policy_setup(db_session, test_org, test_agreement)
+
+    result = await run_retention_worker(db_session, org_id=test_org.id, dry_run=False)
+
+    assert result["deletion_candidates"] == 1
+    assert result["blobs_deleted"] == 1
+    await db_session.refresh(rec)
+    assert rec.status == "deleted"
+    with pytest.raises(document_storage.StorageError):
+        document_storage.load_blob(content_ref)
+
+
+@pytest.mark.asyncio
+async def test_retention_dry_run_keeps_blob(db_session, test_org, test_agreement):
+    rec, content_ref, payload = await _delete_policy_setup(db_session, test_org, test_agreement)
+
+    result = await run_retention_worker(db_session, org_id=test_org.id, dry_run=True)
+
+    assert result["deletion_candidates"] == 1
+    assert result["blobs_deleted"] == 0
+    await db_session.refresh(rec)
+    assert rec.status == "active"
+    assert document_storage.load_blob(content_ref) == payload
+    document_storage.delete_blob(content_ref)
+
+
+@pytest.mark.asyncio
+async def test_legal_hold_prevents_blob_deletion(
+    db_session, test_org, test_agreement, test_user
+):
+    _, content_ref, payload = await _delete_policy_setup(db_session, test_org, test_agreement)
+
+    await place_legal_hold(
+        db_session,
+        org_id=test_org.id,
+        agreement_id=test_agreement.id,
+        reason="Pending litigation",
+        placed_by=test_user.id,
+    )
+    await db_session.flush()
+
+    result = await run_retention_worker(db_session, org_id=test_org.id, dry_run=False)
+
+    assert result["held_skipped"] == 1
+    assert result["blobs_deleted"] == 0
+    assert document_storage.load_blob(content_ref) == payload
+    document_storage.delete_blob(content_ref)
+
+
+@pytest.mark.asyncio
+async def test_delete_failure_keeps_record_retryable(
+    db_session, test_org, test_agreement, monkeypatch
+):
+    rec, content_ref, payload = await _delete_policy_setup(
+        db_session, test_org, test_agreement
+    )
+
+    def _boom(_content_ref):
+        raise document_storage.StorageError("bucket unavailable")
+
+    monkeypatch.setattr(document_storage, "delete_blob", _boom)
+
+    result = await run_retention_worker(db_session, org_id=test_org.id, dry_run=False)
+
+    # The record must stay active (retryable) and the blob must survive.
+    assert result["deletion_candidates"] == 1
+    assert result["blobs_deleted"] == 0
+    await db_session.refresh(rec)
+    assert rec.status == "active"
+
+    monkeypatch.undo()
+    assert document_storage.load_blob(content_ref) == payload
+    document_storage.delete_blob(content_ref)

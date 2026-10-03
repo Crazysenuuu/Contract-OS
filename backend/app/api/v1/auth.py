@@ -32,6 +32,8 @@ from app.schemas.auth import (
     PasswordChange,
     ProfileUpdate,
     SessionResponse,
+    ResendVerificationRequest,
+    ResendVerificationResponse,
 )
 from app.services.auth_security_service import (
     MAX_FAILED_ATTEMPTS_PER_EMAIL,
@@ -43,6 +45,7 @@ from app.services.auth_security_service import (
     rotate_refresh_token,
     validate_refresh_token,
 )
+from app.services.tenant_context import tenant_scope
 from app.tasks.email_tasks import send_email_async
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -53,6 +56,20 @@ logger = logging.getLogger(__name__)
 def generate_slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug
+
+
+def _absolute_url(path: str) -> str:
+    """Resolve an app path against the configured public base URL.
+
+    Email and push payloads must never embed a developer's localhost: a
+    verification link pointing at http://localhost:3000 is unopenable for
+    every real recipient, which silently strands the account in
+    ``pending_verification`` forever.
+    """
+    from app.core.config import get_settings_lazy
+
+    base = (get_settings_lazy().app_base_url or "").rstrip("/")
+    return f"{base}{path}" if path.startswith("/") else f"{base}/{path}"
 
 
 def _totp_valid(user: User, mfa_code: str | None) -> bool | None:
@@ -168,7 +185,9 @@ async def register(
                 "template_data": {
                     "name": user.name,
                     "token": user.verification_token,
-                    "verify_url": f"http://localhost:3000/verify-email?token={user.verification_token}",
+                    "verify_url": _absolute_url(
+                        f"/verify-email?token={user.verification_token}"
+                    ),
                 },
             },
             retry=False,
@@ -188,21 +207,26 @@ async def register(
     db.add(org)
     await db.flush()
 
-    owner_role = Role(
-        organization_id=org.id,
-        name="owner",
-    )
-    db.add(owner_role)
-    await db.flush()
+    # Onboarding is the one flow that writes tenant rows before a tenant
+    # context can exist: there is no membership yet for the request-scoped
+    # dependency to resolve. Pin the context explicitly, otherwise
+    # row-level security on roles/organization_members makes signup fail.
+    async with tenant_scope(db, org.id):
+        owner_role = Role(
+            organization_id=org.id,
+            name="owner",
+        )
+        db.add(owner_role)
+        await db.flush()
 
-    membership = OrganizationMember(
-        organization_id=org.id,
-        user_id=user.id,
-        role_id=owner_role.id,
-        status="active",
-    )
-    db.add(membership)
-    await db.flush()
+        membership = OrganizationMember(
+            organization_id=org.id,
+            user_id=user.id,
+            role_id=owner_role.id,
+            status="active",
+        )
+        db.add(membership)
+        await db.flush()
 
     await _create_session(db, user.id, org.id, request)
 
@@ -222,6 +246,7 @@ async def register(
         access_token=token,
         refresh_token=refresh_token,
         user_id=user.id,
+        verification_required=user.status == "pending_verification",
     )
 
 
@@ -296,7 +321,19 @@ async def login(
                 detail="Invalid MFA code",
             )
 
-    if user.status not in ("active", "pending_verification"):
+    if user.status == "pending_verification":
+        # Not a generic 403: the caller knows the credentials were correct
+        # and needs to know the specific next step. Issuing a session here
+        # instead would be worse — get_current_user rejects
+        # pending_verification on every subsequent request, so the token
+        # would authenticate nothing while appearing to succeed.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified. Check your inbox for the confirmation link.",
+            headers={"X-Auth-Status": "verification_required"},
+        )
+
+    if user.status != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not active",
@@ -508,6 +545,7 @@ async def refresh(
     )
 
 
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     current_user: User = Depends(get_current_user),
@@ -557,6 +595,60 @@ async def verify_email(
     await db.commit()
 
     return {"message": "Email verified successfully"}
+
+
+@router.post(
+    "/resend-verification",
+    response_model=ResendVerificationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resend_verification(
+    request: Request,
+    data: ResendVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-send the confirmation email for an unverified account.
+
+    Answers 202 for every input, whether or not an account exists and
+    whether or not it is already verified: a different response would turn
+    this endpoint into an account-existence oracle for anyone who can post
+    an address. Real work is skipped for unknown or verified addresses so
+    the endpoint cannot be used to send mail on someone's behalf either.
+    """
+    result = await db.execute(
+        select(User).where(User.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is not None and user.status == "pending_verification":
+        # Rotate the token so a previously leaked or expired link stops
+        # working and only the newest email is honoured.
+        user.verification_token = secrets.token_urlsafe(32)
+        try:
+            send_email_async.apply_async(
+                kwargs={
+                    "to_email": user.email,
+                    "subject": "Verify your ContractOS Account",
+                    "template_name": "welcome_email",
+                    "template_data": {
+                        "name": user.name,
+                        "token": user.verification_token,
+                        "verify_url": _absolute_url(
+                            f"/verify-email?token={user.verification_token}"
+                        ),
+                    },
+                },
+                retry=False,
+                ignore_result=True,
+            )
+        except Exception:
+            logger.exception("Failed to queue verification email; continuing")
+    else:
+        logger.info("Resend verification requested for a non-pending address")
+
+    return ResendVerificationResponse(
+        message="If that address needs verification, a new link is on its way.",
+        )
 
 
 # ---------------------------------------------------------------------------

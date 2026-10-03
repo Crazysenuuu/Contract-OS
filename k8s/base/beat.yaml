@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contractos-celery-beat
+  labels:
+    app: contractos-celery-beat
+spec:
+  # Exactly one beat instance: there is no leader election, so a second
+  # replica would double-fire every scheduled sweep.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: contractos-celery-beat
+  template:
+    metadata:
+      labels:
+        app: contractos-celery-beat
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: beat
+          image: contractos-backend:latest
+          command: ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=info"]
+          envFrom:
+            - configMapRef:
+                name: contractos-config
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: DATABASE_URL}}
+            - name: FIELD_ENCRYPTION_MASTER_KEY
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: FIELD_ENCRYPTION_MASTER_KEY}}
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

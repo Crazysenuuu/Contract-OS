@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,9 @@ from app.models.retention import (
     RetentionPolicy,
     RetentionRecord,
 )
+from app.services import document_storage
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -186,6 +190,41 @@ async def list_active_holds(
     return (await db.execute(query)).scalars().all()
 
 
+async def _delete_agreement_blobs(
+    db: AsyncSession, agreement_id: uuid.UUID
+) -> tuple[int, bool]:
+    """Delete every repository object stored for an agreement.
+
+    Returns (blobs_removed, all_ok). A storage failure is logged and leaves
+    ``all_ok`` False so the caller can keep the retention record retryable
+    instead of marking it deleted while the object still exists.
+    """
+    refs = (
+        await db.execute(
+            select(RepositoryRecord.content_ref).where(
+                RepositoryRecord.agreement_id == agreement_id
+            )
+        )
+    ).scalars().all()
+
+    removed = 0
+    all_ok = True
+    for content_ref in refs:
+        try:
+            document_storage.delete_blob(content_ref)
+            removed += 1
+        except (document_storage.StorageError, OSError):
+            # S3 failures surface as StorageError; the local backend can raise
+            # a bare OSError from unlink(). Treat both as retryable.
+            logger.exception(
+                "Retention delete: failed to remove blob %s for agreement %s",
+                content_ref,
+                agreement_id,
+            )
+            all_ok = False
+    return removed, all_ok
+
+
 async def run_retention_worker(
     db: AsyncSession,
     *,
@@ -209,6 +248,7 @@ async def run_retention_worker(
     held_skipped = 0
     archived = 0
     deletion_candidates = 0
+    blobs_deleted = 0
 
     for rec in records:
         # Anything under an active legal hold is frozen regardless of its
@@ -231,18 +271,20 @@ async def run_retention_worker(
 
         disposition = (policy.disposition if policy else "archive") or "archive"
         expired += 1
-        if not dry_run:
-            if disposition == "delete":
-                rec.status = "deleted"
-                deletion_candidates += 1
-            else:
-                rec.status = "archived"
-                archived += 1
+        if disposition == "delete":
+            deletion_candidates += 1
+            if not dry_run:
+                removed, all_ok = await _delete_agreement_blobs(db, rec.agreement_id)
+                blobs_deleted += removed
+                # Only mark deleted once the stored objects are gone, so a
+                # storage failure is retried next run instead of leaving a
+                # blob in the bucket that no record points at.
+                if all_ok:
+                    rec.status = "deleted"
         else:
-            if disposition == "delete":
-                deletion_candidates += 1
-            else:
-                archived += 1
+            archived += 1
+            if not dry_run:
+                rec.status = "archived"
 
     if not dry_run:
         await db.flush()
@@ -253,6 +295,7 @@ async def run_retention_worker(
         "held_skipped": held_skipped,
         "archived": archived,
         "deletion_candidates": deletion_candidates,
+        "blobs_deleted": blobs_deleted,
     }
 
 

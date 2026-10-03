@@ -411,6 +411,10 @@ async def process_document(
 
     doc.extracted_text = result.text
     doc.confidence = result.confidence
+    # New text means the search projection is stale; clear the pending
+    # marker so the Beat sweep re-indexes instead of leaving search results
+    # pointing at the previous OCR attempt.
+    doc.indexed_at = None
     threshold = get_confidence_threshold()
 
     if result.confidence >= threshold:
@@ -567,6 +571,9 @@ async def review_document(
     doc.extracted_text = corrected_text if corrected_text is not None else doc.extracted_text
     doc.confidence = 1.0  # Human verification is ground truth.
     doc.status = "committed"
+    # The correction invalidates any earlier projection; re-index on the
+    # next sweep so search matches the human-verified text.
+    doc.indexed_at = None
     task.status = "approved"
     task.corrected_text = doc.extracted_text
     task.reviewed_by = reviewed_by

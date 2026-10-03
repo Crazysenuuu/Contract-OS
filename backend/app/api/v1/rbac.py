@@ -22,6 +22,7 @@ from app.models.rbac import (
     RolePermission,
 )
 from app.models.user import User
+from app.services.tenant_context import tenant_scope
 
 router = APIRouter(prefix="/rbac", tags=["RBAC"])
 
@@ -261,13 +262,14 @@ async def add_member(
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="User is already a member")
 
-    member = OrganizationMember(
-        organization_id=org_id,
-        user_id=uid,
-        role_id=role.id,
-        status="active",
-    )
-    db.add(member)
+    async with tenant_scope(db, org_id):
+        member = OrganizationMember(
+            organization_id=org_id,
+            user_id=uid,
+            role_id=role.id,
+            status="active",
+        )
+        db.add(member)
     await db.commit()
 
     return {

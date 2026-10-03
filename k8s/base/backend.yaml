@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: contractos-backend
+  labels:
+    app: contractos-backend
+    # Marks the stable revision. The Istio canary manifests in k8s/canary key
+    # their DestinationRule subsets off this label; wiring that flow up
+    # additionally needs a Service selecting both tracks, which this plain
+    # (non-Istio) base deliberately omits so canary traffic stays isolated.
+    track: stable
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: contractos-backend
+      track: stable
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: contractos-backend
+        track: stable
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      initContainers:
+        # The API does not migrate on startup (main.py lifespan only runs
+        # validate_or_die + ws fanout), so apply Alembic migrations before the
+        # new image serves traffic.
+        - name: migrate
+          image: contractos-backend:latest
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: contractos-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: contractos-secrets
+                  key: DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: backend
+          image: contractos-backend:latest
+          command:
+            ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: contractos-config
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: DATABASE_URL}}
+            - name: JWT_SECRET_KEY
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: JWT_SECRET_KEY}}
+            - name: FIELD_ENCRYPTION_MASTER_KEY
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: FIELD_ENCRYPTION_MASTER_KEY}}
+            - name: EMAIL_OPT_OUT_TOKEN
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: EMAIL_OPT_OUT_TOKEN}}
+            - name: DOCUMENT_TOKEN_SECRET
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: DOCUMENT_TOKEN_SECRET}}
+            - name: SENDGRID_API_KEY
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: SENDGRID_API_KEY}}
+            - name: S3_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: S3_ACCESS_KEY_ID}}
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: contractos-secrets, key: S3_SECRET_ACCESS_KEY}}
+          startupProbe:
+            httpGet:
+              path: /api/v1/health/ready
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: storage
+              mountPath: /app/storage
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        # Local scratch only — documents and backups live in S3
+        # (STORAGE_BACKEND=s3). Swap for an RWX PVC if shared local files needed.
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: contractos-backend
+  labels:
+    app: contractos-backend
+    track: stable
+spec:
+  selector:
+    app: contractos-backend
+    track: stable
+  ports:
+    # Port is named so ServiceMonitors can target `port: http`.
+    - name: http
+      port: 8000
+      targetPort: http

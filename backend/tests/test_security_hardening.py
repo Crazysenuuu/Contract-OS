@@ -12,6 +12,7 @@ from app.services.auth_security_service import (
     revoke_all_for_user,
     validate_refresh_token,
 )
+from tests.conftest import activate_user
 
 
 class TestRefreshTokens:
@@ -52,7 +53,7 @@ class TestRefreshApi:
             json={
                 "email": "rotate@test.com",
                 "name": "Rotate User",
-                "password": "RotatePass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": "1990-01-01",
             },
         )
@@ -83,21 +84,24 @@ class TestRefreshApi:
         )
         assert ok.status_code == 200
 
-    async def test_login_returns_refresh_token(self, client):
+    async def test_login_returns_refresh_token(self, client, db_session):
         reg = await client.post(
             "/api/v1/auth/register",
             json={
                 "email": "logintok@test.com",
                 "name": "Login Tok",
-                "password": "LoginPass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": "1990-01-01",
             },
         )
         assert reg.status_code in (200, 201)
 
+        # Login refuses unverified accounts, so confirm the address first.
+        await activate_user(db_session, "logintok@test.com")
+
         login = await client.post(
             "/api/v1/auth/login",
-            json={"email": "logintok@test.com", "password": "LoginPass123!"},
+            json={"email": "logintok@test.com", "password": "QuartzMeadow-Vellum7"},
         )
         assert login.status_code == 200
         assert "refresh_token" in login.json()
@@ -115,7 +119,7 @@ class TestRefreshApi:
                 json={
                     "email": "logoutuser@test.com",
                     "name": "Logout User",
-                    "password": "LogoutPass123!",
+                    "password": "QuartzMeadow-Vellum7",
                     "date_of_birth": "1990-01-01",
                 },
             )
@@ -205,9 +209,9 @@ class TestRateLimiting:
         path_class, (window, limit) = rl._rule_for("/review/TOKEN/verify-id/start")
         win = rl._Window()
         for _ in range(limit):
-            allowed, _ = win.hit("ip:10.0.0.1", window, limit)
+            allowed, _ = await win.hit("ip:10.0.0.1", window, limit)
             assert allowed is True
-        blocked, retry_after = win.hit("ip:10.0.0.1", window, limit)
+        blocked, retry_after = await win.hit("ip:10.0.0.1", window, limit)
         assert blocked is False
         assert retry_after > 0
 

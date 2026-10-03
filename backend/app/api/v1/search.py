@@ -30,6 +30,7 @@ from app.models.legal_entity import LegalEntity
 from app.models.saved_search import SavedSearch
 from app.models.user import User
 from app.services.party_service import search_parties
+from app.services.search_index_service import search_documents
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -87,6 +88,23 @@ class SavedSearchResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DocumentSearchResultItem(BaseModel):
+    document_id: uuid.UUID
+    title: str
+    content_length: int
+    indexed_at: datetime | None = None
+    rank: float = 0.0
+
+
+class DocumentSearchResponse(BaseModel):
+    query: str
+    #: Number of results returned. Deliberately not a grand total: the
+    #: projection is ranked by relevance and bounded by ``limit``, so a
+    #: second COUNT would double the cost to report a number no UI displays.
+    count: int
+    items: list[DocumentSearchResultItem]
 
 
 # --------------------------------------------------------------------------
@@ -374,6 +392,32 @@ async def search_agreements(
     ]
     took_ms = int((time.perf_counter() - started) * 1000)
     return SearchResponse(items=items, total=total, took_ms=took_ms)
+
+
+@router.get("/documents", response_model=DocumentSearchResponse)
+async def search_indexed_documents(
+    q: str = Query(min_length=1, max_length=500),
+    limit: int = Query(default=25, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_current_organization_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full-text search over OCR-extracted document text.
+
+    Reads the ``document_search_index`` projection that
+    :func:`app.services.search_index_service.sync_pending_documents` fills,
+    rather than scanning ``ocr_documents.extracted_text`` on every query.
+    Results are scoped to the caller's active organization by the tenant
+    dependency, which sets ``app.current_tenant`` before this runs.
+    """
+    items = await search_documents(
+        db, organization_id=org_id, query=q, limit=limit
+    )
+    return DocumentSearchResponse(
+        query=q,
+        items=[DocumentSearchResultItem(**item) for item in items],
+        count=len(items),
+    )
 
 
 # --- Saved searches --------------------------------------------------------

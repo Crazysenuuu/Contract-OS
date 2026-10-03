@@ -9,13 +9,18 @@ import {
 } from "react";
 import {
   getMe,
+  getMyMemberships,
   logout as apiLogout,
   clearSessionTokens,
   currentSessionTokens,
   onTokensRotated,
   persistSessionTokens,
   setSessionExpiredHandler,
+  getCurrentOrganizationId,
+  setCurrentOrganizationId,
+  type MembershipOption,
 } from "@/lib/api";
+import { useRouter } from "next/navigation";
 
 interface User {
   id: string;
@@ -31,14 +36,30 @@ interface AuthContextType {
   login: (token: string) => Promise<User>;
   logout: () => void;
   isLoading: boolean;
+  /**
+   * Organizations this user may act in. Empty while loading, and stays empty
+   * for single-organization accounts, where the backend resolves the tenant
+   * without a header.
+   */
+  organizations: MembershipOption[];
+  /** Currently selected organization id, or null when only one applies. */
+  currentOrganizationId: string | null;
+  /** Make `organizationId` the tenant for subsequent requests, then reload. */
+  switchOrganization: (organizationId: string) => Promise<void>;
+  /** True once membership discovery has finished for this session. */
+  organizationsLoaded: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [organizations, setOrganizations] = useState<MembershipOption[]>([]);
+  const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
+  const [currentOrganizationId, setCurrentOrgId] = useState<string | null>(null);
 
   // Keep React state in sync with background refresh rotations. Without
   // this, the dashboard's `token` would go stale after the interceptor
@@ -56,9 +77,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSessionExpiredHandler(() => {
       setToken(null);
       setUser(null);
+      setOrganizations([]);
+      setOrganizationsLoaded(false);
     });
     return () => {
       setSessionExpiredHandler(null);
+    };
+  }, []);
+
+  // Discover which organizations this account may act in. Failure is not
+  // fatal: single-organization accounts need no header, and a network blip
+  // here must not log anyone out.
+  useEffect(() => {
+    let active = true;
+    const session = currentSessionTokens();
+    if (!session?.accessToken) {
+      return;
+    }
+    getMyMemberships(session.accessToken)
+      .then((memberships) => {
+        if (!active) return;
+        setOrganizations(memberships);
+
+        // Reconcile the persisted selection: drop it if this session cannot
+        // use it (membership suspended, different account signed in), so a
+        // stale id cannot pin requests to an unreachable tenant.
+        const stored = getCurrentOrganizationId();
+        const valid = memberships.some((m) => m.organization_id === stored);
+        const next =
+          valid && stored ? stored : memberships.length === 1 ? memberships[0].organization_id : null;
+        setCurrentOrganizationId(next);
+        setCurrentOrgId(next);
+      })
+      .catch(() => {
+        if (active) setOrganizations([]);
+      })
+      .finally(() => {
+        if (active) setOrganizationsLoaded(true);
+      });
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -117,10 +175,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSessionTokens();
     setToken(null);
     setUser(null);
+    setOrganizations([]);
+    setOrganizationsLoaded(false);
+    setCurrentOrganizationId(null);
+    setCurrentOrgId(null);
+  };
+
+  const switchOrganization = async (organizationId: string) => {
+    if (!organizations.some((m) => m.organization_id === organizationId)) {
+      throw new Error("Not a member of this organization");
+    }
+    setCurrentOrganizationId(organizationId);
+    setCurrentOrgId(organizationId);
+    // Every tenant-scoped query in the app now points at a different
+    // organization, and client components hold the previous answers.
+    // Refreshing re-runs them against the new tenant instead of leaving the
+    // screen showing the old organization's data under the new name.
+    router.refresh();
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isLoading }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        login,
+        logout,
+        isLoading,
+        organizations,
+        currentOrganizationId,
+        switchOrganization,
+        organizationsLoaded,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -254,6 +254,9 @@ from app.models.ingestion import (
     OCRDocument,
     HumanReviewTask,
 )
+from app.models.document_search_index import (
+    DocumentSearchIndex,
+)
 from app.models.privacy import (
     FieldEncryptionRecord,
     RedactionRequest,
@@ -429,6 +432,7 @@ __all__ = [
     "IngestionJob",
     "OCRDocument",
     "HumanReviewTask",
+    "DocumentSearchIndex",
     "FieldEncryptionRecord",
     "RedactionRequest",
     "ErasureRequest",

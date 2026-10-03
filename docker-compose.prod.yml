@@ -1,0 +1,219 @@
+# =============================================================================
+# ContractOS — production stack
+# =============================================================================
+# Standalone file (NOT an override of docker-compose.yml, which is dev-only:
+# it bind-mounts source over the image, publishes Postgres/Redis to the host
+# and defaults every secret — none of which a Compose override can undo).
+#
+#   cp docker-compose.prod.env.example docker-compose.prod.env
+#   $EDITOR docker-compose.prod.env            # fill in real secrets
+#   docker compose --env-file docker-compose.prod.env \
+#       -f docker-compose.prod.yml up -d --build --wait
+#
+# or use the wrapper:  ./scripts/deploy.sh production
+#
+# ENVIRONMENT=production makes app.core.startup_validation.validate_or_die()
+# refuse to boot unless: JWT/opt-out/document secrets are 32+ random chars,
+# FIELD_ENCRYPTION_MASTER_KEY is set, APP_BASE_URL is https, CORS_ORIGINS has
+# no localhost/'*', SendGrid plus real e-signature/KYC providers are set,
+# STORAGE_BACKEND=s3, and EXPOSE_API_DOCS is off. The `${VAR:?…}` markers
+# below stop `docker compose config` before any container even starts.
+#
+# A TLS-terminating reverse proxy MUST front `frontend` and set
+# X-Forwarded-Proto=https: the API enforces HTTPS redirects and emails
+# verification/signing links built from APP_BASE_URL.
+#
+# NOTE: if POSTGRES_PASSWORD / S3 secret contain URL-reserved characters
+# (@ : / ? #), URL-encode them or the DATABASE_URL will not parse.
+# =============================================================================
+
+name: contractos-${ENVIRONMENT:-production}
+
+x-backend-env: &backend-env
+  # Override to "staging" to relax the strict production-only boot checks
+  # (startup_validation only hard-fails when ENVIRONMENT=production).
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-contractos}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-contractos}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+  FIELD_ENCRYPTION_MASTER_KEY: ${FIELD_ENCRYPTION_MASTER_KEY:?FIELD_ENCRYPTION_MASTER_KEY is required}
+  EMAIL_OPT_OUT_TOKEN: ${EMAIL_OPT_OUT_TOKEN:?EMAIL_OPT_OUT_TOKEN is required}
+  DOCUMENT_TOKEN_SECRET: ${DOCUMENT_TOKEN_SECRET:?DOCUMENT_TOKEN_SECRET is required}
+  APP_BASE_URL: ${APP_BASE_URL:?APP_BASE_URL is required (https://...)}
+  CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required (comma-separated https origins)}
+  EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-noreply@contractos.lk}
+  EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-ContractOS}
+  EMAIL_POSTAL_ADDRESS: ${EMAIL_POSTAL_ADDRESS:?EMAIL_POSTAL_ADDRESS is required (real sender postal address)}
+  SENDGRID_API_KEY: ${SENDGRID_API_KEY:?SENDGRID_API_KEY is required}
+  ESIGNATURE_PROVIDER: ${ESIGNATURE_PROVIDER:?ESIGNATURE_PROVIDER is required (docusign|adobe_sign)}
+  KYC_PROVIDER: ${KYC_PROVIDER:?KYC_PROVIDER is required}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+  OCR_PROVIDER: ${OCR_PROVIDER:-}
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+  S3_BUCKET: ${S3_BUCKET:-contractos-documents}
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+  S3_REGION_NAME: ${S3_REGION_NAME:-us-east-1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+  DOCUMENT_STORAGE_DIR: /app/storage/documents
+  BACKUP_DIR: /app/storage/backups
+  FORWARDED_HOP_COUNT: ${FORWARDED_HOP_COUNT:-1}
+  EXPOSE_API_DOCS: "false"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-contractos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-contractos}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # `$$` defers expansion to the container shell so it reads the live env.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Deliberately no host ports: reachable only on the compose network.
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Only used for local backup artifacts when STORAGE_BACKEND=s3.
+      - app_storage:/app/storage
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=5).status == 200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - app_storage:/app/storage
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=info"]
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - app_storage:/app/storage
+    # Exactly one beat instance per deployment: leader election is not built
+    # in, so a second replica would double-fire every scheduled sweep.
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      # next.config.ts proxies /api/v1 and /review here at runtime.
+      BACKEND_INTERNAL_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # Host port is configurable so staging and production can share a host.
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_storage:

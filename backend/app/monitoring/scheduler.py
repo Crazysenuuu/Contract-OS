@@ -37,33 +37,31 @@ async def _run_sweep(db, limit: int) -> dict:
 
 
 def run_sweep(limit: int = 50) -> dict:
-    """Synchronous entry point: open a session, sweep, commit, rollback on
-    error. Safe to run from Celery, a management script or a shell."""
-    import asyncio
+    """Synchronous entry point: sweep every active organization, each in its
+    own transaction. Safe to run from Celery, a management script or a shell."""
+    from app.services.tenant_context import merge_counters, run_per_tenant
 
     async def _go():
-        async with AsyncSessionLocal() as db:
-            try:
-                return await _run_sweep(db, limit)
-            except Exception:
-                await db.rollback()
-                raise
+        return merge_counters(
+            await run_per_tenant(
+                lambda db: _run_sweep(db, limit),
+                session_factory=AsyncSessionLocal,
+            )
+        )
 
     return _asyncio_run(_go)
 
 
 def detect_stale() -> dict:
-    import asyncio
+    from app.services.tenant_context import run_per_tenant, sum_values
 
     async def _go():
-        async with AsyncSessionLocal() as db:
-            try:
-                paused = await detect_stale_monitorings(db)
-                await db.commit()
-                return {"paused": paused}
-            except Exception:
-                await db.rollback()
-                raise
+        return {"paused": sum_values(
+            await run_per_tenant(
+                detect_stale_monitorings,
+                session_factory=AsyncSessionLocal,
+            )
+        )}
 
     return _asyncio_run(_go)
 

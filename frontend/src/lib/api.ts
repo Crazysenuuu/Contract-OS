@@ -73,6 +73,48 @@ export function persistSessionTokens(tokens: SessionTokens): void {
 
 export function clearSessionTokens(): void {
   activeStore?.clear();
+  // The selected organization is scoped to the session. Keeping it past a
+  // logout would send the next account's requests to the previous user's
+  // tenant.
+  setCurrentOrganizationId(null);
+}
+
+/** Header the backend reads to decide which organization a request acts in. */
+const ORG_HEADER = "X-Organization-Id";
+
+const ORG_STORAGE_KEY = "contractos.currentOrganizationId";
+
+/**
+ * Currently selected organization, or null when the account belongs to only
+ * one (the backend then resolves the tenant without a header).
+ *
+ * Held in module scope rather than read from the DOM on each call so every
+ * request path — including the 401-refresh replay — carries the same tenant.
+ * Persisted so a page reload does not silently fall back to a different
+ * organization than the one the user was looking at.
+ */
+export function getCurrentOrganizationId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(ORG_STORAGE_KEY);
+  } catch {
+    // Private-mode Safari and blocked storage throw rather than return null.
+    return null;
+  }
+}
+
+export function setCurrentOrganizationId(organizationId: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (organizationId === null) {
+      window.localStorage.removeItem(ORG_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(ORG_STORAGE_KEY, organizationId);
+    }
+  } catch {
+    // Storage unavailable: the selection simply does not survive a reload.
+    // Requests still work — the backend resolves single-org accounts alone.
+  }
 }
 
 interface TokenPairResponse {
@@ -184,6 +226,13 @@ async function apiRequestOnce<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  // Sent on every call, including the refresh replay below, so a
+  // multi-organization session never resolves to an arbitrary tenant.
+  const organizationId = getCurrentOrganizationId();
+  if (organizationId) {
+    headers[ORG_HEADER] = organizationId;
+  }
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     method,
     headers,
@@ -248,8 +297,19 @@ export async function register(data: {
     access_token: string;
     refresh_token?: string | null;
     user_id: string;
+    /**
+     * True when the account is still awaiting email confirmation. The
+     * backend rejects `pending_verification` users on every authenticated
+     * request, so the tokens must NOT be persisted in that state: the SPA
+     * would boot into a session that 401s on its first call and bounce the
+     * user to login with no explanation.
+     */
+    verification_required?: boolean;
   }>("/auth/register", { method: "POST", body: data });
-  storeTokenPair(result);
+
+  if (!result.verification_required) {
+    storeTokenPair(result);
+  }
   return result;
 }
 
@@ -404,6 +464,27 @@ export async function getMyOrganization(token: string) {
     slug: string;
     country: string;
   }>("/organizations/me", { token });
+}
+
+/** One organization the signed-in user may switch into. */
+export interface MembershipOption {
+  organization_id: string;
+  name: string;
+  slug: string;
+  role_id: string;
+}
+
+/**
+ * Organizations this user can act in.
+ *
+ * Needed because the backend refuses tenant-scoped calls without
+ * `X-Organization-Id` when the account has more than one active membership,
+ * so this is how a client discovers what to select.
+ */
+export async function getMyMemberships(token: string) {
+  return apiRequest<MembershipOption[]>("/organizations/me/memberships", {
+    token,
+  });
 }
 
 // Legal Entities

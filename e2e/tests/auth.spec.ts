@@ -56,17 +56,28 @@ test.describe("Authentication", () => {
 });
 
 test.describe("Registration", () => {
-  test("should register new user successfully", async ({ page }) => {
+  test("should register new user and require email verification", async ({ page }) => {
     const uniqueEmail = `test${Date.now()}@example.com`;
     await page.goto("/register");
     await page.fill("#name", "Test User");
     await page.fill("#email", uniqueEmail);
-    await page.fill("#password", "password123");
+    // Must satisfy the server policy in
+    // backend/app/core/password_policy.py (>=12 chars, not blocklisted,
+    // not a derivative of the name or email).
+    await page.fill("#password", "correct horse battery");
     // COPPA age gate: an adult DOB is required to create the account.
     await page.fill("#date_of_birth", "1990-01-01");
     await page.click('button[type="submit"]');
 
-    // Should redirect to dashboard
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
+    // An unverified account is rejected by the backend on every
+    // authenticated request, so registration stops at "check your inbox"
+    // instead of opening a session.
+    await expect(page).toHaveURL(/\/register/, { timeout: 15000 });
+    await expect(page.getByText("Check your inbox")).toBeVisible();
+    await expect(page.getByText(uniqueEmail)).toBeVisible();
+
+    // The dashboard must not be reachable without a verified session.
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL(/\/login/, { timeout: 15000 });
   });
 });

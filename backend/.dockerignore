@@ -1,0 +1,39 @@
+# Never bake secrets into an image layer. The Dockerfile ends with a broad
+# `COPY . .`, so without this file the local .env (and any .env.<env> secrets)
+# would be copied in and recoverable from the image history.
+.env
+.env.*
+!.env.example
+
+# Local virtualenv and build/test caches — hundreds of MB that are
+# reinstalled inside the image from requirements.txt.
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Runtime state that belongs in a mounted volume, not the image: uploads and
+# local backups must survive a redeploy and are not part of the code.
+storage/
+*.db
+*.sqlite3
+load/
+
+# Tests and developer docs are not needed to serve traffic; deploy.sh runs
+# the suite on the host before building.
+tests/
+test_e2e.py
+docs/
+requirements-dev.txt
+conftest.py
+
+# VCS / editor noise
+.git/
+.gitignore
+.dockerignore
+.DS_Store

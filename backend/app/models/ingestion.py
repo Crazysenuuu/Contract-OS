@@ -23,8 +23,10 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -117,6 +119,20 @@ class OCRDocument(
 
     __tablename__ = "ocr_documents"
 
+    __table_args__ = (
+        # Partial index over the un-indexed rows only. The Beat sweep asks
+        # for exactly `indexed_at IS NULL`, so the (overwhelmingly larger)
+        # indexed population should not sit in the index. Declared here, not
+        # via column-level index=True, because the predicate and the custom
+        # name must match migration 7c2d1e0f4a89 for autogenerate to be
+        # diff-clean.
+        Index(
+            "ix_ocr_documents_pending_index",
+            "indexed_at",
+            postgresql_where=text("indexed_at IS NULL"),
+        ),
+    )
+
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="CASCADE"),
@@ -192,6 +208,15 @@ class OCRDocument(
 
     error_message: Mapped[str | None] = mapped_column(
         Text,
+        nullable=True,
+    )
+
+    # Set by app.services.search_index_service once this document's text has
+    # been projected into `document_search_index`. NULL means "not indexed
+    # yet"; the Beat sweep selects on exactly this column, so it doubles as
+    # the pending-work queue for document search.
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 

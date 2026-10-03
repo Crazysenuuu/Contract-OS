@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: contractos-config
+data:
+  # ENVIRONMENT=staging relaxes the production-only boot checks while the
+  # secrets below are still mandatory.
+  ENVIRONMENT: "staging"
+  APP_BASE_URL: "https://staging.app.contractos.lk"
+  CORS_ORIGINS: "https://staging.app.contractos.lk"
+  EMAIL_FROM_ADDRESS: "noreply@staging.contractos.lk"

@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The base is intentionally namespace-agnostic: each overlay supplies its own
+# Namespace resource + `namespace:` so staging and production can coexist.
+#
+# Not included on purpose:
+#   - secret.example.yaml : create the real `contractos-secrets` out of band
+#     (see the header of that file) so credentials never enter git.
+#   - Ingress             : differs per environment; defined in each overlay.
+resources:
+  - configmap.yaml
+  - postgres.yaml
+  - redis.yaml
+  - backend.yaml
+  - worker.yaml
+  - beat.yaml
+  - frontend.yaml
+  - hpa.yaml
+  - pdb.yaml
+
+# Default tags; overlays repoint these at the real registry + immutable SHA tag.
+images:
+  - name: contractos-backend
+    newTag: latest
+  - name: contractos-frontend
+    newTag: latest

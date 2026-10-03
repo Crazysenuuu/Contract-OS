@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
@@ -33,8 +33,12 @@ RUN python -m pip install --upgrade pip \
 # Copy application
 COPY . .
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Create non-root user. The storage tree is created before the recursive
+# chown so that a named volume mounted at /app/storage inherits appuser
+# ownership when Docker initialises the empty volume from the image.
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /app/storage/documents /app/storage/backups \
+    && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000

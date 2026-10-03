@@ -22,9 +22,11 @@ function VerifyEmailPage() {
     verifyEmail(token)
       .then(() => {
         setStatus("success");
-        if (localStorage.getItem("token")) {
-          setTimeout(() => router.push("/dashboard"), 1500);
-        }
+        // No session is created at verification time: registration does not
+        // persist tokens while the account is unverified, so there is
+        // nothing to carry the user into the app. Sign in with the address
+        // they just confirmed.
+        setTimeout(() => router.push("/login?verified=1"), 2000);
       })
       .catch((err) => {
         setError(
@@ -82,11 +84,14 @@ function VerifyEmailPage() {
             <p className="text-sm text-gray-700">
               Your email has been verified. Your account is now active.
             </p>
+            <p className="text-xs text-gray-500">
+              Taking you to sign in&hellip;
+            </p>
             <Link
-              href="/dashboard"
+              href="/login"
               className="inline-block px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
             >
-              Go to dashboard
+              Sign in now
             </Link>
           </div>
         )}

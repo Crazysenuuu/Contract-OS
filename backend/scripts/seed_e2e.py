@@ -28,6 +28,16 @@ E2E_ADMIN_PASSWORD = "password123"
 # Deterministic phone for SMS-channel verification (spec §44).
 E2E_PHONE = "+15551230000"
 
+#: Environments where re-hashing known fixtures with a well-known password is
+#: acceptable. Deployments are refused even when they are not production:
+#: seeding `admin@example.com / password123` on a shared staging box is a
+#: standing admin backdoor, and a guard that only blocks production is how
+#: that stays unnoticed. These credentials are intentionally weak because
+#: they are throwaway local/CI fixtures, never real accounts.
+SEEDABLE_ENVIRONMENTS = frozenset(
+    {"development", "local", "test", "testing", "ci"}
+)
+
 
 async def seed_login_user() -> None:
     await _seed_user(E2E_EMAIL, E2E_PASSWORD, "E2E Test User", is_admin=False)
@@ -182,8 +192,14 @@ async def main() -> int:
     # Spec §72: fixture users / demo data must never land in production.
     from app.core.config import get_settings_lazy
 
-    if get_settings_lazy().environment == "production":
-        print("❌ Refusing to seed e2e fixtures: ENVIRONMENT=production (spec §72)")
+    environment = get_settings_lazy().environment
+    if environment not in SEEDABLE_ENVIRONMENTS:
+        print(
+            "❌ Refusing to seed e2e fixtures: "
+            f"ENVIRONMENT={environment!r} is not a local/test environment "
+            "(spec §72). These fixtures use well-known passwords and an "
+            "admin account; run them only against development or CI."
+        )
         return 2
 
     print("Seeding e2e fixtures...")

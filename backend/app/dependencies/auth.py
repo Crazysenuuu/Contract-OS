@@ -26,7 +26,19 @@ async def get_current_user(
             detail="User not found",
         )
 
-    if user.status not in ("active", "pending_verification"):
+    # An unconfirmed address is not a proven identity: it is a typo away
+    # from belonging to someone else, it is trivially harvested by anyone
+    # who can register an address on a domain they don't own, and it is
+    # the cheapest way to inflate a per-email rate-limit budget. Accounts
+    # sit in ``pending_verification`` until the emailed link is followed,
+    # and hold no API access until then.
+    if user.status == "pending_verification":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email address not verified. Check your inbox for the verification link.",
+        )
+
+    if user.status != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is not active",

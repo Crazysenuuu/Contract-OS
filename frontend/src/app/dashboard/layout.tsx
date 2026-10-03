@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import NotificationBell from "@/components/NotificationBell";
+import { OrganizationSwitcher } from "@/components/OrganizationSwitcher";
 
 /* ─── Nav config ─────────────────────────────────────────────── */
 interface NavItem { label: string; href: string; icon: string }
@@ -203,6 +204,9 @@ function Sidebar({
           <span className="text-base leading-none">⚙️</span>
           {!collapsed && <span>Settings</span>}
         </Link>
+        {/* Hidden while collapsed: the sidebar narrows to icon width and a labeled
+            dropdown has nowhere to open. */}
+        {!collapsed && <OrganizationSwitcher />}
         {!collapsed && user && (
           <div className="px-2 py-1 text-xs text-gray-500 truncate font-medium">{user.name}</div>
         )}

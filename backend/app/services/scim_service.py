@@ -26,6 +26,7 @@ from app.core.exceptions import (
 from app.models.rbac import OrganizationMember, Role
 from app.models.sso import IdentityProviderEvent, SCIMToken
 from app.models.user import User
+from app.services.tenant_context import tenant_scope
 
 
 class SCIMError(Exception):
@@ -86,15 +87,16 @@ async def _record_event(
     succeeded: bool = True,
     **detail,
 ) -> None:
-    db.add(
-        IdentityProviderEvent(
-            organization_id=organization_id,
-            event_type=event_type,
-            succeeded=succeeded,
-            email=detail.get("email"),
-            detail=detail or None,
+    async with tenant_scope(db, organization_id):
+        db.add(
+            IdentityProviderEvent(
+                organization_id=organization_id,
+                event_type=event_type,
+                succeeded=succeeded,
+                email=detail.get("email"),
+                detail=detail or None,
+            )
         )
-    )
 
 
 async def _default_role_id(db: AsyncSession, organization_id: uuid.UUID) -> uuid.UUID | None:
@@ -153,17 +155,20 @@ async def provision_user(
         )
     )
     membership = membership_result.scalar_one_or_none()
-    if membership is None:
-        db.add(
-            OrganizationMember(
-                organization_id=organization_id,
-                user_id=user.id,
-                role_id=await _default_role_id(db, organization_id),
-                status="active" if active else "deactivated",
+    # SCIM provisioning runs from an inbound IdP request that has no
+    # request-scoped tenant, so RLS context must be pinned for the writes.
+    async with tenant_scope(db, organization_id):
+        if membership is None:
+            db.add(
+                OrganizationMember(
+                    organization_id=organization_id,
+                    user_id=user.id,
+                    role_id=await _default_role_id(db, organization_id),
+                    status="active" if active else "deactivated",
+                )
             )
-        )
-    elif active:
-        membership.status = "active"
+        elif active:
+            membership.status = "active"
 
     await _record_event(
         db,

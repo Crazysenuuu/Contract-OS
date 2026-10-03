@@ -1,0 +1,25 @@
+# node_modules is reinstalled inside the builder stage by `npm ci`.
+node_modules/
+
+# Next.js build output is produced inside the builder stage; copying the
+# host's .next into the context would be both stale and large.
+.next/
+out/
+
+# Never bake secrets into an image layer.
+.env
+.env.*
+!.env.example
+
+# Test and tooling artifacts
+coverage/
+test-results/
+playwright-report/
+npm-debug.log*
+*.log
+
+# VCS / editor noise
+.git/
+.gitignore
+.dockerignore
+.DS_Store

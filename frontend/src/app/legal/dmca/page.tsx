@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { LEGAL_CONTACTS } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: "Copyright / DMCA Policy — ContractOS",
@@ -7,7 +8,7 @@ export const metadata: Metadata = {
     "How to submit a Digital Millennium Copyright Act (DMCA) takedown notice to ContractOS.",
 };
 
-const CONTACT_EMAIL = "dmca@contractos.lk";
+const CONTACT_EMAIL = LEGAL_CONTACTS.dmca;
 
 /**
  * Copyright / DMCA policy page.
@@ -23,8 +24,8 @@ export default function DmcaPolicyPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-3xl mx-auto py-12 px-4 sm:px-6">
-        <Link href="/" className="text-sm text-gray-500 hover:text-gray-700">
-          ← ContractOS
+        <Link href="/legal" className="text-sm text-gray-500 hover:text-gray-700">
+          ← Legal
         </Link>
         <h1 className="text-3xl font-bold text-gray-900 mt-3">
           Copyright / DMCA Policy

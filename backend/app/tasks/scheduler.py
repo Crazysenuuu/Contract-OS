@@ -135,20 +135,18 @@ def _run_async(coro_factory):
 @celery_app.task(name="app.tasks.scheduler.send_daily_obligation_reminders")
 def send_daily_obligation_reminders():
     """Send email reminders for obligations due within the next 7 days."""
-    from app.core.database import AsyncSessionLocal
     from app.services.obligation_reminder_service import (
         dispatch_obligation_reminders,
     )
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await dispatch_obligation_reminders(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import merge_counters, run_per_tenant
+
+        return merge_counters(
+            await run_per_tenant(
+                lambda db: dispatch_obligation_reminders(db)
+            )
+        )
 
     return _run_async(_run)
 
@@ -160,20 +158,18 @@ def materialise_recurring_obligations(up_to: str | None = None):
     recurrence records how far it has been materialised."""
     from datetime import date
 
-    from app.core.database import AsyncSessionLocal
     from app.services.recurrence_service import materialise_pending_instances
 
     horizon = date.fromisoformat(up_to) if up_to else None
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await materialise_pending_instances(db, up_to=horizon)
-                await db.commit()
-                return {"created": result}
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import run_per_tenant, sum_values
+
+        return {"created": sum_values(
+            await run_per_tenant(
+                lambda db: materialise_pending_instances(db, up_to=horizon)
+            )
+        )}
 
     return _run_async(_run)
 
@@ -187,18 +183,16 @@ def process_outbox_events(limit: int = 50):
     WebSocket to connected users. Safe to run on an interval: already
     published events are skipped, failed events retry with backoff.
     """
-    from app.core.database import AsyncSessionLocal
     from app.services.event_outbox_service import process_pending_events
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await process_pending_events(db, limit=limit)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import merge_counters, run_per_tenant
+
+        return merge_counters(
+            await run_per_tenant(
+                lambda db: process_pending_events(db, limit=limit)
+            )
+        )
 
     return _run_async(_run)
 
@@ -216,7 +210,6 @@ def process_expiration_sweep():
 
     from sqlalchemy import select
 
-    from app.core.database import AsyncSessionLocal
     from app.models.agreement import Agreement
     from app.models.renewal import ContractRenewal
     from app.services import renewal_service
@@ -224,60 +217,58 @@ def process_expiration_sweep():
 
     async def _run():
         today = date.today()
-        processed = {"renewed": 0, "expired": 0, "errors": 0}
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await db.execute(
-                    select(ContractRenewal, Agreement)
-                    .join(Agreement, Agreement.id == ContractRenewal.agreement_id)
-                    .where(
-                        ContractRenewal.status.notin_(("expired", "terminated", "cancelled")),
-                        ContractRenewal.current_expiry_date.is_not(None),
-                        ContractRenewal.current_expiry_date <= today,
-                    )
+
+        async def _sweep(db):
+            processed = {"renewed": 0, "expired": 0, "errors": 0}
+            result = await db.execute(
+                select(ContractRenewal, Agreement)
+                .join(Agreement, Agreement.id == ContractRenewal.agreement_id)
+                .where(
+                    ContractRenewal.status.notin_(("expired", "terminated", "cancelled")),
+                    ContractRenewal.current_expiry_date.is_not(None),
+                    ContractRenewal.current_expiry_date <= today,
                 )
-                rows = result.all()
-                for renewal, agreement in rows:
+            )
+            rows = result.all()
+            for renewal, agreement in rows:
+                try:
+                    summary = await renewal_service.process_renewal(
+                        db,
+                        renewal=renewal,
+                        agreement=agreement,
+                        org_id=agreement.organization_id,
+                        actor_id=None,
+                    )
+                    action = "renew" if summary.get("action") == "renewed" else "expire"
                     try:
-                        summary = await renewal_service.process_renewal(
+                        await apply_transition(
                             db,
-                            renewal=renewal,
                             agreement=agreement,
-                            org_id=agreement.organization_id,
+                            action_key=action,
                             actor_id=None,
+                            org_id=agreement.organization_id,
+                            actor_type="system",
+                            metadata_json={
+                                "source": "expiration_sweep",
+                                "renewal_id": str(renewal.id),
+                            },
                         )
-                        action = (
-                            "renew" if summary.get("action") == "renewed" else "expire"
-                        )
-                        try:
-                            await apply_transition(
-                                db,
-                                agreement=agreement,
-                                action_key=action,
-                                actor_id=None,
-                                org_id=agreement.organization_id,
-                                actor_type="system",
-                                metadata_json={
-                                    "source": "expiration_sweep",
-                                    "renewal_id": str(renewal.id),
-                                },
-                            )
-                        except Exception:
-                            # Transition rules may not define renew/expire for
-                            # this type/state; the renewal record itself is
-                            # still updated, which is the legally meaningful
-                            # part. Status transitions also happen via APIs.
-                            pass
-                        processed[
-                            "renewed" if summary.get("action") == "renewed" else "expired"
-                        ] += 1
                     except Exception:
-                        processed["errors"] += 1
-                await db.commit()
-                return processed
-            except Exception:
-                await db.rollback()
-                raise
+                        # Transition rules may not define renew/expire for
+                        # this type/state; the renewal record itself is
+                        # still updated, which is the legally meaningful
+                        # part. Status transitions also happen via APIs.
+                        pass
+                    processed[
+                        "renewed" if summary.get("action") == "renewed" else "expired"
+                    ] += 1
+                except Exception:
+                    processed["errors"] += 1
+            return processed
+
+        from app.services.tenant_context import merge_counters, run_per_tenant
+
+        return merge_counters(await run_per_tenant(_sweep))
 
     return _run_async(_run)
 
@@ -287,18 +278,13 @@ def process_expiration_sweep():
 @celery_app.task(name="app.tasks.scheduler.send_pending_webhooks")
 def send_pending_webhooks():
     """Flush pending outbound webhook deliveries with exponential backoff (spec 1.13)."""
-    from app.core.database import AsyncSessionLocal
-
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                from app.services.webhook_service import flush_pending_webhooks
-                result = await flush_pending_webhooks(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import run_per_tenant
+        from app.services.webhook_service import flush_pending_webhooks
+
+        return await run_per_tenant(
+            lambda db: flush_pending_webhooks(db)
+        )
 
     return _run_async(_run)
 
@@ -306,18 +292,15 @@ def send_pending_webhooks():
 @celery_app.task(name="app.tasks.scheduler.sweep_sla_violations")
 def sweep_sla_violations():
     """Detect agreements that have breached SLA thresholds and create violation records."""
-    from app.core.database import AsyncSessionLocal
-
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                from app.services.sla_service import detect_sla_violations
-                result = await detect_sla_violations(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.sla_service import detect_sla_violations
+        from app.services.tenant_context import merge_counters, run_per_tenant
+
+        return merge_counters(
+            await run_per_tenant(
+                lambda db: detect_sla_violations(db)
+            )
+        )
 
     return _run_async(_run)
 
@@ -325,18 +308,13 @@ def sweep_sla_violations():
 @celery_app.task(name="app.tasks.scheduler.sweep_insurance_expiry")
 def sweep_insurance_expiry():
     """Notify parties when counterparty insurance/bonding documents are near expiry."""
-    from app.core.database import AsyncSessionLocal
-
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                from app.services.insurance_service import notify_insurance_expiry
-                result = await notify_insurance_expiry(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.insurance_service import notify_insurance_expiry
+        from app.services.tenant_context import run_per_tenant
+
+        return await run_per_tenant(
+            lambda db: notify_insurance_expiry(db)
+        )
 
     return _run_async(_run)
 
@@ -344,18 +322,17 @@ def sweep_insurance_expiry():
 @celery_app.task(name="app.tasks.scheduler.index_pending_documents")
 def index_pending_documents():
     """Push unindexed or updated document content into the full-text search index."""
-    from app.core.database import AsyncSessionLocal
-
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                from app.services.search_index_service import sync_pending_documents
-                result = await sync_pending_documents(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.search_index_service import sync_pending_documents
+        from app.services.tenant_context import run_per_tenant
+
+        # Wrapped per tenant even though sync_pending_documents() also groups
+        # by organization internally: its "find every unindexed document"
+        # discovery query is tenant-agnostic, so it would silently match zero
+        # rows the moment ocr_documents gains RLS.
+        return await run_per_tenant(
+            lambda db: sync_pending_documents(db)
+        )
 
     return _run_async(_run)
 
@@ -363,18 +340,13 @@ def index_pending_documents():
 @celery_app.task(name="app.tasks.scheduler.aggregate_analytics")
 def aggregate_analytics():
     """Roll up raw events into the daily analytics aggregates for dashboards."""
-    from app.core.database import AsyncSessionLocal
-
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                from app.services.analytics_service import run_daily_aggregation
-                result = await run_daily_aggregation(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.analytics_service import run_daily_aggregation
+        from app.services.tenant_context import run_per_tenant
+
+        return await run_per_tenant(
+            lambda db: run_daily_aggregation(db)
+        )
 
     return _run_async(_run)
 
@@ -382,18 +354,13 @@ def aggregate_analytics():
 @celery_app.task(name="app.tasks.scheduler.send_renewal_notices")
 def send_renewal_notices():
     """Send renewal-window notification emails for agreements entering their renewal period."""
-    from app.core.database import AsyncSessionLocal
-
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                from app.services.renewal_service import dispatch_renewal_notices
-                result = await dispatch_renewal_notices(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.renewal_service import dispatch_renewal_notices
+        from app.services.tenant_context import run_per_tenant
+
+        return await run_per_tenant(
+            lambda db: dispatch_renewal_notices(db)
+        )
 
     return _run_async(_run)
 
@@ -406,18 +373,14 @@ def run_retention_worker_task(dry_run: bool = False):
     holds are always respected. Runs as a daily beat task; also exposed via
     the admin API for on-demand runs.
     """""
-    from app.core.database import AsyncSessionLocal
     from app.services.retention_service import run_retention_worker
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await run_retention_worker(db, org_id=None, dry_run=dry_run)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import run_per_tenant
+
+        return await run_per_tenant(
+            lambda db: run_retention_worker(db, org_id=None, dry_run=dry_run)
+        )
 
     return _run_async(_run)
 
@@ -435,22 +398,18 @@ def auto_seal_audit_batches_task(
     tick continues. Idempotent across overlapping runs because already
     batched events are skipped.
     """
-    from app.core.database import AsyncSessionLocal
     from app.services.audit_batching import auto_seal_audit_batches
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await auto_seal_audit_batches(
-                    db,
-                    min_batch_size=min_batch_size,
-                    max_batches_per_tenant=max_batches_per_tenant,
-                )
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import run_per_tenant
+
+        return await run_per_tenant(
+            lambda db: auto_seal_audit_batches(
+                db,
+                min_batch_size=min_batch_size,
+                max_batches_per_tenant=max_batches_per_tenant,
+            )
+        )
 
     return _run_async(_run)
 
@@ -463,18 +422,14 @@ def process_workflow_timers(limit: int = 200):
     and re-enters the affected workflows. Safe to run every minute: already
     fired timers are skipped by status filter.
     """
-    from app.core.database import AsyncSessionLocal
     from app.services.orchestration_engine import process_due_timers
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await process_due_timers(db, limit=limit)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import run_per_tenant
+
+        return await run_per_tenant(
+            lambda db: process_due_timers(db, limit=limit)
+        )
 
     return _run_async(_run)
 
@@ -482,18 +437,14 @@ def process_workflow_timers(limit: int = 200):
 @celery_app.task(name="app.tasks.scheduler.scan_approval_deadlines")
 def scan_approval_deadlines():
     """Escalate approvals past their stage deadline (spec §3.6.50-51)."""
-    from app.core.database import AsyncSessionLocal
     from app.services.approval_engine import scan_approval_deadlines as _scan
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                result = await _scan(db)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import merge_counters, run_per_tenant
+
+        return merge_counters(
+            await run_per_tenant(lambda db: _scan(db))
+        )
 
     return _run_async(_run)
 
@@ -501,17 +452,13 @@ def scan_approval_deadlines():
 @celery_app.task(name="app.tasks.scheduler.expire_action_items_task")
 def expire_action_items_task():
     """Expire stale action-center items (spec §3.10.72-73)."""
-    from app.core.database import AsyncSessionLocal
     from app.services.action_item_service import expire_stale_items
 
     async def _run():
-        async with AsyncSessionLocal() as db:
-            try:
-                expired = await expire_stale_items(db)
-                await db.commit()
-                return {"expired": expired}
-            except Exception:
-                await db.rollback()
-                raise
+        from app.services.tenant_context import run_per_tenant, sum_values
+
+        return {"expired": sum_values(
+            await run_per_tenant(lambda db: expire_stale_items(db))
+        )}
 
     return _run_async(_run)

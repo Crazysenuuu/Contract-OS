@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { login, adminLogin, ssoStart } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import LegalFooter from "@/components/LegalFooter";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -192,10 +193,17 @@ export default function LoginPage() {
           </p>
 
           <p className="text-center text-xs text-gray-400">
-            <Link href="/legal/dmca" className="hover:text-gray-500">
-              Copyright / DMCA Policy
+            By signing in you agree to our{" "}
+            <Link href="/legal/terms" className="hover:text-gray-500">
+              Terms
+            </Link>{" "}
+            and{" "}
+            <Link href="/legal/privacy" className="hover:text-gray-500">
+              Privacy Policy
             </Link>
+            .
           </p>
+          <LegalFooter />
         </form>
       </div>
     </div>

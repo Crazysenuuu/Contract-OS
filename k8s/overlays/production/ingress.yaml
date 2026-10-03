@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: contractos
+  labels:
+    app: contractos-frontend
+  annotations:
+    # Adjust for your ingress controller (this assumes ingress-nginx).
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["app.contractos.lk"]
+      secretName: contractos-production-tls
+  rules:
+    - host: app.contractos.lk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: contractos-frontend
+                port:
+                  number: 80

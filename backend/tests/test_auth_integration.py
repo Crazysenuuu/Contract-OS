@@ -3,14 +3,17 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
+from tests.conftest import activate_user
+
 
 @pytest.mark.integration
 class TestAuthIntegration:
     """Test authentication flows with database."""
 
     @pytest_asyncio.fixture(autouse=True)
-    def setup_client(self, client: AsyncClient):
+    def setup_client(self, client: AsyncClient, db_session):
         self.client = client
+        self.db_session = db_session
 
     async def test_register_user(self):
         """Test user registration creates user in database."""
@@ -52,7 +55,7 @@ class TestAuthIntegration:
         )
         assert response.status_code in [400, 409, 422]
 
-    async def test_login_success(self):
+    async def test_login_success(self, db_session):
         """Test successful login returns token."""
         # Register first
         await self.client.post(
@@ -64,6 +67,9 @@ class TestAuthIntegration:
                 "date_of_birth": "1990-01-01",
             },
         )
+        # Registration leaves the account unverified; login refuses those
+        # until the emailed link is followed.
+        await activate_user(db_session, "login@test.com")
         # Login
         response = await self.client.post(
             "/api/v1/auth/login",
@@ -75,6 +81,38 @@ class TestAuthIntegration:
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
+
+    async def test_login_blocked_until_email_verified(self, db_session):
+        """An unverified account must not receive a usable session."""
+        await self.client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "unverified@test.com",
+                "name": "Unverified User",
+                "password": "TestPass123!",
+                "date_of_birth": "1990-01-01",
+            },
+        )
+
+        response = await self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "unverified@test.com", "password": "TestPass123!"},
+        )
+
+        assert response.status_code == 403
+        assert response.headers.get("X-Auth-Status") == "verification_required"
+        assert "verif" in response.json()["detail"].lower()
+        # No session may be created for an unverified account.
+        assert "access_token" not in response.json()
+
+        # The same credentials work once the address is confirmed.
+        await activate_user(db_session, "unverified@test.com")
+        ok = await self.client.post(
+            "/api/v1/auth/login",
+            json={"email": "unverified@test.com", "password": "TestPass123!"},
+        )
+        assert ok.status_code == 200
+        assert "access_token" in ok.json()
 
     async def test_login_wrong_password(self):
         """Test login with wrong password fails."""
@@ -122,7 +160,7 @@ class TestAuthIntegration:
             json={
                 "email": "refresh@test.com",
                 "name": "Refresh User",
-                "password": "RefreshPass123!",
+                "password": "QuartzMeadow-Vellum7",
                 "date_of_birth": "1990-01-01",
             },
         )

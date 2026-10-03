@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: contractos-staging
+  labels:
+    app.kubernetes.io/part-of: contractos

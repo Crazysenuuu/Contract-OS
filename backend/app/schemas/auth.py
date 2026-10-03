@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 
 class UserRegister(BaseModel):
@@ -33,6 +33,18 @@ class UserRegister(BaseModel):
             raise ValueError("Please enter a valid date of birth")
         return v
 
+    @model_validator(mode="after")
+    def _validate_password(self) -> "UserRegister":
+        # Email and name are needed to reject passwords derived from them,
+        # so the strength check runs on the whole model, not just the field.
+        from app.core.password_policy import check_password
+
+        reason = check_password(self.password, email=self.email, name=self.name)
+        if reason:
+            raise ValueError(reason)
+        return self
+
+
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -63,6 +75,15 @@ class PasswordChange(BaseModel):
     current_password: str
     new_password: str
 
+    @model_validator(mode="after")
+    def _validate_new_password(self) -> "PasswordChange":
+        from app.core.password_policy import check_password
+
+        reason = check_password(self.new_password)
+        if reason:
+            raise ValueError(reason)
+        return self
+
 
 class ProfileUpdate(BaseModel):
     name: str | None = None
@@ -90,6 +111,18 @@ class TokenResponse(BaseModel):
     refresh_token: str | None = None
     token_type: str = "bearer"
     user_id: UUID
+    # True when the account still has to confirm its email address. The token
+    # is issued so the client can render a "check your inbox" screen, but
+    # every authenticated route rejects it until verification completes.
+    verification_required: bool = False
+
+
+class ResendVerificationResponse(BaseModel):
+    message: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
 
 
 class RefreshRequest(BaseModel):

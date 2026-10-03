@@ -21,18 +21,24 @@ spec:
         - name: backend
           image: contractos-backend:canary
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
+          envFrom:
+            # Same non-secret config as the stable Deployment so the canary
+            # exercises production settings rather than dev defaults.
+            - configMapRef:
+                name: contractos-config
           env:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: contractos-secrets
-                  key: database-url
+                  key: DATABASE_URL
             - name: JWT_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: contractos-secrets
-                  key: jwt-secret
+                  key: JWT_SECRET_KEY
             - name: CANARY_VERSION
               value: "canary"
           readinessProbe:
@@ -64,7 +70,9 @@ metadata:
     track: canary
 spec:
   ports:
-    - port: 8000
+    # Named so the ServiceMonitor's `port: http` endpoint resolves.
+    - name: http
+      port: 8000
       targetPort: 8000
   selector:
     app: contractos-backend

@@ -301,6 +301,22 @@ class StateStore:
             logger.warning("Redis psubscribe to %s failed: %s", pattern, exc)
             return None
 
+    def ping(self) -> bool:
+        """Whether the distributed backend is actually reachable.
+
+        ``StateStore`` silently degrades to an in-process store when Redis is
+        unreachable, which is the right behaviour on a request path but hides
+        a real outage: with a per-process store, rate limits and locks are
+        enforced separately in every replica. Health checks use this to report
+        the degradation instead of reporting healthy.
+        """
+        if self._redis is None:
+            return False
+        try:
+            return bool(self._redis.ping())
+        except Exception:  # noqa: BLE001 — health must never raise
+            return False
+
 
 _store: StateStore | None = None
 _store_lock = threading.Lock()

@@ -84,15 +84,63 @@ async def test_run_monitoring_sweep_task_runs_due(
     assert evaluations.scalars().all()
 
 
-async def test_run_sweep_rolls_back_on_error(sweep_sessionmaker, monkeypatch):
+async def test_run_sweep_logs_and_skips_failing_tenant(
+    sweep_sessionmaker, monkeypatch, caplog, db_session
+):
+    """A per-tenant failure is logged and skipped, not raised.
+
+    Fan-out sweeps must not abort mid-way: Celery would retry the whole job
+    and re-do the tenants that already succeeded.
+    """
     import app.monitoring.scheduler as scheduler_mod
+
+    await _ensure_org(db_session)
 
     def _boom(db, *, limit=50):
         raise RuntimeError("sweep exploded")
 
     monkeypatch.setattr(scheduler_mod, "schedule_due_monitorings", _boom)
-    with pytest.raises(RuntimeError):
-        scheduler_mod.run_sweep(limit=50)
+    with caplog.at_level("ERROR", logger="app.services.tenant_context"):
+        result = scheduler_mod.run_sweep(limit=50)
+
+    # Every counter is absent because the tenant failed, rather than a
+    # fabricated zero that would read as "swept, found nothing".
+    assert result == {}
+    assert "sweep exploded" in caplog.text
+
+
+async def test_run_per_tenant_raise_on_error_is_fail_fast(
+    sweep_sessionmaker, monkeypatch, db_session
+):
+    """Management commands can opt into stopping at the first failure."""
+    from app.services.tenant_context import run_per_tenant
+
+    await _ensure_org(db_session)
+
+    async def _boom(db):
+        raise RuntimeError("tenant service exploded")
+
+    with pytest.raises(RuntimeError, match="tenant service exploded"):
+        await run_per_tenant(
+            _boom,
+            session_factory=sweep_sessionmaker,
+            raise_on_error=True,
+        )
+
+
+async def _ensure_org(db_session) -> None:
+    """Guarantee the fan-out loop has at least one tenant to visit."""
+    from app.models.organization import Organization
+
+    db_session.add(
+        Organization(
+            name="Sweep Org",
+            slug="sweep-org",
+            country="US",
+            timezone="UTC",
+        )
+    )
+    await db_session.commit()
 
 
 async def test_detect_stale_task_pauses_superseded_version(

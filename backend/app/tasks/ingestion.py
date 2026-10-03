@@ -37,15 +37,21 @@ def process_bulk_ingestion(self, organization_id: str, job_id: str, document_ref
 
             async def _apply() -> None:
                 async with AsyncSessionLocal() as session:
-                    await session.execute(
-                        update(OCRDocument)
-                        .where(OCRDocument.content_ref == ref)
-                        .values(
-                            status="failed",
-                            error_message=reason,
+                    # Pin the tenant: this worker session has no RLS context
+                    # from a request, so without it an RLS-protected
+                    # ocr_documents would make the UPDATE match zero rows.
+                    from app.services.tenant_context import tenant_scope
+
+                    async with tenant_scope(session, uuid.UUID(organization_id)):
+                        await session.execute(
+                            update(OCRDocument)
+                            .where(OCRDocument.content_ref == ref)
+                            .values(
+                                status="failed",
+                                error_message=reason,
+                            )
                         )
-                    )
-                    await session.commit()
+                        await session.commit()
 
             asyncio.run(_apply())
         except Exception:

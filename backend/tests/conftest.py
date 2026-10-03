@@ -11,9 +11,9 @@ os.environ["CELERY_TASK_ALWAYS_EAGER"] = "true"
 
 # ===== CRITICAL: Patch PostgreSQL types BEFORE any model imports =====
 
-from sqlalchemy import JSON, String, TypeDecorator
+from sqlalchemy import JSON, String, Text, TypeDecorator
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 
 
 class _SQLiteJSONB(JSON):
@@ -23,6 +23,17 @@ class _SQLiteJSONB(JSON):
     def __init__(self, *args, **kwargs):
         kwargs.pop("none_as_null", None)
         super().__init__(*args, **kwargs)
+
+
+class _SQLiteTSVECTOR(Text):
+    """TSVECTOR stand-in for SQLite.
+
+    SQLite has no tsvector type and none of the full-text behaviour that
+    goes with it; document-search tests exercise the LIKE fallback path
+    instead. Rendering as TEXT keeps `Base.metadata.create_all()` working
+    so the whole schema can still be built in the test rig.
+    """
+    __visit_name__ = "text"
 
 
 class _SQLiteUUID(TypeDecorator):
@@ -70,10 +81,21 @@ def _compile_uuid_pg(type_, compiler, **kw):
     return "UUID"
 
 
+@compiles(_SQLiteTSVECTOR, "sqlite")
+def _compile_tsvector_sqlite(type_, compiler, **kw):
+    return "TEXT"
+
+
+@compiles(_SQLiteTSVECTOR, "postgresql")
+def _compile_tsvector_pg(type_, compiler, **kw):
+    return "TSVECTOR"
+
+
 # Monkey-patch the postgresql dialect module
 import sqlalchemy.dialects.postgresql as pg_dialect
 pg_dialect.JSONB = _SQLiteJSONB
 pg_dialect.UUID = _SQLiteUUID
+pg_dialect.TSVECTOR = _SQLiteTSVECTOR
 
 
 # ===== Now safe to import everything else =====
@@ -181,6 +203,28 @@ async def client(engine):
     app.dependency_overrides.clear()
 
 
+# ===== Helpers =====
+
+async def activate_user(session: AsyncSession, email: str) -> None:
+    """Flip a freshly registered account to ``active``.
+
+    Registration creates a ``pending_verification`` account and login
+    refuses those until the emailed link is followed. Tests that are about
+    login itself (token shape, refresh rotation, rate limiting) are not
+    about the verification round trip, so they activate the account
+    directly. Use ``client`` + ``/auth/verify-email`` when the round trip
+    is the thing under test.
+    """
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    user = await session.scalar(select(User).where(User.email == email))
+    assert user is not None, f"no user registered for {email}"
+    user.status = "active"
+    await session.flush()
+
+
 # ===== Data Fixtures =====
 
 @pytest_asyncio.fixture
@@ -198,6 +242,23 @@ async def test_user(db_session: AsyncSession):
     await db_session.commit()
     await db_session.refresh(user)
     return user
+
+
+@pytest_asyncio.fixture(autouse=True)
+def reset_rate_limit_window():
+    """Clear the process-local rate-limit window between tests.
+
+    ``RateLimitMiddleware`` keeps one in-memory window for the whole
+    process, so counters otherwise carry across every test in a session and
+    unrelated tests start seeing 429 purely because of how many ran before
+    them. The database-backed login limiter needs no equivalent: the engine
+    fixture is function-scoped, so its rows start empty each time.
+    """
+    from app.core.rate_limit import reset_rate_limits
+
+    reset_rate_limits()
+    yield
+    reset_rate_limits()
 
 
 @pytest_asyncio.fixture(autouse=True)

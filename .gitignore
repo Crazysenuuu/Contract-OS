@@ -24,6 +24,7 @@ Panels.txt
 .env
 .env.local
 .env.*.local
+docker-compose.prod.env
 
 # Playwright artifacts
 test-results/

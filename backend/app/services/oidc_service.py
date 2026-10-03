@@ -34,6 +34,7 @@ from app.core.config import get_settings_lazy
 from app.core.exceptions import UnauthenticatedError, ValidationError
 from app.models.sso import IdentityProviderEvent, SSOConnection
 from app.models.user import User
+from app.services.tenant_context import tenant_scope
 
 logger = logging.getLogger(__name__)
 settings = get_settings_lazy()
@@ -326,16 +327,21 @@ async def provision_sso_user(
                 select(Role).where(Role.organization_id == org_id).limit(1)
             )
             role = role_result.scalar_one_or_none()
-        db.add(
-            OrganizationMember(
-                organization_id=org_id,
-                user_id=user.id,
-                role_id=role.id if role else None,
-                status="active",
+        # Provisioning writes tenant rows from a callback that never passed
+        # through the request-scoped tenant dependency, so RLS context has to
+        # be pinned here explicitly.
+        async with tenant_scope(db, org_id):
+            db.add(
+                OrganizationMember(
+                    organization_id=org_id,
+                    user_id=user.id,
+                    role_id=role.id if role else None,
+                    status="active",
+                )
             )
-        )
     elif membership.status != "active":
-        membership.status = "active"
+        async with tenant_scope(db, org_id):
+            membership.status = "active"
 
     db.add(
         IdentityProviderEvent(

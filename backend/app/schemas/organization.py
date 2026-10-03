@@ -31,3 +31,18 @@ class OrganizationMemberResponse(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class MembershipOptionResponse(BaseModel):
+    """One organization a user may switch into.
+
+    Returned by ``GET /organizations/me/memberships`` so a client holding
+    several memberships can choose which tenant subsequent requests act in.
+    ``role_id`` is exposed instead of a role name because the role row is
+    itself RLS-protected by the tenant being resolved.
+    """
+
+    organization_id: UUID
+    name: str
+    slug: str
+    role_id: UUID
